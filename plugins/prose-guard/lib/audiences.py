@@ -323,7 +323,8 @@ def visibility(directory):
     """Whether the repository holding a directory is public, if that can be established.
 
     Best effort and clearly labelled as such. Whether names may be shared depends entirely on who can
-    read the repository, and a URL does not say — your-org/scripts and another-org/scripts look identical.
+    read the repository, and a URL does not carry that — a private repository and a public one look
+    identical written down.
     """
     try:
         top = subprocess.run(["git", "-C", directory, "rev-parse", "--show-toplevel"],

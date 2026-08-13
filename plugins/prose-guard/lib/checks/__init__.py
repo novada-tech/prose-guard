@@ -13,7 +13,9 @@ nothing else can.
     advise  hand it over and let the message go.
 
 `for_effort(level)` gives the checks that level runs, in order: cheapest and most exact first, so a
-message with a plainly wrong term never reaches a model call.
+message with a plainly wrong term never reaches a model call. A destination may cap its own level:
+what the judgement checks ask — does this reader care, is the ask clear — presupposes a reader and an
+ask, and a commit message has neither.
 
     low     terms only. No model call.
     medium  terms, then one advisory call over the remaining concerns.
@@ -28,6 +30,16 @@ from . import config, judgement, sequence, terms
 Finding = collections.namedtuple("Finding", "severity message")
 BLOCK = "block"
 ADVISE = "advise"
+
+
+ORDER = ("disabled", "low", "medium", "high")
+
+
+def capped(level, ceiling):
+    """The lower of what was asked for and what this destination is worth."""
+    if not ceiling or ceiling not in ORDER or level not in ORDER:
+        return level
+    return level if ORDER.index(level) <= ORDER.index(ceiling) else ceiling
 
 
 def for_effort(level=None):

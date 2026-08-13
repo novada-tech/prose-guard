@@ -370,7 +370,11 @@ def test_prose_files_must_be_tracked():
     committed. Extension alone would check the agent's own notes."""
     with tempfile.TemporaryDirectory() as tmp:
         _, D = fresh(os.path.join(tmp, "home"))
-        long = "word " * 40
+        # Real prose, because that is what discovery is looking for. "word " * 40 is long and is not
+        # a paragraph, and the check that tells those apart is the point of the mechanism.
+        long = ("The exporter line was removed because nothing on a laptop reads that variable. "
+                "Plans had started failing in any shell older than an hour, so access uses the "
+                "application default credential now. Continuous integration sets it itself.")
         repo = os.path.join(tmp, "repo")
         os.makedirs(repo)
         subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True)
@@ -396,7 +400,11 @@ def test_user_destinations_win():
                 {"name": "stop checking commits", "bash": r"\bgit\s+commit\b", "text_arg": []},
             ]}, fh)
         _, D = fresh(home)
-        long = "word " * 40
+        # Real prose, because that is what discovery is looking for. "word " * 40 is long and is not
+        # a paragraph, and the check that tells those apart is the point of the mechanism.
+        long = ("The exporter line was removed because nothing on a laptop reads that variable. "
+                "Plans had started failing in any shell older than an hour, so access uses the "
+                "application default credential now. Continuous integration sets it itself.")
         check("a destination the user added is claimed",
               (D.match("example__send_briefing", {"note": long}) or {}).get("name"),
               "our briefing tool")
@@ -415,7 +423,9 @@ def test_passive_discovery():
     """
     with tempfile.TemporaryDirectory() as home:
         _, D = fresh(home)
-        secret = "swordfish " * 40
+        secret = ("The exporter line was removed because nothing on a laptop reads swordfish. "
+                  "Plans had started failing in any shell older than an hour, so access uses the "
+                  "application default credential now. Continuous integration sets it itself.")
         bash = ("Bash", {"command": f'my-cli notify --text "{secret}"'})
         mcp = ("mcp__example__post_update", {"body": secret})
 
@@ -452,10 +462,58 @@ def test_passive_discovery():
               <= D.MAX_TRACKED, True)
 
 
+def test_discovery_ignores_long_text_that_is_not_going_anywhere():
+    """Six mentions in real use, none of them a destination.
+
+    `git grep -E '<a long alternation>'`, the text an edit replaces, a subagent prompt, a `Write` to a
+    file the prose-file destination already decides on. Discovery gets one mention per shape for the
+    life of the config, so spending it on a search pattern spends it on nothing — and a reader who is
+    told three useless things stops reading the fourth.
+    """
+    import destinations as D
+    prose = ("The exporter line was removed because nothing on a laptop reads that variable. Plans "
+             "had started failing in any shell older than an hour, so access uses the application "
+             "default credential now. Continuous integration sets it itself.")
+
+    def shape(tool, **kw):
+        return D._shape(tool, kw)
+
+    pattern = "|".join(f"needle{n}_pattern_alternative" for n in range(12))
+    # These two are long in words, which is why word count alone could not tell them from a paragraph.
+    # The script has ordinary-looking words and few of them are words; the search has words and no
+    # sentences. Each is rejected by a different half of the test.
+    script = ("d = json.load(handle); rows = [r for r in d if r.keep]; print(len(rows), "
+              "sum(r.n for r in rows)); os.makedirs(out, exist_ok=True); json.dump(rows, handle, "
+              "indent=1); print(done, len(rows), total)")
+    search = ("fix the flaky test|resolve the import cycle|update the changelog entry|bump the "
+              "plugin version|drop the legacy flag|rename the routing key|share the audience file|"
+              "read the whole corpus|stop the silent truncation|name the rival rule")
+    for label, got in (
+            ("a grep pattern", shape("Bash", command=f"git grep -E '{pattern}' lib/")),
+            ("a long regex", shape("Bash", command=f"grep -E '{pattern}' -r .")),
+            ("a script passed to -c", shape("Bash", command=f'python3 -c "{script}"')),
+            ("a search whose pattern is words", shape("Bash", command=f"git log --grep '{search}'")),
+            ("the text an edit replaces", shape("Edit", file_path="/x/y.md", old_string=prose,
+                                                new_string=prose)),
+            ("an instruction to a subagent", shape("Agent", prompt=prose)),
+            ("a file being written", shape("Write", file_path="/x/y.md", content=prose))):
+        check(f"not a destination: {label}", got, None)
+
+    # And the things that are, still are.
+    check("a commit message is", shape("Bash", command='git commit -m "' + prose + '"'),
+          "bash: git commit -m")
+    check("an unknown tool carrying prose is", shape("mcp__example__post_update", body=prose),
+          "tool: mcp__example__post_update [body]")
+
+
 def test_the_hook_surfaces_a_candidate_once():
     with tempfile.TemporaryDirectory() as tmp:
         home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
-        long = "word " * 40
+        # Real prose, because that is what discovery is looking for. "word " * 40 is long and is not
+        # a paragraph, and the check that tells those apart is the point of the mechanism.
+        long = ("The exporter line was removed because nothing on a laptop reads that variable. "
+                "Plans had started failing in any shell older than an hour, so access uses the "
+                "application default credential now. Continuous integration sets it itself.")
         payload = {"tool_name": "mcp__example__post_update", "session_id": "pd", "cwd": tmp,
                    "tool_input": {"body": long}}
         verdicts = [run_guard(payload, home, state)[0] for _ in range(5)]

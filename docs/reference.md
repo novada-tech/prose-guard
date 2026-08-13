@@ -41,9 +41,34 @@ already gone out unchecked. Then the agent names the tools it can actually see, 
 and waits for you.
 
 You will install something new next month, and the guard notices on its own: when nothing claims a
-call carrying long prose it records the *shape* — `bash: git commit -m`, `tool: example__post [body]` —
-never the text. It mentions it **once**, on about the third use, and never again. Decline and it is
-declined for good.
+call carrying outgoing prose it records the *shape* — `bash: git commit -m`, `tool: example__post
+[body]` — never the text. It mentions it **once**, on the third use, and never again. Decline and it is
+declined for good, so nothing can nag you twice about the same thing. At most 50 shapes are tracked.
+
+Long is not the same as outgoing, and getting that wrong is expensive: one mention per shape means a
+mention spent on a search pattern is a mention gone. In real use it spent all six of them on nothing —
+`git grep -E` with a long alternation, the text an `Edit` replaces, an `Agent` prompt, a `Write` to a
+file the prose-file destination already decides on. So a candidate now has to read like prose: at least
+25 words, at least two sentences, and at least 70% ordinary words. A regex has words and no sentences; a
+script has punctuation and few real words. Fields that are structurally not outgoing — `old_string`,
+`prompt`, `command`, `pattern` — are skipped whatever they contain, and the file-writing tools are left
+to the destination that already claims prose files.
+
+## Not every destination is worth the same effort
+
+A destination can cap the level it is checked at, and the commit message does: `low`, the term check
+only, whatever you have configured. Measured on one commit message at `high`, four runs: about 20
+seconds and four model calls each, and the findings were unstable — two runs raised something, two said
+nothing about the same text.
+
+That is the wrong trade for a commit message, and the reason is in what the higher levels ask. They ask
+whether this reader will care and whether the ask is clear. A commit message has no addressee and no
+ask; it is read years later by someone finding out when a line changed. The term check still applies,
+because an acronym nobody expands is exactly as unhelpful there as anywhere, and it costs no model call
+and about a tenth of a second.
+
+`max_effort` on any destination does the same, and your own `destinations.json` is read before the
+shipped one, so raising it back is a two-line file.
 
 ## When the words were already there
 

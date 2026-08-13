@@ -1,86 +1,171 @@
 {
-  "_meta": {
-    "what": "Where prose leaves for a person, what field carries it, and which identifiers say who will read it.",
-    "extend": "Put a file with this shape at <config dir>/destinations.json. Your entries are tried BEFORE these, so you can override one as well as add one. /prose-guard:setup will offer to write it for you, from what it finds on your machine.",
-    "match": "tool: matched as a substring of the tool name, so MCP prefixes need not be spelled out. bash: a regex over the command. file: a regex over file_path.",
-    "identifiers": "Which tool-call fields carry the channel, repo, owner or path. audiences.json matches on these, so a destination with no identifiers can never resolve an audience.",
-    "text": "text_fields: input fields that may hold the prose. text_arg: for Bash, flags whose value is the prose; a flag ending in -file is read from disk."
-  },
-
-  "destinations": [
-    {
-      "name": "chat message",
-      "tool": ["slack_send_message", "slack_send_message_draft", "slack_schedule_message",
-               "slack_create_canvas", "slack_update_canvas",
-               "discord_send_message", "mattermost_post", "teams_send_message"],
-      "text_fields": ["message", "text", "content"],
-      "identifiers": {"channel": "channel_id"},
-      "context_from": {
-        "field": "channel_id",
-        "map": {
-          "D": {"shared_context": "high", "note": "one colleague, in a direct message: they are already in this conversation"},
-          "C": {"shared_context": "low", "note": "a whole channel: readers arrive cold and out of order"},
-          "G": {"shared_context": "medium", "note": "a private group"}
-        }
-      },
-      "when": {"thread_ts": "a reply inside an existing thread, not a standalone message"}
-    },
-    {
-      "name": "code review or issue comment",
-      "tool": ["add_issue_comment", "add_comment_to_pending_review",
-               "add_reply_to_pull_request_comment", "pull_request_review_write",
-               "create_pull_request", "update_pull_request", "issue_write"],
-      "text_fields": ["body", "description"],
-      "identifiers": {"owner": "owner", "repo": ["owner", "repo"]},
-      "note": "engineers reviewing a change"
-    },
-    {
-      "name": "documentation page",
-      "tool": ["notion-create-pages", "notion-update-page", "notion-create-comment",
-               "create_record_comment", "confluence_create_page", "confluence_update_page"],
-      "text_fields": ["content", "body", "text"],
-      "note": "read later, without you present to explain it"
-    },
-    {
-      "name": "issue tracker comment",
-      "tool": ["linear_create_comment", "linear_update_issue", "linear_create_issue",
-               "jira_add_comment", "jira_create_issue", "asana_create_task"],
-      "text_fields": ["body", "description", "comment"],
-      "note": "whoever picks this ticket up, possibly weeks from now"
-    },
-    {
-      "name": "github cli",
-      "bash": "\\bgh\\s+(pr|issue|release)\\s+(comment|review|create|edit)\\b",
-      "text_arg": ["--body-file", "--notes-file", "--body", "--notes"],
-      "identifiers": {"cwd_repo": true},
-      "note": "engineers reviewing a change"
-    },
-    {
-      "name": "gitlab cli",
-      "bash": "\\bglab\\s+(mr|issue)\\s+(note|create|update)\\b",
-      "text_arg": ["--description", "--message"],
-      "identifiers": {"cwd_repo": true}
-    },
-    {
-      "name": "commit message",
-      "bash": "\\bgit\\s+(commit|tag|notes)\\b",
-      "text_arg": ["--message", "-m", "--file", "-F"],
-      "identifiers": {"cwd_repo": true},
-      "note": "everyone who reads this repository's history, including you in a year. It is permanent and it is not edited later.",
-      "caveat": "Only the forms that put the text on the command line can be seen. `git commit` with no -m opens an editor, and that text never reaches the tool call."
-    },
-    {
-      "name": "prose file someone will read",
-      "file": "\\.(md|markdown|txt|rst|adoc|org)$",
-      "text_fields": ["content", "new_string"],
-      "identifiers": {"path": "file_path", "cwd_repo": true},
-      "require_tracked": true,
-      "note": "whoever reads this file later, without you present",
-      "when": {"_edit": "an edit to an existing document: judge the change, not the whole document"},
-      "caveat": "require_tracked means the file must sit in a git working tree and not be ignored. That is the difference between a document colleagues will read and a scratch file: one gets committed."
+ "_meta": {
+  "what": "Where prose leaves for a person, what field carries it, and which identifiers say who will read it.",
+  "extend": "Put a file with this shape at <config dir>/destinations.json. Your entries are tried BEFORE these, so you can override one as well as add one. /prose-guard:setup will offer to write it for you, from what it finds on your machine.",
+  "match": "tool: matched as a substring of the tool name, so MCP prefixes need not be spelled out. bash: a regex over the command. file: a regex over file_path.",
+  "identifiers": "Which tool-call fields carry the channel, repo, owner or path. audiences.json matches on these, so a destination with no identifiers can never resolve an audience.",
+  "text": "text_fields: input fields that may hold the prose. text_arg: for Bash, flags whose value is the prose; a flag ending in -file is read from disk."
+ },
+ "destinations": [
+  {
+   "name": "chat message",
+   "tool": [
+    "slack_send_message",
+    "slack_send_message_draft",
+    "slack_schedule_message",
+    "slack_create_canvas",
+    "slack_update_canvas",
+    "discord_send_message",
+    "mattermost_post",
+    "teams_send_message"
+   ],
+   "text_fields": [
+    "message",
+    "text",
+    "content"
+   ],
+   "identifiers": {
+    "channel": "channel_id"
+   },
+   "context_from": {
+    "field": "channel_id",
+    "map": {
+     "D": {
+      "shared_context": "high",
+      "note": "one colleague, in a direct message: they are already in this conversation"
+     },
+     "C": {
+      "shared_context": "low",
+      "note": "a whole channel: readers arrive cold and out of order"
+     },
+     "G": {
+      "shared_context": "medium",
+      "note": "a private group"
+     }
     }
-  ],
-
-  "public_owners": [],
-  "public_owners_help": "Repository owners whose content outsiders can read. Declared rather than guessed, because telling someone a private repository is public makes them strip links their colleagues could have opened."
+   },
+   "when": {
+    "thread_ts": "a reply inside an existing thread, not a standalone message"
+   }
+  },
+  {
+   "name": "code review or issue comment",
+   "tool": [
+    "add_issue_comment",
+    "add_comment_to_pending_review",
+    "add_reply_to_pull_request_comment",
+    "pull_request_review_write",
+    "create_pull_request",
+    "update_pull_request",
+    "issue_write"
+   ],
+   "text_fields": [
+    "body",
+    "description"
+   ],
+   "identifiers": {
+    "owner": "owner",
+    "repo": [
+     "owner",
+     "repo"
+    ]
+   },
+   "note": "engineers reviewing a change"
+  },
+  {
+   "name": "documentation page",
+   "tool": [
+    "notion-create-pages",
+    "notion-update-page",
+    "notion-create-comment",
+    "create_record_comment",
+    "confluence_create_page",
+    "confluence_update_page"
+   ],
+   "text_fields": [
+    "content",
+    "body",
+    "text"
+   ],
+   "note": "read later, without you present to explain it"
+  },
+  {
+   "name": "issue tracker comment",
+   "tool": [
+    "linear_create_comment",
+    "linear_update_issue",
+    "linear_create_issue",
+    "jira_add_comment",
+    "jira_create_issue",
+    "asana_create_task"
+   ],
+   "text_fields": [
+    "body",
+    "description",
+    "comment"
+   ],
+   "note": "whoever picks this ticket up, possibly weeks from now"
+  },
+  {
+   "name": "github cli",
+   "bash": "\\bgh\\s+(pr|issue|release)\\s+(comment|review|create|edit)\\b",
+   "text_arg": [
+    "--body-file",
+    "--notes-file",
+    "--body",
+    "--notes"
+   ],
+   "identifiers": {
+    "cwd_repo": true
+   },
+   "note": "engineers reviewing a change"
+  },
+  {
+   "name": "gitlab cli",
+   "bash": "\\bglab\\s+(mr|issue)\\s+(note|create|update)\\b",
+   "text_arg": [
+    "--description",
+    "--message"
+   ],
+   "identifiers": {
+    "cwd_repo": true
+   }
+  },
+  {
+   "name": "commit message",
+   "bash": "\\bgit\\s+(commit|tag|notes)\\b",
+   "text_arg": [
+    "--message",
+    "-m",
+    "--file",
+    "-F"
+   ],
+   "identifiers": {
+    "cwd_repo": true
+   },
+   "note": "everyone who reads this repository's history, including you in a year. It is permanent and it is not edited later.",
+   "caveat": "Only the forms that put the text on the command line can be seen. `git commit` with no -m opens an editor, and that text never reaches the tool call. And it is checked at `low` whatever level you set: the terms check only, no model call. A commit message has no addressee and no ask, so most of what the higher levels ask does not apply to it.",
+   "max_effort": "low"
+  },
+  {
+   "name": "prose file someone will read",
+   "file": "\\.(md|markdown|txt|rst|adoc|org)$",
+   "text_fields": [
+    "content",
+    "new_string"
+   ],
+   "identifiers": {
+    "path": "file_path",
+    "cwd_repo": true
+   },
+   "require_tracked": true,
+   "note": "whoever reads this file later, without you present",
+   "when": {
+    "_edit": "an edit to an existing document: judge the change, not the whole document"
+   },
+   "caveat": "require_tracked means the file must sit in a git working tree and not be ignored. That is the difference between a document colleagues will read and a scratch file: one gets committed."
+  }
+ ],
+ "public_owners": [],
+ "public_owners_help": "Repository owners whose content outsiders can read. Declared rather than guessed, because telling someone a private repository is public makes them strip links their colleagues could have opened."
 }

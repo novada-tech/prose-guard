@@ -244,8 +244,34 @@ def _candidates_path():
     return os.path.join(config_dir(), "unclaimed-destinations.json")
 
 
+# Fields that carry long text which is not being sent anywhere. `old_string` is what an edit replaces,
+# `prompt` is an instruction to another agent, `pattern` and `command` are code. Long is not the same as
+# outgoing, and discovery gets one mention per shape — spending it on these is spending it on nothing.
+NOT_OUTGOING = ("old_string", "prompt", "pattern", "command", "query", "regex", "expression",
+                "description", "script", "code", "diff", "input")
+# Tools where a file destination already decides. A prose file is claimed by extension and by being
+# tracked; suggesting "add Write" would add a rule that ignores both.
+WRITES_A_FILE = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+
+
+def _reads_like_prose(text):
+    """Long text that is prose rather than a pattern, a script or a payload.
+
+    Passive discovery has one mention per shape and had been spending it on `git grep -E`, on the text
+    an edit replaces, and on subagent prompts — six mentions in real use, none of them a destination.
+    Word count alone cannot tell a paragraph from a regex; sentences and ordinary words can.
+    """
+    words = text.split()
+    if len(words) < MIN_WORDS:
+        return False
+    if sum(text.count(c) for c in ".!?") < 2:
+        return False                         # a paragraph has sentences; a pattern does not
+    alpha = sum(1 for w in words if w.strip(".,;:!?()[]\"'").isalpha())
+    return alpha >= 0.7 * len(words)
+
+
 def _shape(tool, tool_input):
-    """The SHAPE of a call carrying long prose, never the text.
+    """The SHAPE of a call carrying outgoing prose, never the text.
 
     For an MCP tool that is the tool name and the field. For Bash it is the binary, its subcommand and
     the flag that held the long argument, so `git commit -m` becomes discoverable the first time it is
@@ -253,14 +279,18 @@ def _shape(tool, tool_input):
     """
     if tool == "Bash":
         cmd = str(tool_input.get("command") or "")
-        m = re.search(r"(--?[A-Za-z][-\w]*)[= ]\s*['\"]([^'\"]{80,})['\"]", cmd)
-        if not m:
-            return None
-        words = cmd.strip().split()
-        head = " ".join(w for w in words[:2] if not w.startswith("-"))
-        return f"bash: {head} {m.group(1)}"
+        for m in re.finditer(r"(--?[A-Za-z][-\w]*)[= ]\s*['\"]([^'\"]{80,})['\"]", cmd):
+            if _reads_like_prose(m.group(2)):
+                words = cmd.strip().split()
+                head = " ".join(w for w in words[:2] if not w.startswith("-"))
+                return f"bash: {head} {m.group(1)}"
+        return None
+    if tool in WRITES_A_FILE:
+        return None
     for field, value in tool_input.items():
-        if isinstance(value, str) and len(value.split()) >= MIN_WORDS:
+        if field in NOT_OUTGOING:
+            continue
+        if isinstance(value, str) and _reads_like_prose(value):
             return f"tool: {tool} [{field}]"
     return None
 

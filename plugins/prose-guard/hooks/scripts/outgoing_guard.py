@@ -31,7 +31,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..", "..", "lib")))
 import audiences  # noqa: E402
 import paths  # noqa: E402
 import destinations  # noqa: E402
-from checks import BLOCK, IN_ORDER as CHECKS  # noqa: E402
+import checks as checks_module  # noqa: E402
+from checks import BLOCK, EFFORT, IN_ORDER as CHECKS  # noqa: E402
 
 MAX_PER_CHECK = 2      # one complaint, then one more if the fix did not land
 MAX_DENIALS = 6        # a ceiling across all of them, so one message cannot eat a session
@@ -123,11 +124,14 @@ def save_state(path, state):
         pass
 
 
-def emit(decision, message):
+def emit(decision, message, hint=""):
     out = {"hookEventName": "PreToolUse"}
     if decision == BLOCK:
         out["permissionDecision"] = "deny"
-        out["permissionDecisionReason"] = "Hold this message. " + message + ", then send again."
+        # The hint goes after the instruction, not inside it: "then send again" is what to do, and
+        # anything appended before it reads as part of the complaint.
+        out["permissionDecisionReason"] = ("Hold this message. " + message + ", then send again."
+                                          + hint)
     else:
         out["additionalContext"] = message
     print(json.dumps({"hookSpecificOutput": out}))
@@ -175,6 +179,14 @@ def main():
     if not text:
         allow()
 
+    # A destination can be worth less than the level you asked for. The gating checks ask whether the
+    # reader will care and whether the ask is clear; a commit message has no addressee and no ask, and
+    # paying four model calls for one is the wrong trade for something read years later, by someone
+    # looking for when a line changed. See data/destinations.json.
+    running = checks_module.for_effort(checks_module.capped(EFFORT, dest.get("max_effort")))
+    if not running:
+        allow()
+
     session = str(payload.get("session_id") or "no-session")
     digest = hashlib.sha1(text.encode()).hexdigest()[:16]
     path, state = load_state(session)
@@ -189,7 +201,7 @@ def main():
     # one. Bounded three ways so two checks that genuinely disagree make a message expensive and
     # then let it go, rather than hanging the turn.
     advice = []
-    for check in CHECKS:
+    for check in running:
         if state["passed"].get(check.NAME) == digest:
             continue
         if check.COSTS_A_CALL and state["calls"] >= MAX_CALLS:
@@ -212,7 +224,17 @@ def main():
                 state["total_denials"] += 1
                 state["passed"].pop(check.NAME, None)   # it has to pass on the NEXT text, not this
                 save_state(path, state)
-                emit(BLOCK, finding.message)
+                # The escape hatch is named only on the last denial this check gets, which is the
+                # first moment it is the right answer. Naming it in every denial would teach the
+                # cheaper move before the correct one, and the correct one is almost always to edit
+                # the text. An agent that has already tried twice is a different situation.
+                hint = ("" if used + 1 < MAX_PER_CHECK else
+                        "\n\nIf editing cannot fix this — you are reproducing text you did not write, "
+                        "or quoting someone — say so and send it anyway: "
+                        'PROSE_GUARD_SKIP="<why>" in front of the command excuses that one command. '
+                        "If a term is fine for this reader in general, "
+                        "`/prose-guard:audiences` is the lasting fix.")
+                emit(BLOCK, finding.message, hint)
                 return
         # Advice, or a block that has run out of budget. Say it once per text and move on: giving up
         # on one check must not skip the rest.
