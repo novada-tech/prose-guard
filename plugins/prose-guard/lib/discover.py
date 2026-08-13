@@ -141,6 +141,10 @@ def main():
     print("  " + (", ".join(servers) if servers else "none found"))
     print("\n  Which of their tools send prose is not knowable from disk. /prose-guard:setup asks")
     print("  the agent which tools it can actually see, and you confirm.\n")
+    print("  Two questions decide how hard each one is checked, and only you can answer them:")
+    print("    Does anybody read it before its audience does? Then findings should advise, not block.")
+    print("    Does it have an addressee and an ask? If not, the term check is the part that applies.")
+    print("  See max_severity and max_effort in docs/reference.md.\n")
 
     print("Outbound command-line tools on PATH:")
     for name in clis_on_path():
@@ -161,6 +165,8 @@ def main():
         for shape, entry in sorted(pending.items(), key=lambda kv: -kv[1].get("uses", 0)):
             seen = " (already mentioned once)" if entry.get("mentioned") else ""
             print(f"  {entry.get('uses', 0):5d}x  {shape}{seen}")
+            for field, (value, why) in destinations.suggest_caps(shape).items():
+                print(f"           suggest {field}={value}: {why}")
         print("\n  To rule one out for good, so it is never suggested again:")
         print("    python3 lib/discover.py --decline '<shape>'")
     else:

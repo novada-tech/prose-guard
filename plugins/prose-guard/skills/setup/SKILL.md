@@ -75,6 +75,19 @@ Then do the part no script can:
   carries the text. Ask before writing.
 - **Say what each addition costs.** Every added destination is more messages checked, at the
   per-message price above.
+- **Ask the two questions that decide how hard it is checked.** Adding a destination is not one
+  decision but three, and these two are the ones you cannot work out for them:
+
+  1. *Does anybody read it before its audience does?* If yes — a draft, a preview, anything that lands
+     in their own compose box — set `"max_severity": "advise"`. Blocking is only justified when text is
+     about to reach a reader with nobody in between.
+  2. *Does it have an addressee and an ask?* If not — a record, a changelog, a tag message — set
+     `"max_effort": "low"`. The checks above `low` ask whether the reader will care and whether the ask
+     is clear, and neither question means anything without a reader. Measured: every destination costs
+     about 15 seconds and 5 model calls at `high`, so this is about what applies, not about speed.
+
+  `discover.py` prints a suggested answer for each candidate where the name is evidence, with the
+  reason. Read it out and let them disagree — it is a guess from a name.
 
 **If they say no to something, record it** — otherwise the same suggestion comes back the next time
 they use that tool, which is the fastest way to get a tool switched off:
@@ -91,8 +104,11 @@ Already covered without asking: chat messages, GitHub and GitLab comments and PR
 documentation pages, issue trackers, `git commit` and `git tag -m`, and prose files that are inside
 a git working tree and not ignored.
 
-Two known gaps worth stating rather than hiding: `git commit` with no `-m` opens an editor and that
-text never reaches a tool call, and `--body "$(cat file)"` cannot be read.
+Two known gaps worth stating rather than hiding: `git commit` with no `-m` opens an editor and that text
+never reaches a tool call, and a body passed as `--body "$(cat file)"` is a shell substitution that the
+tool call does not contain. The second one now says so, once per session, and names the `--body-file`
+form that is read — silence there was indistinguishable from a check that passed, and the pull request
+for that very change went out unchecked.
 
 ## 5. Offer audiences, and be honest about what it buys
 

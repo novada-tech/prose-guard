@@ -168,6 +168,36 @@ def identifiers(dest, tool, tool_input, cwd=None):
     return out
 
 
+# A text argument whose value the tool call does not contain: `--body "$(git log -1 --format=%b)"`,
+# `--body "$(cat notes.md)"`, `--message "${SUMMARY}"`. The prose is real and is about to be published;
+# it just is not here.
+SUBSTITUTED = re.compile(r"""['"]?\$[({]""")
+
+
+def unreadable(dest, tool, tool_input):
+    """Why a matched destination yielded no text, when the reason is worth telling somebody.
+
+    The alternative is what happened when the pull request for this very change was opened: the guard
+    matched `gh pr create`, found the body was a shell substitution, and allowed the call in silence. A
+    gap that says nothing is indistinguishable from a check that passed, and `--body-file` — which is
+    read — is one flag away.
+    """
+    if tool != "Bash":
+        return None
+    cmd = str(tool_input.get("command") or "")
+    for flag in dest.get("text_arg") or ():
+        if flag.endswith("-file") or flag in ("-F", "--file"):
+            continue
+        m = re.search(re.escape(flag) + r"[= ]\s*(\S{0,3})", cmd)
+        if m and SUBSTITUTED.match(m.group(1)):
+            readable = next((f for f in dest.get("text_arg") or () if f.endswith("-file")), None)
+            return (f"This is going to {dest['name']} and the text came from a shell substitution, so "
+                    f"nothing was checked — the prose is not in the command."
+                    + (f" Write it to a file and pass {readable} if you want it checked."
+                       if readable else ""))
+    return None
+
+
 def previous(dest, tool, tool_input, cwd=None):
     """The text this one replaces, where there is one. Empty string when there is not.
 
@@ -324,6 +354,38 @@ def decline(shape):
     return _candidates_path()
 
 
+# Words in a tool or command name that say something about what it does with the text. A suggestion
+# only: never applied without someone confirming it, because a wrong guess here is a destination that
+# quietly stops holding anything back.
+REVIEWED_FIRST = ("draft", "preview", "unsent", "scratch", "compose", "stage")
+# Specific forms, not bare words. "note" on its own matched `glab mr note`, which is a comment on
+# a merge request and has an addressee — the exact mistake this suggestion exists to avoid
+# making silently.
+NO_ADDRESSEE = ("git commit", "git tag", "git notes", "changelog", "release_note",
+                "release-note")
+
+
+def suggest_caps(shape):
+    """What a new destination probably deserves, and why, in words a person can agree or disagree with.
+
+    Discovery used to be a yes-or-no question, so everything it added ran at full effort and blocked.
+    That is the wrong default in two specific cases, and they are the two things only a person knows:
+    whether anybody sees the text before its audience does, and whether it has an addressee at all. The
+    name is weak evidence about both — enough to open with a proposal rather than a blank question.
+    """
+    lowered = shape.lower()
+    out = {}
+    if any(word in lowered for word in REVIEWED_FIRST):
+        out["max_severity"] = ("advise", "the name says draft, so you would read it before it went "
+                                         "anywhere — blocking would argue about text you were about "
+                                         "to read")
+    if any(word in lowered for word in NO_ADDRESSEE):
+        out["max_effort"] = ("low", "this looks like a record rather than a message to somebody, and "
+                                    "the checks above `low` ask whether the reader will care and "
+                                    "whether the ask is clear")
+    return out
+
+
 def record_candidate(tool, tool_input):
     """Count a call nothing claimed, and return a one-line note if now is the moment to say so.
 
@@ -343,8 +405,11 @@ def record_candidate(tool, tool_input):
     note = None
     if entry["uses"] >= MENTION_AFTER:
         entry["mentioned"] = True
+        caps = suggest_caps(shape)
         note = (f"prose-guard has seen long text go out through `{shape}` {entry['uses']} times and "
-                f"does not check it. Add it with /prose-guard:setup if that is worth checking. This "
-                f"is the only time it will be mentioned.")
+                f"does not check it. Add it with /prose-guard:setup if that is worth checking"
+                + (f" — probably as {', '.join(v[0] for v in caps.values())} rather than a block, "
+                   f"going by the name" if caps else "")
+                + f". This is the only time it will be mentioned.")
     _save_candidates(data)
     return note

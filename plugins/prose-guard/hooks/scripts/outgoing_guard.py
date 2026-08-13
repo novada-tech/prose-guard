@@ -177,6 +177,16 @@ def main():
         allow()
     text = destinations.extract(dest, tool, tool_input)
     if not text:
+        # Matched, but the prose is not in the call. Say so once a session: silence here reads exactly
+        # like a check that passed, which is how the pull request for this change went out unchecked.
+        why = destinations.unreadable(dest, tool, tool_input)
+        if why:
+            path, state = load_state(str(payload.get("session_id") or "no-session"))
+            if not state.get("told_unreadable"):
+                state["told_unreadable"] = True
+                save_state(path, state)
+                emit("advise", why)
+                return
         allow()
 
     # A destination can be worth less than the level you asked for. The gating checks ask whether the

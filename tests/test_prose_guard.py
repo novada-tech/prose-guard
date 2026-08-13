@@ -462,6 +462,78 @@ def test_passive_discovery():
               <= D.MAX_TRACKED, True)
 
 
+def test_discovery_proposes_how_hard_to_check_a_new_destination():
+    """Adding a destination was a yes-or-no question, so everything discovered blocked at full effort.
+
+    That is the wrong default for the two cases only a person can judge: whether anybody reads the text
+    before its audience does, and whether it has an addressee at all. The name is weak evidence about
+    both — enough to open with a proposal instead of a blank question. A suggestion only: applying one
+    without asking would quietly stop a destination holding anything back.
+    """
+    import destinations as D
+    check("a draft should advise rather than block",
+          list(D.suggest_caps("tool: mcp__slack__slack_send_message_draft [message]")),
+          ["max_severity"])
+    check("a record should not pay for the reader checks",
+          list(D.suggest_caps("bash: git commit -m")), ["max_effort"])
+    # `note` on its own matched `glab mr note`, which is a comment on a merge request and has a reader.
+    # A wrong suggestion here is a destination that silently stops blocking.
+    check("a merge request comment is a message to somebody",
+          D.suggest_caps("bash: glab mr note --message"), {})
+    check("and an ordinary send gets no suggestion",
+          D.suggest_caps("tool: mcp__example__post_update [body]"), {})
+    for field, (value, why) in D.suggest_caps("bash: git commit -m").items():
+        check("a suggestion carries a reason to agree or disagree with", len(why) > 30, True)
+
+
+def test_a_matched_destination_that_cannot_be_read_says_so():
+    """The pull request for this change went out unchecked, and nothing said anything.
+
+    `gh pr create --body "$(git log -1 --format=%b)"` matches the destination and carries no prose: the
+    body is a shell substitution the tool call does not contain. Allowing it silently is
+    indistinguishable from a check that passed, and `--body-file` is read.
+    """
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as repo:
+        subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True, timeout=60)
+        write_audience(home, "team", matches={"github_owners": ["your-org"], "paths": ["*"]},
+                       inherits=["engineers"], members=["a", "b", "c", "d"])
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"effort": "low"}, fh)
+
+        def ask(command, session="sub"):
+            payload = {"tool_name": "Bash", "session_id": session, "cwd": repo,
+                       "tool_input": {"command": command}}
+            r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
+                               text=True, env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=120)
+            if not r.stdout.strip():
+                return "silent", ""
+            out = json.loads(r.stdout)["hookSpecificOutput"]
+            return ("deny" if out.get("permissionDecision") == "deny" else "advise",
+                    out.get("permissionDecisionReason") or str(out.get("additionalContext") or ""))
+
+        verdict, said = ask('gh pr create --title "T" --body "$(git log -1 --format=%b)"')
+        check("an unreadable body is not passed over in silence", verdict, "advise")
+        check("it names the flag that would work", "--body-file" in said, True)
+        # Once per session. A gap worth mentioning is not worth mentioning on every call.
+        again, _ = ask('gh pr create --title "T" --body "$(git log -1 --format=%b)"')
+        check("and says it once", again, "silent")
+
+        # A body given literally is checked as normal, not diverted into this branch.
+        body = ("The exporter line was removed because nothing on a laptop reads that variable. Plans "
+                "had started failing in any shell older than an hour. Access uses the credential now.")
+        verdict, said = ask(f'gh pr create --title "T" --body "{body}"', "literal")
+        check("a literal body is not called unreadable", "substitution" in said, False)
+
+        # And a body too short to judge is silent for that reason, not blamed on a substitution. This
+        # is the case that separates the two: both leave no text to check, and only one is a gap.
+        verdict, said = ask('gh pr create --title "T" --body "too short to check"', "short")
+        check("a short body is not blamed on a substitution", "substitution" in said, False)
+        check("and nothing is said about it at all", verdict, "silent")
+        check("but a substitution in braces is still caught",
+              "substitution" in ask('gh pr create --title "T" --body "${SUMMARY}"', "braces")[1],
+              True)
+
+
 def test_discovery_ignores_long_text_that_is_not_going_anywhere():
     """Six mentions in real use, none of them a destination.
 

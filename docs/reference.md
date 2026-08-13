@@ -30,7 +30,10 @@ the file, and "it gets committed" is a deterministic proxy — so your README is
 notes are not.
 
 Three gaps, stated rather than hidden. `git commit` with no `-m` opens an editor and that text never
-reaches a tool call. `--body "$(cat file)"` cannot be read. And the plumbing — `git commit-tree`,
+reaches a tool call. `--body "$(cat file)"` cannot be read — the destination matches and the prose is not
+in the call, so the guard now says so once per session and names `--body-file`, which is read. It stayed
+silent until the pull request for that change went out unchecked, and silence there reads exactly like a
+check that passed. And the plumbing — `git commit-tree`,
 `filter-branch --msg-filter`, `filter-repo` — is not matched at all, deliberately: those rewrite text
 somebody else wrote, usually in bulk, which is not the act this checks.
 
@@ -87,6 +90,14 @@ is there to quieten a noisy check.
 
 Both fields work on any destination, and your own `destinations.json` is read before the shipped one, so
 changing either is a two-line file.
+
+They also change what discovery asks. Adding a destination used to be yes or no, which meant everything
+discovered ran at full effort and could block — the wrong default for exactly the two cases only a person
+can judge. `discover.py` now prints a suggested cap per candidate, with its reason, where the name is
+evidence: a shape saying draft or preview suggests `advise`, and `git commit`, `git tag`, `git notes` or
+a changelog suggests `low`. Suggestions only. Applying one unasked would quietly stop a destination
+holding anything back, and a first version of this heuristic did exactly that to `glab mr note`, which is
+a comment on a merge request and has a reader.
 
 ## When the words were already there
 
