@@ -734,6 +734,32 @@ def test_rule_installer():
         run("--remove")
         check("removable", os.path.exists(target), False)
 
+        # Someone already had an almost identical rule from another source, under a different name.
+        # Installing put a second copy of the same guidance into every session, and the two differed
+        # only in a closing paragraph, so nothing looked wrong from either side.
+        rules = os.path.join(tmp, ".claude", "rules")
+        os.makedirs(rules, exist_ok=True)
+        mine = open(os.path.join(PLUGIN, "rule", "engineer-communication.md")).read()
+        with open(os.path.join(rules, "house-communication.md"), "w") as fh:
+            fh.write(mine.replace(mine.rsplit("\n\n", 1)[-1], "A different closing paragraph.\n"))
+        out = run("--install")
+        check("a near-identical rule already loading is refused", out.startswith("duplicate"), True)
+        check("and it names the file so it can be judged", "house-communication.md" in out, True)
+        check("nothing was installed", os.path.exists(target), False)
+        check("but it can be overridden deliberately",
+              run("--install", "--force").startswith("installed"), True)
+
+        # And the other way round: somebody else's rule about something else must not look like a
+        # rival, or the installer refuses on every machine that has any rules at all.
+        run("--remove")
+        os.remove(os.path.join(rules, "house-communication.md"))
+        with open(os.path.join(rules, "verification.md"), "w") as fh:
+            fh.write("# Claims about system behaviour\n\nEvery claim about how the system behaves "
+                     "is either backed by a command you ran and its output, or is explicitly marked "
+                     "as unverified. Never present an inference as a finding.\n")
+        check("an unrelated rule is not a rival", run("--install").startswith("installed"), True)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 

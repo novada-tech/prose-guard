@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install the communication rule into ~/.claude/rules/, where it loads every session.
 
-    python3 lib/install_rule.py --status
+    python3 lib/install_rule.py            # what state it is in
     python3 lib/install_rule.py --install
     python3 lib/install_rule.py --remove
 
@@ -27,9 +27,44 @@ TARGET = os.path.join(os.path.expanduser("~"), ".claude", "rules",
                       "prose-guard-communication.md")
 
 
+def _rival():
+    """Another rule already loading that says much the same thing.
+
+    Installing a second copy is worse than installing none: both load every turn, and longer
+    guidance measurably dilutes adherence. It happened — a machine ended up with 501 words of
+    near-identical rule across two files that differed only in their closing paragraph.
+
+    Compared on opening words rather than on the whole text, because the copy that matters is a
+    variant: a team's own version points at its own skills where this one is generic.
+    """
+    directory = os.path.dirname(TARGET)
+    try:
+        mine = set(open(SOURCE).read().split()[:40])
+    except OSError:
+        return None
+    for name in sorted(os.listdir(directory)) if os.path.isdir(directory) else []:
+        path = os.path.join(directory, name)
+        if os.path.abspath(path) == os.path.abspath(TARGET) or not name.endswith(".md"):
+            continue
+        try:
+            theirs = set(open(path).read().split()[:40])
+        except OSError:
+            continue
+        if len(mine & theirs) >= 0.7 * len(mine):
+            return path
+    return None
+
+
 def status():
     if not os.path.isfile(SOURCE):
         return "missing", f"the plugin's copy is not where it should be: {SOURCE}"
+    rival = _rival()
+    if rival and not os.path.exists(TARGET):
+        return "duplicate", (
+            f"{rival} already loads and says much the same thing. Installing this one would load "
+            f"both every turn, and longer guidance measurably dilutes adherence. Keep the one you "
+            f"have — if it is your team's own version it points at your own skills, which this "
+            f"generic copy cannot. --force installs anyway.")
     if not os.path.exists(TARGET):
         return "absent", f"not installed. --install copies it to {TARGET}"
     if os.path.islink(TARGET):
@@ -64,7 +99,7 @@ def main():
     if state == "missing":
         print(message)
         return 1
-    if state in ("stale", "link") and not a.force:
+    if state in ("stale", "link", "duplicate") and not a.force:
         print(f"{state}: {message}\n\nRe-run with --force to replace it.")
         return 1
     os.makedirs(os.path.dirname(TARGET), exist_ok=True)

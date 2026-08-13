@@ -9,7 +9,7 @@
     {
       "name": "prose-guard",
       "source": "./plugins/prose-guard",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "description": "Checks a message, review comment, documentation page or document on its way out, and hands it back with one problem named."
     }
   ]
