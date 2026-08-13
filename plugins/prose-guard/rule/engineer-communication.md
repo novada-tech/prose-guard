@@ -15,3 +15,5 @@ Price any action you ask of them: say whether it is optional and what it costs. 
 Cut whatever they will not act on. Backstory they lived through, identifiers nobody types, reassurance nobody asked for, and proof that you tested it all belong in the PR, not the message.
 
 Before writing for a specific medium, read whatever conventions your team keeps for it: how long a review comment runs, how a chat message is laid out, what a commit message opens with. They carry what this rule does not.
+
+edited

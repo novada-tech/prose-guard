@@ -1,42 +1,57 @@
-"""Terms the reader cannot be assumed to know. Deterministic, instant, no model call.
+"""Terms this reader cannot be assumed to know. Deterministic, instant, no model call.
 
-It defers to lib/jargon.py, which is the same code the `jargon.py` command and check_prose.py use.
-One implementation, three callers.
+Severity is decided per message, from two things the check knows and the caller does not.
 
-CAN_DENY is decided at import time by whether a measured vocabulary exists. Without one the tool
-knows what developers in general know and nothing about the people you write to, so a finding is a
-guess and it says so instead of blocking. See lib/vocabulary.py.
+**Is the audience known?** If no audience matched the destination, the tool is working from a
+baseline rather than from evidence about these readers, so a finding is a guess: it says so and does
+not block. Enforcement follows the evidence, which is the only way the zero-setup case is usable —
+blocking on a guess spends someone's first day arguing about their own house words.
+
+**Is the complaint small enough to act on?** Not a word count: the signal is what SHARE of the
+terms the reader met are unknown. Three unknown out of twenty in a long document is a fixable
+oversight. Fifteen out of twenty is the tool having the wrong reader in mind, and insisting then is
+worse than saying so. A check that demands wholesale rewriting is usually wrong about the situation.
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import jargon  # noqa: E402
+
 NAME = "terms"
 COSTS_A_CALL = False
 
-try:
-    import jargon
-    import vocabulary
-    CAN_DENY = vocabulary.HAVE_MEASURED
-except Exception:                             # nothing to say if the data is missing
-    jargon = None
-    vocabulary = None
-    CAN_DENY = False
+# Above this share of the terms the reader met, the finding is reported rather than enforced.
+# 1/3 is the 90th percentile of the share seen when a message IS scored against the audience it was
+# written for, measured on two real audiences in both directions. Above it, "the audience is wrong"
+# explains the finding better than "the message is wrong". See docs/thresholds.md.
+MAX_SHARE_TO_BLOCK = 1 / 3
+# ...except when there are very few terms in play, where a share is meaningless: one unknown term
+# out of one is 100% and still perfectly actionable.
+ALWAYS_ACTIONABLE = 2
 
 
-def run(text, envelope=None):
-    if jargon is None:
-        return True, ""
-    bad, _ = jargon.unexplained(text)
+def run(text, ctx):
+    from . import ADVISE, BLOCK, Finding
+    bad, considered = jargon.scan(text, ctx.audience.is_known)
     if not bad:
-        return True, ""
+        return None
     fix = ("Explain each where it first appears, by anchoring it to something this reader already "
            "works with")
-    if CAN_DENY:
-        return False, "Terms used without explanation: " + ", ".join(bad) + ". " + fix
-    return False, (
-        "Possibly unexplained for this reader: " + ", ".join(bad) + ". " + fix +
-        ". This is a guess — nothing has been measured about your audience's vocabulary yet, so "
-        "if these are house words, run /prose-guard:learn-vocabulary or add them to "
-        + os.path.join(vocabulary.config_dir() if vocabulary else "", "known-terms.txt"))
+    listed = ", ".join(bad)
+    if not ctx.audience.resolved:
+        return Finding(ADVISE, (
+            f"Possibly unexplained for this reader: {listed}. {fix}. This is a guess — no audience "
+            f"is configured for this destination, so nothing has been measured about who reads it. "
+            f"Run /prose-guard:audiences to fix that, or accept the term with "
+            f"/prose-guard:audiences accept {bad[0]}"))
+    share = len(bad) / max(len(considered), 1)
+    if len(bad) > ALWAYS_ACTIONABLE and share > MAX_SHARE_TO_BLOCK:
+        return Finding(ADVISE, (
+            f"{len(bad)} of the {len(considered)} terms here look unknown to "
+            f"{', '.join(ctx.audience.names)}: {listed}. That is most of them, which usually means "
+            f"the audience is wrong rather than the message — check who actually reads this before "
+            f"explaining all of them"))
+    return Finding(BLOCK, f"Terms used without explanation for "
+                          f"{', '.join(ctx.audience.names)}: {listed}. {fix}")

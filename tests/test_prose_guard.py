@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Tests for prose-guard. No dependencies beyond the standard library.
+"""Tests for prose-guard. Standard library only.
 
     python3 tests/test_prose_guard.py
 
-Each case pins something a plausible-looking implementation gets wrong. A guard that quietly
-stopped checking chat, or started checking source files, or blocked on a vocabulary it had never
-measured, would otherwise look exactly like a working one.
+Each case pins a design decision, not an implementation detail. The ones worth reading are the
+severity tests — they are where the tool decides whether it knows enough to hold a message back —
+and `test_no_subset_elimination`, which pins a simplification that was proposed, looks free, and is
+not sound.
 
-Mutation-checked rather than trusted on a green run: see the mutations listed in the README.
+Mutation-checked rather than trusted on a green run; the mutations are listed in the README.
 """
 import json
 import os
@@ -16,12 +17,11 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PLUGIN = os.path.join(HERE, "..", "plugins", "prose-guard")
+PLUGIN = os.path.abspath(os.path.join(HERE, "..", "plugins", "prose-guard"))
 LIB = os.path.join(PLUGIN, "lib")
 GUARD = os.path.join(PLUGIN, "hooks", "scripts", "guard-outgoing-prose.sh")
 sys.path.insert(0, LIB)
 
-# 25 words is the floor, so test text has to clear it to be inspected at all
 PAD = (" Anyone still relying on the previous credentials will need to re-run the setup command "
        "before their next deploy actually goes through cleanly today.")
 FAILS = []
@@ -32,7 +32,277 @@ def check(label, got, want):
         FAILS.append(f"FAIL {label}: got {got!r}, wanted {want!r}")
 
 
-def env(home, state, effort="medium"):
+def fresh(home):
+    """Reload the modules that cache files at import time, pointed at a temporary home."""
+    import importlib
+    os.environ["PROSE_GUARD_HOME"] = home
+    import audiences
+    import destinations
+    importlib.reload(audiences)
+    importlib.reload(destinations)
+    return audiences, destinations
+
+
+def write_audience(home, name, **kw):
+    d = os.path.join(home, "audiences")
+    os.makedirs(d, exist_ok=True)
+    data = {"name": name, "who": kw.pop("who", f"the {name}"),
+            "matches": kw.pop("matches", {}), "inherits": kw.pop("inherits", []),
+            "members": kw.pop("members", []), "vocabulary": kw.pop("vocabulary", {}),
+            "assumptions": kw.pop("assumptions", {})}
+    data.update(kw)
+    with open(os.path.join(d, name + ".json"), "w") as fh:
+        json.dump(data, fh)
+
+
+class Ctx:
+    def __init__(self, audience, situation=None):
+        self.audience = audience
+        self.situation = situation or {}
+
+
+# --------------------------------------------------------------------- detection
+def test_detection():
+    import jargon
+    known = {"CLI", "API"}
+
+    def is_known(t):
+        return t.upper() in known
+
+    cases = [
+        ("expanded in parentheses", "We use Application Default Credentials (ADC) here.", []),
+        ("expanded in prose", "Terraform prefers Application Default Credentials. ADC is next.",
+         []),
+        ("never expanded", "ADC is a separate grant.", ["ADC"]),
+        ("only inside code", "Run `gcloud auth ADC` now.", []),
+        # someone else's words are not yours to answer for. Dropping blockquotes removed zero
+        # detections across 301 real messages, whereas skipping any term inside backticks anywhere
+        # would have silenced a third of the true positives.
+        ("only in a blockquote", "They wrote:\n\n> move onto ADC soon\n\nNothing for me.", []),
+        ("in my own prose", "We should move onto ADC soon.", ["ADC"]),
+        ("screaming snake case", "The script exported GOOGLE_OAUTH_ACCESS_TOKEN on start.", []),
+        # a one-letter word must not stand in for an initial: "a docker container" once made ADC
+        # count as explained, passing a message that never explained it
+        ("short words are not an expansion", "We ran a docker container, then ADC failed.",
+         ["ADC"]),
+        ("a real three-word expansion", "It reads application default credentials. ADC is next.",
+         []),
+        ("known terms pass", "The CLI calls the API twice.", []),
+    ]
+    for label, text, want in cases:
+        check(f"detect/{label}", jargon.scan(text + PAD, is_known)[0], want)
+    # the denominator: every acronym-shaped term the reader met, known or not
+    check("considered counts known terms too",
+          jargon.scan("The CLI hit the API and then ADC failed." + PAD, is_known)[1],
+          ["ADC", "API", "CLI"])
+
+
+# --------------------------------------------------------------------- audiences
+def test_matching():
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "chat", matches={"slack_channels": ["C1"]})
+        write_audience(home, "byrepo", matches={"repos": ["your-org/infra"]})
+        write_audience(home, "byowner", matches={"github_owners": ["your-org"]})
+        write_audience(home, "bypath", matches={"paths": ["docs/runbooks/*"]})
+        A, _ = fresh(home)
+        for label, ctx, want in (
+                ("channel", {"channel": "C1"}, ["chat"]),
+                ("repo", {"repo": "your-org/infra"}, ["byrepo"]),
+                ("cwd repo", {"cwd_repo": "your-org/infra"}, ["byrepo"]),
+                ("owner", {"owner": "your-org"}, ["byowner"]),
+                ("path glob", {"path": "docs/runbooks/deploy.md"}, ["bypath"]),
+                ("nothing", {"channel": "C9"}, []),
+        ):
+            check(f"match/{label}", sorted(A.resolve(ctx).names), want)
+        # a baseline has no identifiers, so it can never be selected on its own
+        check("a baseline never matches by itself",
+              "engineers" in A.resolve({"channel": "C1"}).names, False)
+
+
+def test_combination():
+    """Three dimensions, three different combinators. Getting reach wrong is the expensive one."""
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "eng", matches={"slack_channels": ["C1"]},
+                       vocabulary={"JVM": 9, "SHARED": 9},
+                       assumptions={"shared_context": "high", "reach": "internal"})
+        write_audience(home, "clients", matches={"slack_channels": ["C1"]},
+                       vocabulary={"SHARED": 9, "SWAP": 9},
+                       assumptions={"shared_context": "low", "reach": "public"})
+        A, _ = fresh(home)
+        r = A.resolve({"channel": "C1"})
+        check("both audiences are in scope", sorted(r.names), ["clients", "eng"])
+        check("vocabulary intersects", sorted(r.known), ["SHARED"])
+        check("shared context takes the minimum", r.shared_context, "low")
+        check("reach takes the maximum", r.reach, "public")
+        check("the description names both", "several groups" in r.describe(), True)
+
+
+def test_no_subset_elimination():
+    """Dropping an audience contained in another looks free and is not sound.
+
+    Measured breadth inside the larger group does not imply every member of it knows the term, and
+    dropping an audience can only WIDEN the vocabulary, which is the unsafe direction. So a contained
+    audience must keep constraining.
+    """
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "big", matches={"slack_channels": ["C1"]},
+                       members=["alice", "bobby", "carol", "dave"],
+                       vocabulary={"WIDE": 9, "NARROW": 9})
+        write_audience(home, "small", matches={"slack_channels": ["C1"]},
+                       members=["alice", "bobby"], vocabulary={"WIDE": 9})
+        A, _ = fresh(home)
+        r = A.resolve({"channel": "C1"})
+        check("the contained audience still constrains", sorted(r.known), ["WIDE"])
+        # overlap is a HINT, not a fact: sources name people differently, so it is reported for a
+        # person to confirm and nothing depends on it
+        rows = A.possible_overlap()
+        check("possible overlap is reported for a human instead",
+              [(x, y, len(h)) for x, y, h, _, _ in rows], [("big", "small", 2)])
+
+
+# --------------------------------------------------------------------- severity
+def test_severity():
+    """When the tool may hold a message back, and when it must only advise."""
+    from checks import ADVISE, BLOCK, terms
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "team", matches={"slack_channels": ["C1"]},
+                       vocabulary={f"T{i}": 9 for i in range(20)})
+        A, _ = fresh(home)
+        import importlib
+
+        import checks.terms
+        importlib.reload(checks.terms)
+        terms = checks.terms
+
+        unresolved = Ctx(A.resolve({"channel": "C9"}))
+        resolved = Ctx(A.resolve({"channel": "C1"}))
+
+        # no audience for this destination: the finding is a guess, so it cannot block
+        f = terms.run("The ZZQ pipeline broke." + PAD, unresolved)
+        check("unresolved advises", f.severity, ADVISE)
+        check("and says it is guessing", "guess" in f.message, True)
+
+        # a small, specific complaint against a known audience is actionable
+        known_terms = " ".join(f"T{i}" for i in range(12))
+        f = terms.run(f"Touching {known_terms} and also ZZQ today." + PAD, resolved)
+        check("few unknown terms block", f.severity, BLOCK)
+
+        # most of the terms unknown means the audience is wrong, not the message
+        f = terms.run("ZZQ WQX YYT RRP MMN and LLK all changed today." + PAD, resolved)
+        check("mostly unknown advises instead", f.severity, ADVISE)
+        check("and says the audience is the likely problem", "audience is wrong" in f.message, True)
+
+        # a share is meaningless when almost nothing is in play: 1 of 1 is 100% and still fixable
+        f = terms.run("The ZZQ pipeline broke this morning." + PAD, resolved)
+        check("one unknown term of one still blocks", f.severity, BLOCK)
+
+        check("nothing to say when everything is known",
+              terms.run(f"Touching {known_terms} today." + PAD, resolved), None)
+
+
+# ------------------------------------------------------------------ destinations
+def test_routing():
+    with tempfile.TemporaryDirectory() as tmp:
+        _, D = fresh(os.path.join(tmp, "home"))
+        long = ("Removed the exporter line because nothing on a laptop reads that variable, and it "
+                "broke terraform after an hour of shell uptime by shadowing the fallback "
+                "credential entirely.")
+        bodyfile = os.path.join(tmp, "body.md")
+        with open(bodyfile, "w") as fh:
+            fh.write(long)
+        cases = [
+            ("chat", "mcp__slack__slack_send_message", {"channel_id": "C1", "message": long},
+             "chat message"),
+            ("github comment", "mcp__github__add_issue_comment", {"body": long},
+             "code review or issue comment"),
+            ("commit -m", "Bash", {"command": f'git commit -m "{long}"'}, "commit message"),
+            ("commit --message=", "Bash", {"command": f'git commit --message="{long}"'},
+             "commit message"),
+            ("commit -F", "Bash", {"command": f"git commit -F {bodyfile}"}, "commit message"),
+            ("amend -m", "Bash", {"command": f'git commit --amend -m "{long}"'},
+             "commit message"),
+            ("tag -a -m", "Bash", {"command": f'git tag -a v1 -m "{long}"'}, "commit message"),
+            ("gh comment", "Bash", {"command": f'gh pr comment 5 --body "{long}"'}, "github cli"),
+            ("gh body-file", "Bash",
+             {"command": f"gh pr create --title x --body-file {bodyfile}"}, "github cli"),
+            ("git status", "Bash", {"command": "git status"}, None),
+            ("read", "Read", {"file_path": "/tmp/x.md"}, None),
+        ]
+        for label, tool, ti, want in cases:
+            dest = D.match(tool, ti)
+            check(f"route/{label}", (dest or {}).get("name"), want)
+            if want:
+                check(f"extract/{label}", bool(D.extract(dest, tool, ti)), True)
+        # the editor form carries no text, so it is claimed but nothing can be judged
+        dest = D.match("Bash", {"command": "git commit"})
+        check("commit with an editor has no text", D.extract(dest, "Bash", {"command": "git commit"}),
+              None)
+        # two -m flags are one message
+        dest = D.match("Bash", {"command": f'git commit -m "Subject line here" -m "{long}"'})
+        got = D.extract(dest, "Bash", {"command": f'git commit -m "Subject line here" -m "{long}"'})
+        check("both -m parts are joined", got.startswith("Subject line here"), True)
+
+
+def test_prose_files_must_be_tracked():
+    """The line between a document colleagues will read and a scratch file is whether it gets
+    committed. Extension alone would check the agent's own notes."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _, D = fresh(os.path.join(tmp, "home"))
+        long = "word " * 40
+        repo = os.path.join(tmp, "repo")
+        os.makedirs(repo)
+        subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True)
+        with open(os.path.join(repo, ".gitignore"), "w") as fh:
+            fh.write("ignored.md\n")
+        for label, path, want in (
+                ("tracked markdown", os.path.join(repo, "README.md"), "prose file someone will read"),
+                ("ignored markdown", os.path.join(repo, "ignored.md"), None),
+                ("outside any repo", os.path.join(tmp, "loose.md"), None),
+                ("source file", os.path.join(repo, "Main.java"), None),
+        ):
+            dest = D.match("Write", {"file_path": path, "content": long})
+            check(f"prose file/{label}", (dest or {}).get("name"), want)
+
+
+def test_user_destinations_win():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = os.path.join(tmp, "home")
+        os.makedirs(home)
+        with open(os.path.join(home, "destinations.json"), "w") as fh:
+            json.dump({"destinations": [
+                {"name": "our briefing tool", "tool": ["send_briefing"], "text_fields": ["note"]},
+                {"name": "stop checking commits", "bash": r"\bgit\s+commit\b", "text_arg": []},
+            ]}, fh)
+        _, D = fresh(home)
+        long = "word " * 40
+        check("a destination the user added is claimed",
+              (D.match("example__send_briefing", {"note": long}) or {}).get("name"),
+              "our briefing tool")
+        # the override is listed first, so it wins and extracts nothing
+        dest = D.match("Bash", {"command": f'git commit -m "{long}"'})
+        check("a shipped destination can be overridden", dest.get("name"), "stop checking commits")
+        check("and then nothing is extracted",
+              D.extract(dest, "Bash", {"command": f'git commit -m "{long}"'}), None)
+
+
+def test_passive_discovery_records_shapes_not_text():
+    with tempfile.TemporaryDirectory() as home:
+        _, D = fresh(home)
+        secret = "swordfish " * 40
+        D.record_candidate("Bash", {"command": f'my-cli notify --text "{secret}"'})
+        D.record_candidate("mcp__example__post_update", {"body": secret})
+        D.record_candidate("mcp__example__post_update", {"body": secret})
+        raw = open(os.path.join(home, "unclaimed-destinations.json")).read()
+        seen = json.loads(raw)
+        check("a bash shape is binary, subcommand and flag",
+              "bash: my-cli notify --text" in seen, True)
+        check("an mcp shape is the tool and the field",
+              seen.get("tool: mcp__example__post_update [body]"), 2)
+        check("no message text is ever written down", "swordfish" in raw, False)
+
+
+# ------------------------------------------------------------------- the hook
+def env(home, state, effort="low"):
     e = {k: v for k, v in os.environ.items() if not k.startswith("PROSE_GUARD")}
     e.pop("CLAUDE_PLUGIN_DATA", None)
     e.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
@@ -40,7 +310,7 @@ def env(home, state, effort="medium"):
     return e
 
 
-def run_guard(payload, home, state, effort="medium"):
+def run_guard(payload, home, state, effort="low"):
     r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
                        text=True, env=env(home, state, effort), timeout=300)
     out = r.stdout.strip()
@@ -52,262 +322,138 @@ def run_guard(payload, home, state, effort="medium"):
     return "advise", h.get("additionalContext", "")
 
 
-def measured(home, terms):
-    os.makedirs(home, exist_ok=True)
-    with open(os.path.join(home, "vocabulary.json"), "w") as fh:
-        json.dump({"terms": terms}, fh)
-
-
-def test_detection():
-    """The Schwartz-Hearst expansion detection, which is the deterministic half of the tool."""
-    import jargon
-    cases = [
-        ("expanded in parentheses", "We use Application Default Credentials (ADC) here.", []),
-        ("expanded in prose", "Terraform prefers Application Default Credentials. ADC is "
-                              "separate.", []),
-        ("never expanded", "ADC is a separate grant.", ["ADC"]),
-        ("only inside code", "Run `gcloud auth ADC` now.", []),
-        # a quoted line is someone else's words. Dropping blockquotes removed zero detections
-        # across 301 real messages, whereas skipping any term inside backticks anywhere would
-        # have silenced a third of the true positives.
-        ("only inside a blockquote", "Someone wrote:\n\n> we should move onto ADC soon\n\nFine.",
-         []),
-        ("in my own prose", "We should move onto ADC soon.", ["ADC"]),
-        # word boundaries mean GOOGLE_OAUTH never matches
-        ("screaming snake case", "The script exported GOOGLE_OAUTH_ACCESS_TOKEN on start.", []),
-        # a one-letter word must not stand in for an initial: "a docker container" used to make
-        # ADC count as explained, passing a message that never explained it
-        ("short words are not an expansion", "We ran a docker container, then ADC failed.",
-         ["ADC"]),
-        ("a real three-word expansion counts", "Terraform reads application default credentials. "
-                                               "ADC is separate.", []),
-    ]
-    for label, text, want in cases:
-        check(f"detect/{label}", jargon.unexplained(text + PAD)[0], want)
-
-
-def test_vocabulary():
-    """Shipped general terms pass; anything else is unknown until it has been measured."""
-    import vocabulary
-    for term, needs in (("CLI", False), ("API", False), ("JSON", False), ("HTTP", False),
-                        # capitalised English words and code constants are not acronyms. A
-                        # hand-kept exclusion list would grow forever, so the system word list
-                        # catches these.
-                        ("LOGGER", False), ("NULL", False), ("ERROR", False), ("ASCII", False),
-                        # nothing org-specific ships, so these are unknown out of the box
-                        ("ADC", True), ("GKE", True), ("CDM", True)):
-        check(f"vocab/{term}", vocabulary.needs_explaining(term), needs)
-    check("nothing measured ships with the tool", vocabulary.HAVE_MEASURED, False)
-
-
-def test_confidence_gates_enforcement():
-    """Without a measured vocabulary the tool is guessing, so it must advise and not block.
-
-    This is the property that makes zero-setup usable. Blocking on a guess means the first day is
-    spent arguing with it about house vocabulary.
-    """
-    text = "We moved the kubectl configuration onto GKE this week." + PAD
-    payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": "s1",
-               "tool_input": {"channel_id": "C1", "message": text}}
-    with tempfile.TemporaryDirectory() as tmp:
-        home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
-        verdict, why = run_guard(payload, home, state, "low")
-        check("unmeasured audience advises", verdict, "advise")
-        check("and says it is guessing", "guess" in why, True)
-
-        # measured, and GKE sits below the author cut: now it is evidence, so it blocks
-        measured(home, {"KUBECTL": 6, "GKE": 3})
-        verdict, _ = run_guard(payload, home, os.path.join(tmp, "s2"), "low")
-        check("measured audience denies", verdict, "deny")
-
-        # at or above the cut, there is nothing to say
-        measured(home, {"KUBECTL": 6, "GKE": 4})
-        verdict, _ = run_guard(payload, home, os.path.join(tmp, "s3"), "low")
-        check("a term the audience shares is not flagged", verdict, "allow")
-
-        # accepting a term by hand works without a rerun, and applies immediately
-        measured(home, {"KUBECTL": 6, "GKE": 3})
-        with open(os.path.join(home, "known-terms.txt"), "w") as fh:
-            fh.write("# mine\nGKE\n")
-        verdict, _ = run_guard(payload, home, os.path.join(tmp, "s4"), "low")
-        check("known-terms.txt is honoured", verdict, "allow")
-
-
-def test_routing():
-    """What counts as outgoing prose is data, and the data has to be right."""
-    text = "We moved the kubectl configuration onto GKE this week." + PAD
+def test_hook_end_to_end():
     with tempfile.TemporaryDirectory() as tmp:
         home = os.path.join(tmp, "home")
-        measured(home, {"KUBECTL": 6})            # so terms can deny and routing is observable
-        bodyfile = os.path.join(tmp, "body.md")
-        with open(bodyfile, "w") as fh:
-            fh.write(text)
-        cases = [
-            ("slack", {"tool_name": "mcp__slack__slack_send_message",
-                       "tool_input": {"channel_id": "C1", "message": text}}, "deny"),
-            ("github comment", {"tool_name": "mcp__github__add_issue_comment",
-                                "tool_input": {"body": text}}, "deny"),
-            ("notion page", {"tool_name": "mcp__notion__notion-update-page",
-                             "tool_input": {"content": text}}, "deny"),
-            ("markdown file", {"tool_name": "Write",
-                               "tool_input": {"file_path": "/tmp/design.md",
-                                              "content": text}}, "deny"),
-            # --body-file is how a long body is really passed. It used to be invisible.
-            ("gh pr create --body-file", {"tool_name": "Bash",
-                                          "tool_input": {"command": f"gh pr create --title x "
-                                                                    f"--body-file {bodyfile}"}},
-             "deny"),
-            # code is out of scope: this guards writing, not programming
-            ("java file", {"tool_name": "Write",
-                           "tool_input": {"file_path": "/tmp/Foo.java", "content": text}},
-             "allow"),
-            ("read-only tool", {"tool_name": "Read",
-                                "tool_input": {"file_path": "/tmp/x.md"}}, "allow"),
-            ("unrelated bash", {"tool_name": "Bash",
-                                "tool_input": {"command": "git status"}}, "allow"),
-            # too short to be the failure this catches
-            ("short message", {"tool_name": "mcp__slack__slack_send_message",
-                               "tool_input": {"channel_id": "C1", "message": "done, thanks"}},
-             "allow"),
-        ]
-        for label, payload, want in cases:
-            payload["session_id"] = "r-" + label.replace(" ", "_")
-            verdict, _ = run_guard(payload, home, os.path.join(tmp, label.replace(" ", "_")),
-                                   "low")
-            check(f"routing/{label}", verdict, want)
-
-
-def test_user_destinations_win():
-    """A user file is read before the shipped defaults, so it can override as well as extend."""
-    import importlib
-    text = "We moved the kubectl configuration onto GKE this week." + PAD
-    with tempfile.TemporaryDirectory() as tmp:
-        home = os.path.join(tmp, "home")
-        os.makedirs(home)
-        measured(home, {"KUBECTL": 6})
-        with open(os.path.join(home, "destinations.json"), "w") as fh:
-            json.dump({"destinations": [
-                {"name": "my own tool", "tool": ["send_briefing"], "text_fields": ["note"],
-                 "audience": {"audience": "the operations rota"}},
-                # override: stop checking markdown files
-                {"name": "markdown off", "file": r"\.md$", "text_fields": []},
-            ]}, fh)
-        verdict, _ = run_guard({"tool_name": "example__send_briefing", "session_id": "u1",
-                                "tool_input": {"note": text}}, home, os.path.join(tmp, "u1"),
-                               "low")
-        check("a destination the user added is checked", verdict, "deny")
-        verdict, _ = run_guard({"tool_name": "Write", "session_id": "u2",
-                                "tool_input": {"file_path": "/tmp/x.md", "content": text}},
-                               home, os.path.join(tmp, "u2"), "low")
-        check("a destination the user overrode is skipped", verdict, "allow")
-
-        os.environ["PROSE_GUARD_HOME"] = home
-        import destinations
-        importlib.reload(destinations)
-        env_ = destinations.envelope(
-            {"tool": ["send_briefing"], "audience": {"audience": "the operations rota"}},
-            "example__send_briefing", {"note": text})
-        check("a declared audience reaches the envelope", env_.get("audience"),
-              "the operations rota")
-        del os.environ["PROSE_GUARD_HOME"]
-        importlib.reload(destinations)
-
-
-def test_envelope_is_derived():
-    """The audience comes from the call, and says so when it cannot."""
-    import destinations
-    slack = next(d for d in destinations.DESTINATIONS if "slack_send_message" in (d.get("tool") or []))
-    dm = destinations.envelope(slack, "slack_send_message", {"channel_id": "D42"})
-    ch = destinations.envelope(slack, "slack_send_message", {"channel_id": "C42"})
-    check("a direct message is one colleague", "direct message" in dm["audience"], True)
-    check("a channel arrives cold", "cold" in ch.get("shared_context", ""), True)
-    thread = destinations.envelope(slack, "slack_send_message",
-                                   {"channel_id": "C42", "thread_ts": "1.0"})
-    check("a thread reply is marked as continuing", "thread" in thread.get("situation", ""), True)
-    gh = next(d for d in destinations.DESTINATIONS if "add_issue_comment" in (d.get("tool") or []))
-    priv = destinations.envelope(gh, "mcp__github__add_issue_comment", {"owner": "someone"})
-    check("an owner not declared public is treated as private",
-          "private" in priv.get("reach", ""), True)
-    unknown = destinations.envelope({}, "whatever", {})
-    check("an unconfigured destination admits it", "unknown" in unknown["audience"], True)
+        write_audience(home, "team", matches={"slack_channels": ["C1"]}, inherits=["engineers"],
+                       vocabulary={"GKE": 9})
+        text = "We moved the kubectl configuration onto GKE this week." + PAD
+        send = {"tool_name": "mcp__slack__slack_send_message", "session_id": "h1", "cwd": tmp,
+                "tool_input": {"channel_id": "C1", "message": text}}
+        check("a resolved audience that knows the term allows",
+              run_guard(send, home, os.path.join(tmp, "s1"))[0], "allow")
+        elsewhere = dict(send, session_id="h2",
+                         tool_input={"channel_id": "C9", "message": text})
+        verdict, why = run_guard(elsewhere, home, os.path.join(tmp, "s2"))
+        check("an unknown destination advises", verdict, "advise")
+        check("and names the term", "GKE" in why, True)
+        check("disabled does nothing",
+              run_guard(elsewhere, home, os.path.join(tmp, "s3"), "disabled")[0], "allow")
 
 
 def test_session_ledger_bounds_the_argument():
-    """Ten different drafts, each still carrying an unexplained term, must not block forever."""
     with tempfile.TemporaryDirectory() as tmp:
         home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
-        measured(home, {"KUBECTL": 6})
+        write_audience(home, "team", matches={"slack_channels": ["C1"]}, inherits=["engineers"],
+                       vocabulary={"KUBECTL": 9})
         seq = []
         for n in range(10):
-            payload = {"tool_name": "mcp__github__add_issue_comment", "session_id": "ledger",
-                       "tool_input": {"body": f"Draft {n} still talks about GKE clusters." + PAD}}
-            seq.append(run_guard(payload, home, state, "low")[0] == "deny")
+            payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": "ledger",
+                       "cwd": tmp,
+                       "tool_input": {"channel_id": "C1",
+                                      "message": f"Draft {n} still talks about GKE." + PAD}}
+            seq.append(run_guard(payload, home, state)[0] == "deny")
         check("a session is blocked at most MAX_DENIALS times", sum(seq), 6)
         check("and stops blocking once the ledger is spent", any(seq[-2:]), False)
-        fresh = run_guard({"tool_name": "mcp__github__add_issue_comment", "session_id": "other",
-                           "tool_input": {"body": "Another note about GKE." + PAD}},
-                          home, state, "low")[0]
-        check("a new session gets its own ledger", fresh, "deny")
 
 
+def test_state_stays_out_of_the_plugin():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = os.path.join(tmp, "home")
+        write_audience(home, "team", matches={"slack_channels": ["C1"]}, inherits=["engineers"])
+        payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": "fb", "cwd": tmp,
+                   "tool_input": {"channel_id": "C1", "message": "GKE broke again." + PAD}}
+        e = env(home, os.path.join(tmp, "state"))
+        subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True, text=True,
+                       env=e, timeout=300)
+        check("state written where it was told",
+              os.path.isfile(os.path.join(tmp, "state", "sessions", "fb.json")), True)
+        # and with nowhere told, the fallback still lands outside the plugin
+        e2 = {k: v for k, v in e.items() if k != "PROSE_GUARD_STATE"}
+        e2["HOME"] = os.path.join(tmp, "fakehome")
+        subprocess.run(["bash", GUARD], input=json.dumps(dict(payload, session_id="fb2")),
+                       capture_output=True, text=True, env=e2, timeout=300)
+        check("the fallback lands under the user's cache",
+              os.path.isfile(os.path.join(tmp, "fakehome", ".cache", "prose-guard", "sessions",
+                                          "fb2.json")), True)
+        check("no session state inside the plugin",
+              os.path.isdir(os.path.join(PLUGIN, "sessions")), False)
+
+
+# ------------------------------------------------------------------- the rest
 def test_levels():
-    """Which checks each level runs, and that low never reaches a model."""
     import importlib
+
     import checks
+    from checks import config
     for level, names in (("disabled", []),
                          ("low", ["terms"]),
                          ("medium", ["terms", "judgement"]),
                          ("high", ["terms", "relevance", "structure", "sentence", "reference"])):
-        got = [c.NAME for c in checks.for_effort(level)]
-        check(f"level/{level}", got, names)
-    check("low spends no model call",
+        check(f"level/{level}", [c.NAME for c in checks.for_effort(level)], names)
+    check("only the judgement checks cost a call",
           [c.COSTS_A_CALL for c in checks.for_effort("low")], [False])
-    from checks import config
     for bad in ("", "nonsense", "LOW "):
         os.environ["PROSE_GUARD_EFFORT"] = bad
         importlib.reload(config)
-        check(f"an unrecognised level falls back to disabled ({bad!r})", config.effort(),
-              "disabled")
+        check(f"an unrecognised level is disabled ({bad!r})", config.effort(), "disabled")
     del os.environ["PROSE_GUARD_EFFORT"]
     importlib.reload(config)
 
 
-def test_state_stays_out_of_the_plugin():
-    """An earlier version fell back to the plugin directory and put state under version control."""
-    text = "We moved the kubectl configuration onto GKE this week." + PAD
-    with tempfile.TemporaryDirectory() as tmp:
-        home = os.path.join(tmp, "home")
-        measured(home, {"KUBECTL": 6})
-        e = env(home, os.path.join(tmp, "state"), "low")
-        subprocess.run(["bash", GUARD], input=json.dumps(
-            {"tool_name": "mcp__github__add_issue_comment", "session_id": "st",
-             "tool_input": {"body": text}}), capture_output=True, text=True, env=e, timeout=300)
-        check("state written where it was told",
-              os.path.isfile(os.path.join(tmp, "state", "sessions", "st.json")), True)
+def test_audience_editing():
+    import audiences
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "team", matches={"slack_channels": ["C1"]}, vocabulary={"AAA": 9})
+        A, _ = fresh(home)
+        check("accept adds a term", bool(A.accept("team", "bbb")), True)
+        A, _ = fresh(home)
+        check("and it is known afterwards", A.resolve({"channel": "C1"}).is_known("BBB"), True)
+        check("accepting a known term changes nothing", A.accept("team", "AAA"), None)
+        A.remove("team")
+        A, _ = fresh(home)
+        check("removed audiences are gone", "team" in A.ALL, False)
+        try:
+            A.remove("engineers")
+            check("a built-in cannot be deleted", "no error", "PermissionError")
+        except PermissionError:
+            pass
 
-        # and with nowhere told, the fallback must still land outside the plugin. Pointing HOME at
-        # a temporary directory makes ~/.cache land there, so this asserts the fallback itself
-        # rather than only asserting that an explicit path is honoured.
-        e2 = {k: v for k, v in e.items() if k != "PROSE_GUARD_STATE"}
-        e2["HOME"] = os.path.join(tmp, "fakehome")
-        e2["PROSE_GUARD_HOME"] = home
-        subprocess.run(["bash", GUARD], input=json.dumps(
-            {"tool_name": "mcp__github__add_issue_comment", "session_id": "fb",
-             "tool_input": {"body": text}}), capture_output=True, text=True, env=e2, timeout=300)
-        check("the fallback lands under the user's cache",
-              os.path.isfile(os.path.join(tmp, "fakehome", ".cache", "prose-guard",
-                                          "sessions", "fb.json")), True)
-        for junk in ("sessions", "outgoing-guard-state"):
-            check(f"no {junk} inside the plugin",
-                  os.path.isdir(os.path.join(PLUGIN, junk)), False)
+
+def test_rule_installer():
+    with tempfile.TemporaryDirectory() as tmp:
+        e = {**os.environ, "HOME": tmp}
+        script = os.path.join(LIB, "install_rule.py")
+
+        def run(*args):
+            return subprocess.run([sys.executable, script, *args], capture_output=True, text=True,
+                                  env=e, timeout=60).stdout.strip()
+
+        check("absent before installing", run().startswith("absent"), True)
+        run("--install")
+        target = os.path.join(tmp, ".claude", "rules", "prose-guard-communication.md")
+        check("installed as a real file, not a link",
+              os.path.isfile(target) and not os.path.islink(target), True)
+        check("current after installing", run().startswith("current"), True)
+        with open(target, "a") as fh:
+            fh.write("\nedited\n")
+        check("an edited copy is reported as stale", run().startswith("stale"), True)
+        check("and is not silently overwritten", run("--install").startswith("stale"), True)
+        run("--remove")
+        check("removable", os.path.exists(target), False)
 
 
 def main():
-    for fn in (test_detection, test_vocabulary, test_confidence_gates_enforcement,
-               test_routing, test_user_destinations_win, test_envelope_is_derived,
-               test_session_ledger_bounds_the_argument, test_levels,
-               test_state_stays_out_of_the_plugin):
-        fn()
+    for fn in (test_detection, test_matching, test_combination, test_no_subset_elimination,
+               test_severity, test_routing, test_prose_files_must_be_tracked,
+               test_user_destinations_win, test_passive_discovery_records_shapes_not_text,
+               test_hook_end_to_end, test_session_ledger_bounds_the_argument,
+               test_state_stays_out_of_the_plugin, test_levels, test_audience_editing,
+               test_rule_installer):
+        try:
+            fn()
+        except Exception as exc:                # a test that cannot run is a failure, not a pass
+            FAILS.append(f"ERROR {fn.__name__}: {type(exc).__name__}: {exc}")
     for line in FAILS:
         print(line)
     if FAILS:

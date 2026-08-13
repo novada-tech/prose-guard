@@ -14,11 +14,18 @@ SYSTEM = ("You are a text checker. You read a message and answer with exactly on
           "PASS or FAIL followed by a reason. You never use tools.")
 
 
-def envelope_text(env):
-    if not env:
+def context_text(ctx):
+    """What the model is told about the reader and the moment. Descriptive only: the audience was
+    already decided deterministically, so nothing here can change which vocabulary applies."""
+    if ctx is None:
         return ""
-    lines = "\n".join(f"- {k.replace('_', ' ')}: {v}" for k, v in (env or {}).items())
-    return f"\n\nWhat you know about the situation:\n{lines}\n"
+    lines = [f"- who reads this: {ctx.audience.describe()}"]
+    if ctx.audience.shared_context:
+        lines.append(f"- how much they already know of this: {ctx.audience.shared_context}")
+    for key, value in (ctx.situation or {}).items():
+        if not key.startswith("_"):
+            lines.append(f"- {key.replace('_', ' ')}: {value}")
+    return "\n\nWhat you know about the situation:\n" + "\n".join(lines) + "\n"
 
 
 def _log_usage(name, usage, seconds):
@@ -42,7 +49,7 @@ def read_prompt(path):
         return None
 
 
-def ask(name, prompt, text, envelope=None):
+def ask(name, prompt, text, ctx=None):
     """(ok, message). Any failure to reach the checker is a pass: it must not block work."""
     import time
     if not prompt:
@@ -50,7 +57,7 @@ def ask(name, prompt, text, envelope=None):
     t0 = time.time()
     try:
         r = subprocess.run(
-            ["claude", "-p", f"{prompt}{envelope_text(envelope)}"
+            ["claude", "-p", f"{prompt}{context_text(ctx)}"
              f"\n===== MESSAGE =====\n{text}\n",
              "--model", MODEL, "--effort", EFFORT,
              "--system-prompt", SYSTEM,

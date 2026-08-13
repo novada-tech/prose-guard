@@ -1,20 +1,33 @@
-"""One check per module. Two callers run them: the outgoing-prose hook, and check_prose.py.
-
-Each check exposes the same four names, so a caller never has to know what a check does:
+"""One check per module, and one contract between them and the two callers that run them.
 
     NAME          what to call it in output
-    CAN_DENY      whether this check is exact enough to hold a message back
     COSTS_A_CALL  whether running it spends a model call
-    run(text, envelope) -> (ok, message)
+    run(text, ctx) -> Finding or None
 
-`for_effort(level)` returns the checks that level runs, in order. Order is a design decision, not
-a detail: the cheapest and most exact check goes first, so a message with a plainly wrong term
-never reaches a model call. The term check leads every level for that reason — it is
-deterministic, it names the exact token it objects to, and so it converges.
+A check returns None when it has nothing to say, and otherwise a Finding carrying its own severity.
+Severity belongs to the finding rather than the check, because the same check is sometimes exact
+enough to hold a message back and sometimes only guessing — the term check knows the difference and
+nothing else can.
 
-Adding a check is adding a file here and a line in `for_effort`. Both callers pick it up.
+    block   the complaint is specific, small and evidenced. Hold the message.
+    advise  hand it over and let the message go.
+
+`for_effort(level)` gives the checks that level runs, in order: cheapest and most exact first, so a
+message with a plainly wrong term never reaches a model call.
+
+    low     terms only. No model call.
+    medium  terms, then one advisory call over the remaining concerns.
+    high    terms, then four gating checks, one concern each.
+
+Adding a check is a file here and a line in for_effort. Both callers pick it up.
 """
+import collections
+
 from . import config, judgement, sequence, terms
+
+Finding = collections.namedtuple("Finding", "severity message")
+BLOCK = "block"
+ADVISE = "advise"
 
 
 def for_effort(level=None):

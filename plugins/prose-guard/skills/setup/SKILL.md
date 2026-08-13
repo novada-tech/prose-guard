@@ -1,78 +1,95 @@
 ---
 name: setup
-description: Set up prose-guard — choose how much checking to do, and optionally measure the vocabulary your audience actually shares. Use when the user asks to set up, configure, enable, disable or change prose-guard, or asks why it is or is not checking their messages.
-disable-model-invocation: false
+description: Set up prose-guard — choose how much checking to do, install the communication rule, and configure which tools count as sending prose. Use when the user asks to set up, configure, enable or disable prose-guard, asks why it is or is not checking their messages, or asks it to check a tool it currently ignores.
 ---
 
 # Setting up prose-guard
 
-Do this conversationally, one question at a time, and show the user what you wrote. Everything
-lands in plain files they can read, diff and hand-edit — there is no hidden state.
+One question at a time, and show what you wrote. Everything lands in plain files.
 
 ## 1. Say what is set now
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/checks/config.py"
-python3 "${CLAUDE_PLUGIN_ROOT}/lib/vocabulary.py"
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" list
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/install_rule.py"
 ```
 
-The first prints the effort level and where it is stored, the second what vocabulary is loaded and
-whether unexplained terms are held back or only reported.
+## 2. Choose a level
 
-## 2. Ask which level, if they have not said
-
-Give them the trade honestly. The numbers come from five paired sessions on one fixture and one
-model, so the ordering is the finding, not the digits:
+The numbers are five paired sessions on one fixture and one model, so the ordering is the finding
+and the digits are not:
 
 | level | what runs | added per message sent |
 |---|---|---|
 | `disabled` | nothing | — |
 | `low` | the term check only, no model call | +12s |
-| `medium` | plus one advisory judgement call | +19s |
-| `high` | four gating checks, each re-verified after any edit | +75s |
+| `medium` | plus one advisory writing check | +19s |
+| `high` | four separate checks, re-verified after each edit | +75s |
 
-Two things worth telling them, because both are counter-intuitive:
+Both counter-intuitive results are worth saying out loud:
 
-- **`low` is not the cheap option.** It spends no model call, but holding a message back costs a
-  whole agent turn on their own context, which is dearer than the small call `medium` adds.
+- **`low` is not the cheap option.** No model call, but holding a message back costs a whole agent
+  turn on their own context, which is dearer than the small call `medium` adds.
 - **`high` is not known to be better than `medium`.** Both satisfied every concern on every message
   measured, which is a judge at its ceiling rather than evidence they are equal.
 
-`medium` is the level the evidence supports. Set it whichever way suits them:
-
-```
-/plugin configure prose-guard@novada
-```
-
-That is the first-class path — Claude Code stores it and passes it to the hook. If they would
-rather have a file they can read and commit, or they installed some other way:
+`medium` is what the evidence supports. Set it with `/plugin configure prose-guard@novada`, which is
+the first-class path, or write the file:
 
 ```
 python3 -c "import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/lib'); \
 from checks import config; print(config.save('medium'))"
 ```
 
-`/plugin configure` wins if both are set.
+## 3. Offer the rule
 
-## 3. Offer to measure their vocabulary, and say what it buys
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/install_rule.py" --install
+```
 
-Until they do, the tool knows what developers in general know and nothing about the people they
-write to, so an unrecognised acronym is a guess: it reports it and does not block. Measuring turns
-that into evidence, and then it blocks.
+Say what it is: 250 words that apply while a message is being written, rather than when it is sent,
+and the only part of this tool that costs nothing per message. It is copied rather than linked
+because the plugin directory is replaced on update, so re-run this after upgrading — `--status` says
+whether it has drifted.
 
-Point them at `/prose-guard:learn-vocabulary`. Optional, and worth saying it takes a few minutes.
+## 4. Work out what counts as outgoing
 
-## 4. Mention the two things they may need to add, then stop
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/discover.py"
+```
 
-- **A destination it does not know.** `lib/../data/destinations.json` lists what counts as outgoing
-  prose. Their own file at `<config dir>/destinations.json` is read first, so they can add or
-  override an entry. Offer to write one only if they name a tool that is being missed.
-- **Which repository owners are public.** Empty by default, because telling someone a private repo
-  is public makes them strip links their colleagues could have opened. It changes what the checks
-  say about internal links and shorthand.
+That prints what is already covered, plus four kinds of evidence about what is not: MCP servers
+configured here, outbound command-line tools on PATH, how often each appears in their shell history,
+and anything that has already carried long prose past the guard unclaimed.
 
-Do not walk them through either unless they ask. The tool works without both.
+Then do the part no script can:
 
-## 5. Say what happens next
+- **Name the tools you can actually see.** For each MCP server it listed, say which of your own
+  available tools belong to it and which of those send prose to a person. You can see your tool
+  list; the script cannot.
+- **Propose, do not assume.** Show the user a short list of what you would add and what field
+  carries the text. Ask before writing.
+- **Say what each addition costs.** Every added destination is more messages checked, at the
+  per-message price above.
 
-Nothing changes until Claude Code restarts, because hooks load at startup.
+Write confirmed entries to `<config dir>/destinations.json`, whose shape is documented in
+[`data/destinations.json`](../../data/destinations.json). User entries are read first, so the same
+file also overrides a shipped entry — that is how to stop checking something.
+
+Already covered without asking: chat messages, GitHub and GitLab comments and PR descriptions,
+documentation pages, issue trackers, `git commit` and `git tag -m`, and prose files that are inside
+a git working tree and not ignored.
+
+Two known gaps worth stating rather than hiding: `git commit` with no `-m` opens an editor and that
+text never reaches a tool call, and `--body "$(cat file)"` cannot be read.
+
+## 5. Offer audiences, and be honest about what it buys
+
+Until an audience is measured, the tool knows what developers in general know and nothing about the
+people they write to, so it reports unexplained terms as a guess and does not block. Point at
+`/prose-guard:audiences`. Optional, a few minutes, and it is what turns advice into enforcement.
+
+## 6. Restart
+
+Hooks and rules load at startup. Nothing takes effect until then.

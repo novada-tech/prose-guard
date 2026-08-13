@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""What on this machine could be sending prose to a person, so setup can suggest rather than ask.
+
+    python3 lib/discover.py
+
+Four sources, all deterministic and all local. Nothing here decides anything: it hands a list to
+`/prose-guard:setup`, which proposes destinations and asks you to confirm. Guessing wrong in either
+direction is cheap — a missed destination goes unchecked, an invented one checks something harmless —
+but only if a person sees the list, which is why this prints rather than writes.
+
+    mcp        MCP servers configured for Claude Code. Names only; the tools they expose are not
+               knowable from disk, so setup asks the agent which of its own tools belong to them.
+    cli        outbound command-line tools on PATH. Installed is weak evidence of used.
+    history    the same tools as they appear in your shell history, which is strong evidence. Only
+               command NAMES are counted; no arguments are read, because arguments carry content.
+    unclaimed  tools that already carried long prose past the hook without any destination
+               claiming them. The best evidence of all, because it happened.
+"""
+import glob
+import json
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import destinations  # noqa: E402
+
+# Command-line tools that post prose to people. Extend freely: an entry here only ever becomes a
+# suggestion.
+OUTBOUND_CLIS = {
+    "gh": "GitHub — pull request and issue comments, PR descriptions, release notes",
+    "glab": "GitLab — merge request notes and descriptions",
+    "git": "commit messages, annotated tags and notes",
+    "jira": "Jira — issue comments and descriptions",
+    "az": "Azure DevOps — work item comments",
+    "tea": "Gitea — issue and pull request comments",
+    "slack": "Slack CLI — messages",
+    "teams": "Microsoft Teams CLI — messages",
+    "mail": "email",
+    "sendmail": "email",
+    "curl": "anything, including webhooks that post to chat",
+}
+
+
+def mcp_servers():
+    """From ~/.claude.json, at the root and per project, plus any installed plugin that ships one."""
+    names = set()
+    path = os.path.join(os.path.expanduser("~"), ".claude.json")
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except Exception:
+        data = {}
+    names |= set((data.get("mcpServers") or {}).keys())
+    for project in (data.get("projects") or {}).values():
+        if isinstance(project, dict):
+            names |= set((project.get("mcpServers") or {}).keys())
+    for manifest in glob.glob(os.path.join(os.path.expanduser("~"), ".claude", "plugins",
+                                           "cache", "*", "*", "*", ".claude-plugin",
+                                           "plugin.json")):
+        try:
+            with open(manifest) as fh:
+                d = json.load(fh)
+            if d.get("mcpServers"):
+                names |= set(d["mcpServers"].keys())
+        except Exception:
+            continue
+    return sorted(names)
+
+
+def clis_on_path():
+    import shutil
+    return sorted(name for name in OUTBOUND_CLIS if shutil.which(name))
+
+
+def from_history(limit=40000):
+    """Which outbound tools you actually use. Command names only — never arguments.
+
+    Arguments are the content of your messages, and this file is read to make a suggestion, not to
+    build a corpus. Counting `git commit` without reading what was committed is the whole point.
+    """
+    counts = {}
+    subcommands = {}
+    for name in ("~/.zsh_history", "~/.bash_history", "~/.local/share/fish/fish_history"):
+        path = os.path.expanduser(name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, errors="replace") as fh:
+                lines = fh.readlines()[-limit:]
+        except OSError:
+            continue
+        for line in lines:
+            # zsh writes ": <ts>:<elapsed>;<command>"
+            cmd = line.split(";", 1)[-1].strip() if line.startswith(":") else line.strip()
+            words = re.findall(r"[\w.-]+", cmd)[:2]
+            if not words:
+                continue
+            head = words[0]
+            if head in OUTBOUND_CLIS:
+                counts[head] = counts.get(head, 0) + 1
+                if len(words) > 1:
+                    key = f"{head} {words[1]}"
+                    subcommands[key] = subcommands.get(key, 0) + 1
+    return counts, subcommands
+
+
+def unclaimed():
+    """Tools that carried long prose past the hook with no destination claiming them."""
+    path = os.path.join(destinations.config_dir(), "unclaimed-destinations.json")
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+
+def covered():
+    """Which shipped or configured destinations already exist, so setup does not re-suggest them."""
+    out = []
+    for dest in destinations.DESTINATIONS:
+        out.append({"name": dest.get("name"), "tool": dest.get("tool"),
+                    "bash": dest.get("bash"), "file": dest.get("file")})
+    return out
+
+
+def main():
+    servers = mcp_servers()
+    used, subs = from_history()
+    print("MCP servers configured here:")
+    print("  " + (", ".join(servers) if servers else "none found"))
+    print("\n  Which of their tools send prose is not knowable from disk. /prose-guard:setup asks")
+    print("  the agent which tools it can actually see, and you confirm.\n")
+
+    print("Outbound command-line tools on PATH:")
+    for name in clis_on_path():
+        seen = used.get(name, 0)
+        print(f"  {name:10s} {OUTBOUND_CLIS[name]}"
+              + (f"  [used {seen}x in your history]" if seen else "  [not in your history]"))
+
+    if subs:
+        print("\nThe forms you actually use:")
+        for key, n in sorted(subs.items(), key=lambda kv: -kv[1])[:12]:
+            print(f"  {n:5d}x  {key}")
+
+    un = unclaimed()
+    if un:
+        print("\nAlready carried long prose past the guard, and nothing claimed it:")
+        for shape, n in sorted(un.items(), key=lambda kv: -kv[1]):
+            print(f"  {n:5d}x  {shape}")
+    else:
+        print("\nNothing has slipped past unclaimed yet. This fills in as you work.")
+
+    print("\nAlready covered:")
+    for d in covered():
+        print(f"  {d['name']}")
+
+
+if __name__ == "__main__":
+    main()
