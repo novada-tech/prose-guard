@@ -74,10 +74,9 @@ class Audience:
     def matches(self, ctx):
         """ctx carries whatever the tool call revealed: channel, repo, owner, path, cwd_repo."""
         m = self.matches_on
-        # `channels` is the generic key: any chat destination yields a channel id, whatever product
-        # it came from. `slack_channels` is the original name and still works.
-        if ctx.get("channel") and ctx["channel"] in ((m.get("channels") or [])
-                                                     + (m.get("slack_channels") or [])):
+        # `channels` is generic on purpose: any chat destination yields a channel id, and whatever
+        # produced the message already knows which product it came from.
+        if ctx.get("channel") and ctx["channel"] in (m.get("channels") or []):
             return True
         for key in ("repo", "cwd_repo"):
             if ctx.get(key) and ctx[key] in (m.get("repos") or []):

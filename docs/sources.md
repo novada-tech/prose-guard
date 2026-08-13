@@ -117,4 +117,4 @@ python3 lib/audiences.py match platform-team channel C054ZDE533R --rm
 
 `channel` is deliberately not named after any chat product. Whatever produced the message already
 knows which product it came from; by the time an audience is being chosen, a channel id is just an
-identifier. An audience file written before this used `slack_channels`, and that key still works.
+identifier.

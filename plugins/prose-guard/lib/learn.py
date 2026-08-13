@@ -4,7 +4,7 @@
     python3 lib/learn.py scan --gh your-org/your-repo --git . --out /tmp/candidates.json
     python3 lib/learn.py create platform /tmp/candidates.json \\
         --who "Infrastructure engineers who run our clusters." \\
-        --slack-channel C0123 --repo your-org/infra --also-known PROD RC
+        --match-channel C0123 --match-repo your-org/infra --also-known PROD RC
 
 Two steps, because they need different things. `scan` counts, which is arithmetic. `create` decides,
 and the only decisions worth a person's time are the borderline ones — so `scan` sorts candidates
@@ -253,17 +253,16 @@ def main():
     c.add_argument("name")
     c.add_argument("candidates")
     c.add_argument("--who", help="prose describing the people. Read by the checks, never by routing")
-    # These decide when the audience APPLIES. They are not sources — someone reached for
-    # --slack-channel expecting it to read that channel. Old names still work.
-    c.add_argument("--match-channel", "--slack-channel", action="append", default=[],
-                   dest="match_channel", metavar="ID",
+    # These decide when the audience APPLIES. They are not sources — the earlier name for the first
+    # one was --slack-channel, and someone reached for it expecting it to read that channel.
+    c.add_argument("--match-channel", action="append", default=[], metavar="ID",
                    help="a chat channel id this audience READS, not one to learn from")
-    c.add_argument("--match-repo", "--repo", action="append", default=[], dest="match_repo",
-                   metavar="OWNER/REPO", help="a repository this audience reads")
-    c.add_argument("--match-owner", "--github-owner", action="append", default=[],
-                   dest="match_owner", metavar="OWNER", help="every repository under this owner")
-    c.add_argument("--match-path", "--path", action="append", default=[], dest="match_path",
-                   metavar="GLOB", help="file paths this audience reads")
+    c.add_argument("--match-repo", action="append", default=[], metavar="OWNER/REPO",
+                   help="a repository this audience reads")
+    c.add_argument("--match-owner", action="append", default=[], metavar="OWNER",
+                   help="every repository under this owner")
+    c.add_argument("--match-path", action="append", default=[], metavar="GLOB",
+                   help="file paths this audience reads")
     c.add_argument("--also-known", nargs="*", default=[])
     c.add_argument("--not-known", nargs="*", default=[])
     c.add_argument("--shared-context", choices=audiences.CONTEXT_ORDER, default="low")

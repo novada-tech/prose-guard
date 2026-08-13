@@ -186,7 +186,7 @@ def test_everyday_abbreviations_are_not_jargon():
 
 def test_matching():
     with tempfile.TemporaryDirectory() as home:
-        write_audience(home, "chat", matches={"slack_channels": ["C1"]})
+        write_audience(home, "chat", matches={"channels": ["C1"]})
         write_audience(home, "byrepo", matches={"repos": ["your-org/infra"]})
         write_audience(home, "byowner", matches={"github_owners": ["your-org"]})
         write_audience(home, "bypath", matches={"paths": ["docs/runbooks/*"]})
@@ -208,10 +208,10 @@ def test_matching():
 def test_combination():
     """Three dimensions, three different combinators. Getting reach wrong is the expensive one."""
     with tempfile.TemporaryDirectory() as home:
-        write_audience(home, "eng", matches={"slack_channels": ["C1"]},
+        write_audience(home, "eng", matches={"channels": ["C1"]},
                        vocabulary={"JVM": 9, "SHARED": 9},
                        assumptions={"shared_context": "high", "reach": "internal"})
-        write_audience(home, "clients", matches={"slack_channels": ["C1"]},
+        write_audience(home, "clients", matches={"channels": ["C1"]},
                        vocabulary={"SHARED": 9, "SWAP": 9},
                        assumptions={"shared_context": "low", "reach": "public"})
         A, _ = fresh(home)
@@ -231,10 +231,10 @@ def test_no_subset_elimination():
     audience must keep constraining.
     """
     with tempfile.TemporaryDirectory() as home:
-        write_audience(home, "big", matches={"slack_channels": ["C1"]},
+        write_audience(home, "big", matches={"channels": ["C1"]},
                        members=["alice", "bobby", "carol", "dave"],
                        vocabulary={"WIDE": 9, "NARROW": 9})
-        write_audience(home, "small", matches={"slack_channels": ["C1"]},
+        write_audience(home, "small", matches={"channels": ["C1"]},
                        members=["alice", "bobby"], vocabulary={"WIDE": 9})
         A, _ = fresh(home)
         r = A.resolve({"channel": "C1"})
@@ -251,7 +251,7 @@ def test_severity():
     """When the tool may hold a message back, and when it must only advise."""
     from checks import ADVISE, BLOCK, terms
     with tempfile.TemporaryDirectory() as home:
-        write_audience(home, "team", matches={"slack_channels": ["C1"]},
+        write_audience(home, "team", matches={"channels": ["C1"]},
                        vocabulary={f"T{i}": 9 for i in range(20)})
         A, _ = fresh(home)
         import importlib
@@ -451,7 +451,7 @@ def run_guard(payload, home, state, effort="low"):
 def test_hook_end_to_end():
     with tempfile.TemporaryDirectory() as tmp:
         home = os.path.join(tmp, "home")
-        write_audience(home, "team", matches={"slack_channels": ["C1"]}, inherits=["engineers"],
+        write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"],
                        vocabulary={"GKE": 9})
         text = "We moved the kubectl configuration onto GKE this week." + PAD
         send = {"tool_name": "mcp__slack__slack_send_message", "session_id": "h1", "cwd": tmp,
@@ -470,7 +470,7 @@ def test_hook_end_to_end():
 def test_session_ledger_bounds_the_argument():
     with tempfile.TemporaryDirectory() as tmp:
         home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
-        write_audience(home, "team", matches={"slack_channels": ["C1"]}, inherits=["engineers"],
+        write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"],
                        vocabulary={"KUBECTL": 9})
         seq = []
         for n in range(10):
@@ -486,7 +486,7 @@ def test_session_ledger_bounds_the_argument():
 def test_state_stays_out_of_the_plugin():
     with tempfile.TemporaryDirectory() as tmp:
         home = os.path.join(tmp, "home")
-        write_audience(home, "team", matches={"slack_channels": ["C1"]}, inherits=["engineers"])
+        write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"])
         payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": "fb", "cwd": tmp,
                    "tool_input": {"channel_id": "C1", "message": "GKE broke again." + PAD}}
         e = env(home, os.path.join(tmp, "state"))
@@ -638,7 +638,7 @@ def test_levels():
 def test_audience_editing():
     import audiences
     with tempfile.TemporaryDirectory() as home:
-        write_audience(home, "team", matches={"slack_channels": ["C1"]}, vocabulary={"AAA": 9})
+        write_audience(home, "team", matches={"channels": ["C1"]}, vocabulary={"AAA": 9})
         A, _ = fresh(home)
         check("accept adds a term", bool(A.accept("team", "bbb")), True)
         A, _ = fresh(home)
@@ -696,8 +696,9 @@ def test_routing_can_be_edited_without_hand_editing_json():
         check("adding a channel writes the file", bool(path), True)
         check("both are kept", now, ["C1", "C2"])
         A, _ = fresh(home)
-        check("the generic key routes", A.resolve({"channel": "C2"}).names, ["team"])
-        check("and the old key still routes", A.resolve({"repo": "your-org/infra"}).names, ["team"])
+        check("the channel routes", A.resolve({"channel": "C2"}).names, ["team"])
+        check("and so does the repo it already had", A.resolve({"repo": "your-org/infra"}).names,
+              ["team"])
         A, _ = fresh(home)
         check("re-adding changes nothing", A.route("team", "channel", ["C1"])[0], None)
         A.route("team", "channel", ["C1", "C2"], drop=True)
