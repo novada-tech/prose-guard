@@ -736,6 +736,29 @@ def test_a_vocabulary_can_come_from_any_command():
         check("one dead source among working ones does not stop the scan", r.returncode, 0)
         check("but it is named", "echo" in r.stderr and "warning" in r.stderr, True)
 
+        # A bound on the read, and what was read kept on disk. Both exist for the same reason: a read
+        # against a live service takes tens of minutes and can die at any point in them.
+        kept = os.path.join(home, "kept.jsonl")
+        argv = [sys.executable, os.path.join(LIB, "learn.py"), "scan", "--command", emit,
+                "--max-documents", "2", "--keep", kept, "--out", out + ".5"]
+        r = subprocess.run(argv, capture_output=True, text=True, env=e, timeout=120)
+        check("the read stops where it was told to", "2 documents" in r.stdout, True)
+        # Stopping early under-measures, which holds messages back rather than letting them out. Say
+        # so, or a short read reads as a complete one.
+        check("and says that under-measures", "under-measure" in r.stdout, True)
+        check("what was read is on disk", len(open(kept).read().strip().splitlines()), 2)
+        check("and is a corpus that can be read back",
+              json.loads(open(kept).read().splitlines()[0])["author"], "ann")
+        check("the file records that it stopped",
+              json.load(open(out + ".5"))["_meta"]["stopped_early"], True)
+
+        # A source can report where it got to, so a later read knows where to resume. Opaque here:
+        # whatever the source calls a timestamp is reported back untouched.
+        stamped = 'printf \'%s\\n\' \'{"author":"ann","text":"BSP","ts":"1700.5"}\' ' \
+                  '\'{"author":"bob","text":"BSP","ts":"1700.9"}\''
+        r = scan(stamped, out=out + ".6")
+        check("the newest document read is reported", "1700.9" in r.stdout, True)
+
 
 def test_a_rebuild_says_what_it_takes_away():
     """A rebuild wrote the routing under a key nothing read, and create printed success.
@@ -812,6 +835,108 @@ def test_routing_can_be_edited_without_hand_editing_json():
             check("a built-in cannot be rerouted", "no error", "KeyError")
         except KeyError:
             pass
+
+
+def test_the_fetcher_survives_what_an_api_does():
+    """Written by hand for one real read, this came to two bugs found by running it.
+
+    A connection reset at 5,564 documents that would have been written up as a complete corpus, and
+    rate limits met by stopping. Both are the source's business and neither is about any particular
+    source, so they are tested here against a scripted service rather than left to each recipe.
+    """
+    import http.server
+    import socketserver
+    import threading
+
+    state = {"limited": 0}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            import urllib.parse
+            parts = urllib.parse.urlsplit(self.path)
+            cursor = (urllib.parse.parse_qs(parts.query).get("cursor") or [""])[0]
+            if parts.path == "/refuse":                 # 200 with a refusal in the body
+                return self.reply({"ok": False, "error": "missing_scope"})
+            if parts.path == "/drop":
+                # A body that stops short of its own Content-Length — what a connection reset looks
+                # like from the client, and it arrives as an HTTPException rather than an OSError.
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", "500")
+                self.end_headers()
+                self.wfile.write(b'{"ok": true, "messages": [')
+                self.close_connection = True
+                return
+            if state["limited"] < 1 and not cursor:     # rate limited once, with an instruction
+                state["limited"] += 1
+                self.send_response(429)
+                self.send_header("Retry-After", "1")
+                self.send_header("Content-Length", "0")
+                return self.end_headers()
+            if not cursor:
+                return self.reply({"ok": True, "messages": [
+                    {"user": "ann", "text": "the BSP run failed", "ts": "1700.1"}],
+                    "meta": {"next": "page2"}})
+            if cursor == "page2":
+                return self.reply({"ok": True, "messages": [
+                    {"user": "bob", "text": "BSP again", "ts": "1700.2"}], "meta": {"next": ""}})
+            return self.reply({"ok": True, "messages": []})
+
+        def reply(self, obj):
+            body = json.dumps(obj).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    class Server(socketserver.TCPServer):
+        allow_reuse_address = True
+
+        def handle_error(self, *a):
+            pass                                # a deliberately dropped response is not a test error
+
+    server = Server(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        script = os.path.join(LIB, "fetch.py")
+
+        def fetch(path, *extra):
+            return subprocess.run(
+                [sys.executable, script, "--url", f"http://127.0.0.1:{port}{path}",
+                 "--items", "messages", "--author", "user", "--text", "text", "--ts", "ts",
+                 "--retry-base", "0.1", *extra],
+                capture_output=True, text=True, timeout=120)
+
+        r = fetch("/history", "--ok", "ok", "--cursor-out", "meta.next", "--cursor-in", "cursor")
+        rows = [json.loads(line) for line in r.stdout.strip().splitlines()]
+        check("a 429 is waited out, not given up on", r.returncode, 0)
+        check("both pages arrive", [row["author"] for row in rows], ["ann", "bob"])
+        check("in the document contract", sorted(rows[0]), ["author", "text", "ts"])
+        check("and the instruction is honoured, not guessed at", "as asked" in r.stderr, True)
+
+        # A refusal inside a 200 is the failure that reads as an empty channel. It has to be loud.
+        r = fetch("/refuse", "--ok", "ok", "--error", "error")
+        check("a refusal in the body fails", r.returncode, 1)
+        check("and says what the service said", "missing_scope" in r.stderr, True)
+
+        r = fetch("/drop", "--retries", "2")
+        check("a dropped connection is retried", r.stderr.count("waiting"), 2)
+        check("and then reported rather than returning less", r.returncode, 1)
+
+        # Stopping at a bound is not the same as reaching the end, and nothing downstream can tell
+        # from the output alone.
+        r = fetch("/history", "--ok", "ok", "--cursor-out", "meta.next", "--max-pages", "1")
+        check("a bounded read says it is incomplete", "incomplete" in r.stderr, True)
+        check("and exits differently from a finished one", r.returncode, 2)
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_rule_installer():

@@ -57,6 +57,34 @@ unreadable page cost that page rather than the rest of the run.
 nothing refuses outright, and rebuilding an audience over a smaller corpus than last time says so. What
 it cannot see is a source that quietly stopped at two-thirds and exited 0. That one is yours.
 
+## The fetcher, for anything cursor-paginated
+
+Most of the work in a live source is not about the source: retry what is transient, wait when told to
+wait, follow the cursor to the end, and fail loudly rather than quietly returning less. `fetch.py` does
+those four things and knows nothing about any particular service — you give it the paths to the fields.
+
+```
+python3 lib/fetch.py --url 'https://slack.com/api/conversations.history?channel=C123&limit=200' \
+    --header "Authorization: Bearer $SLACK_TOKEN" \
+    --ok ok --error error --items messages --author user --text text --ts ts \
+    --cursor-out response_metadata.next_cursor --cursor-in cursor
+```
+
+That prints the contract on stdout, so it goes straight into a scan:
+
+```
+python3 lib/learn.py scan --command './read-chat.sh' --keep /tmp/corpus.jsonl --out /tmp/candidates.json
+```
+
+`--ok` is the one flag worth explaining. Some services answer `200` with a refusal in the body, which
+otherwise reads as an empty page — name the field that has to be truthy and a refusal becomes a failure.
+It honours `Retry-After` rather than guessing, retries a body that stops short of its own
+`Content-Length`, and exits `2` with "this corpus is incomplete" if it hits `--max-pages` with more to
+read. It does not authenticate: pass a header, and keep the credential in your shell or keychain.
+
+If your source is not a JSON array plus a cursor, write your own command. The recipes below are all a
+few lines of shell.
+
 ## Recipes
 
 Each of these emits the contract above. They are starting points, not supported integrations.
