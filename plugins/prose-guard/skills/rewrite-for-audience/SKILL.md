@@ -18,9 +18,15 @@ to, because this is one deliberate run rather than every message someone sends: 
 term check, then four separate checks for relevance, structure, sentences and reference. Four
 model calls of a few seconds each.
 
-`--for` names an audience whose vocabulary has been measured, and is the better one: run
-`python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" list` to see what exists. `--who` describes the
-reader in a sentence when no audience fits, and leaves the term check guessing rather than blocking.
+The two flags do different jobs. **`--for` sets the vocabulary** — run
+`python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" list` to see what exists. **`--who` describes the
+reader in a sentence** for the model-based checks; it cannot change which terms are known, because a
+sentence is not a vocabulary.
+
+If no measured audience fits, pass both: `--for engineers` for the terms and `--who` for everything
+else. `engineers` is the shipped baseline, and naming it explicitly lets the term check hold a message
+back — you asked for that standard rather than the tool guessing at one. Without `--for` nothing is
+enforced at all, and the output says so.
 
 Pass `--effort low` if you only want the term check — instant, no model call — or `medium` for one
 combined judgement call instead of five.

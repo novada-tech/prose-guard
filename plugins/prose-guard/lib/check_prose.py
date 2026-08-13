@@ -7,11 +7,19 @@ thorough level whatever the hook is set to, because this is one deliberate run r
 message you send.
 
     python3 lib/check_prose.py draft.md --for platform-team
-    cat draft.md | python3 lib/check_prose.py --who "the #dev channel, arriving cold"
+    python3 lib/check_prose.py draft.md --for engineers --who "the ops rota, arriving cold"
     python3 lib/check_prose.py draft.md --effort low        # no model call at all
 
-Name an audience with --for and its measured vocabulary applies, exactly as it would if the text were
-being sent there. Without one, nothing is measured about the reader, so terms are reported as a guess.
+The two flags do different jobs and are not interchangeable.
+
+`--for` picks the vocabulary. Name a measured audience and its terms apply exactly as they would if
+the text were being sent there. Name a shipped baseline — `engineers` is the one that ships — and the
+term check will hold a message back against that, because you asked for it explicitly rather than the
+tool guessing. Without `--for`, nothing is measured about the reader and terms are reported as a guess.
+
+`--who` describes the reader in a sentence, for the model-based checks to read. It cannot change which
+terms are known, because a sentence is not a vocabulary. Use both together when no measured audience
+fits: `--for engineers` for the terms, `--who` for everything else.
 """
 import argparse
 import os
@@ -33,8 +41,12 @@ class Context:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("file", nargs="?", help="file to check; omit to read stdin")
-    ap.add_argument("--for", dest="audience", help="an audience name; see audiences.py list")
-    ap.add_argument("--who", help="describe the reader in your own words, if no audience fits")
+    ap.add_argument("--for", dest="audience",
+                    help="an audience or baseline name — this is what sets the vocabulary. "
+                         "See audiences.py list")
+    ap.add_argument("--who",
+                    help="describe the reader in a sentence, for the model-based checks. It cannot "
+                         "change which terms are known; use --for for that")
     ap.add_argument("--effort", choices=[x for x in config.LEVELS if x != "disabled"],
                     default="high")
     a = ap.parse_args()
@@ -61,7 +73,18 @@ def main():
         resolved = audiences.resolve({})
 
     ctx = Context(resolved, a.who)
-    print(f"audience: {', '.join(resolved.names) if resolved.resolved else 'none named, assuming ' + str(resolved.fallback)}")
+    # Say what each half is working from. Reporting only "none named" hid the fact that a --who was
+    # passed and used, so a reader could not tell whether their sentence had done anything.
+    if resolved.resolved:
+        print(f"terms judged against: {', '.join(resolved.names)}"
+              f"{' (a shipped baseline, not measured for your readers)' if all(audiences.ALL[n].builtin for n in resolved.names) else ''}")
+    else:
+        print(f"terms judged against: the '{resolved.fallback}' baseline — nothing is measured for "
+              f"your readers, so findings are a guess and nothing is held back.")
+        print(f"                      `--for {resolved.fallback}` enforces against it; "
+              f"/prose-guard:audiences measures your own.")
+    if a.who:
+        print(f'reader described as:  "{a.who}"  (read by the model-based checks, not by terms)')
     problems = 0
     for check in for_effort(a.effort):
         finding = check.run(text, ctx)

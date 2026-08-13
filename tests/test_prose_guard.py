@@ -542,6 +542,42 @@ def test_verdict_parsing():
           "coined label" in read_verdict('FAIL: "the silent row" is a coined label')[1], True)
 
 
+def test_the_two_check_prose_flags_do_different_jobs():
+    """--for sets the vocabulary, --who describes the reader. Neither may be silently ignored.
+
+    Someone passed --who and the output said "none named, assuming engineers", which reads as though
+    their sentence had been thrown away. It had not — the model-based checks were given it — but
+    nothing said so, and they could not tell.
+    """
+    script = os.path.join(LIB, "check_prose.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        draft = os.path.join(tmp, "d.md")
+        with open(draft, "w") as fh:
+            fh.write("The ZZQ reporting path now runs against the new cluster and anyone still "
+                     "pointing at the old endpoint should switch before the end of the week.")
+        env = {**os.environ, "PROSE_GUARD_HOME": os.path.join(tmp, "home")}
+        env.pop("PROSE_GUARD_EFFORT", None)
+
+        def run(*args):
+            return subprocess.run([sys.executable, script, draft, "--effort", "low", *args],
+                                  capture_output=True, text=True, env=env, timeout=300).stdout
+
+        plain = run()
+        check("with no --for, nothing is enforced", "nothing is held back" in plain, True)
+        check("and it says how to enforce", "--for engineers" in plain, True)
+
+        described = run("--who", "the ops rota, arriving cold")
+        check("a --who is echoed back so it is visibly used",
+              "the ops rota, arriving cold" in described, True)
+        check("and is marked as not reaching the term check",
+              "not by terms" in described, True)
+
+        named = run("--for", "engineers")
+        check("--for accepts a shipped baseline", "terms judged against: engineers" in named, True)
+        check("and says it is a baseline rather than measured", "not measured" in named, True)
+        check("naming it explicitly enforces", "must fix" in named, True)
+
+
 def test_levels():
     """Which checks each level runs, and that low never reaches a model.
 
@@ -625,7 +661,8 @@ def main():
                test_the_hook_surfaces_a_candidate_once,
                test_hook_end_to_end, test_session_ledger_bounds_the_argument,
                test_state_stays_out_of_the_plugin, test_one_config_location,
-               test_verdict_parsing, test_levels, test_audience_editing,
+               test_verdict_parsing, test_the_two_check_prose_flags_do_different_jobs,
+               test_levels, test_audience_editing,
                test_rule_installer):
         try:
             fn()
