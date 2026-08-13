@@ -413,7 +413,8 @@ def _cli():
         print(f"{a.name} -> {target}")
         print(f"  measured over {people} people, and the file says so")
         if a.with_names and public is False:
-            print(f"  their names are included, readable by whoever can read {where}.")
+            print(f"  their names are included. {where[0].upper() + where[1:]}, so that is who reads "
+                  f"them.")
         elif a.with_names:
             print(f"  their names are included, and {where} — so check who can read it before you "
                   f"push.")

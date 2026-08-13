@@ -1,6 +1,6 @@
 {
   "name": "prose-guard",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Checks a message, review comment, documentation page or document on its way out, and hands it back with one problem named.",
   "author": {
     "name": "Simon Cockx"
