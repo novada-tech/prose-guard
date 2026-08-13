@@ -408,19 +408,56 @@ def test_state_stays_out_of_the_plugin():
                        env=e, timeout=300)
         check("state written where it was told",
               os.path.isfile(os.path.join(tmp, "state", "sessions", "fb.json")), True)
-        # and with nowhere told, the fallback still lands outside the plugin
+        # and with nowhere told, it lands beside everything else the tool remembers
         e2 = {k: v for k, v in e.items() if k != "PROSE_GUARD_STATE"}
-        e2["HOME"] = os.path.join(tmp, "fakehome")
         subprocess.run(["bash", GUARD], input=json.dumps(dict(payload, session_id="fb2")),
                        capture_output=True, text=True, env=e2, timeout=300)
-        check("the fallback lands under the user's cache",
-              os.path.isfile(os.path.join(tmp, "fakehome", ".cache", "prose-guard", "sessions",
-                                          "fb2.json")), True)
+        check("the fallback lands under the one config home",
+              os.path.isfile(os.path.join(home, "sessions", "fb2.json")), True)
         check("no session state inside the plugin",
               os.path.isdir(os.path.join(PLUGIN, "sessions")), False)
 
 
 # ------------------------------------------------------------------- the rest
+def test_one_config_location():
+    """The hook, the shell wrapper and a skill's plain shell must resolve the same directory.
+
+    They did not. CLAUDE_PLUGIN_DATA is exported into a hook's environment but not into a skill's
+    shell, so setup wrote ~/.config/prose-guard/config.json while the hook read
+    ~/.claude/plugins/data/.../config.json. Setup looked like it worked and the guard stayed off.
+    """
+    import importlib
+
+    import paths
+    from checks import config
+    with tempfile.TemporaryDirectory() as tmp:
+        env_hookish = {**os.environ, "CLAUDE_PLUGIN_DATA": os.path.join(tmp, "plugindata"),
+                       "HOME": tmp}
+        env_hookish.pop("PROSE_GUARD_HOME", None)
+        env_hookish.pop("XDG_CONFIG_HOME", None)
+        got = subprocess.run(
+            [sys.executable, "-c",
+             f"import sys; sys.path.insert(0, {LIB!r}); import paths; print(paths.home())"],
+            capture_output=True, text=True, env=env_hookish, timeout=60).stdout.strip()
+        check("CLAUDE_PLUGIN_DATA does not move the config",
+              got, os.path.join(tmp, ".config", "prose-guard"))
+
+        # and the shell wrapper agrees with paths.py
+        wrapper = open(GUARD).read()
+        check("the wrapper resolves the same directory",
+              'CFG_HOME="${PROSE_GUARD_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/prose-guard}"'
+              in wrapper, True)
+
+        os.environ["PROSE_GUARD_HOME"] = tmp
+        importlib.reload(paths)
+        importlib.reload(config)
+        check("config lands under the one home", config.CONFIG_PATH,
+              os.path.join(tmp, "config.json"))
+        del os.environ["PROSE_GUARD_HOME"]
+        importlib.reload(paths)
+        importlib.reload(config)
+
+
 def test_levels():
     import importlib
 
@@ -489,7 +526,7 @@ def main():
                test_user_destinations_win, test_passive_discovery,
                test_the_hook_surfaces_a_candidate_once,
                test_hook_end_to_end, test_session_ledger_bounds_the_argument,
-               test_state_stays_out_of_the_plugin, test_levels, test_audience_editing,
+               test_state_stays_out_of_the_plugin, test_one_config_location, test_levels, test_audience_editing,
                test_rule_installer):
         try:
             fn()

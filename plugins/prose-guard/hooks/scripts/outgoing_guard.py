@@ -28,6 +28,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..", "..", "lib")))
 
 import audiences  # noqa: E402
+import paths  # noqa: E402
 import destinations  # noqa: E402
 from checks import BLOCK, IN_ORDER as CHECKS  # noqa: E402
 
@@ -53,20 +54,17 @@ class Context:
 
 def default_audience():
     try:
-        with open(os.path.join(audiences.config_dir(), "config.json")) as fh:
+        with open(paths.at("config.json")) as fh:
             return json.load(fh).get("unresolved_audience") or "engineers"
     except Exception:
         return "engineers"
 
 
 def state_dir():
-    """Per-session bookkeeping. Never inside a checkout: an earlier design fell back to the plugin
-    directory and put one machine's denial count under version control."""
-    return os.path.join(
-        os.environ.get("PROSE_GUARD_STATE")
-        or os.environ.get("CLAUDE_PLUGIN_DATA")
-        or os.path.join(os.path.expanduser("~"), ".cache", "prose-guard"),
-        "sessions")
+    """Per-session bookkeeping, beside everything else this tool remembers. Never inside the plugin:
+    an earlier design fell back to the plugin directory and put one machine's denial count under
+    version control."""
+    return os.path.join(os.environ.get("PROSE_GUARD_STATE") or paths.home(), "sessions")
 
 
 def allow():

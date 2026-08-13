@@ -25,19 +25,19 @@ Precedence: the environment, then plugin config, then the file, then disabled.
 """
 import json
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import paths  # noqa: E402
 
 LEVELS = ("disabled", "low", "medium", "high")
 
 
 def config_dir():
-    return (os.environ.get("PROSE_GUARD_HOME")
-            or os.environ.get("CLAUDE_PLUGIN_DATA")
-            or os.path.join(os.environ.get("XDG_CONFIG_HOME")
-                            or os.path.join(os.path.expanduser("~"), ".config"),
-                            "prose-guard"))
+    return paths.home()
 
 
-CONFIG_PATH = os.path.join(config_dir(), "config.json")
+CONFIG_PATH = paths.at("config.json")
 
 
 def _from_file():
@@ -50,9 +50,8 @@ def _from_file():
 
 def effort():
     for value in ((os.environ.get("PROSE_GUARD_EFFORT") or "").lower(),
-                  # Set by Claude Code from the plugin's userConfig, when that is available.
-                  # Unverified on the build this was written against, so it is one candidate
-                  # among several rather than the only path.
+                  # Set by Claude Code from the plugin's userConfig. Verified: it reaches a hook's
+                  # environment, though not a skill's shell, which is why it cannot be the only path.
                   (os.environ.get("CLAUDE_PLUGIN_OPTION_EFFORT") or "").lower(),
                   _from_file()):
         if value in LEVELS:

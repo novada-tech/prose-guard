@@ -12,6 +12,8 @@ override an entry as well as add one.
 """
 import json
 import os
+
+import paths
 import re
 import subprocess
 
@@ -24,11 +26,7 @@ FILE_TOOLS = ("Write", "Edit", "NotebookEdit")
 
 
 def config_dir():
-    return (os.environ.get("PROSE_GUARD_HOME")
-            or os.environ.get("CLAUDE_PLUGIN_DATA")
-            or os.path.join(os.environ.get("XDG_CONFIG_HOME")
-                            or os.path.join(os.path.expanduser("~"), ".config"),
-                            "prose-guard"))
+    return paths.home()
 
 
 def _read(path):

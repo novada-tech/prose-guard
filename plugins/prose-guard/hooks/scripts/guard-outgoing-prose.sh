@@ -8,7 +8,9 @@ set -u
 # The hook has no matcher, so it is offered every tool call in every session. Deciding here rather
 # than in Python keeps ~25ms of interpreter startup off anyone who has not turned it on. This is a
 # cheap pre-filter only; lib/checks/config.py makes the real decision.
-CFG_HOME="${PROSE_GUARD_HOME:-${CLAUDE_PLUGIN_DATA:-${XDG_CONFIG_HOME:-$HOME/.config}/prose-guard}}"
+# Must match lib/paths.py exactly. Anything else and the guard reads a different config
+# from the one the setup skill wrote, which is silent and looks like the tool not working.
+CFG_HOME="${PROSE_GUARD_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/prose-guard}"
 if [ -z "${PROSE_GUARD_EFFORT:-}${CLAUDE_PLUGIN_OPTION_EFFORT:-}" ]; then
   [ -f "$CFG_HOME/config.json" ] || exit 0
   grep -Eq '"effort"[[:space:]]*:[[:space:]]*"(low|medium|high)"' "$CFG_HOME/config.json" || exit 0
