@@ -486,73 +486,115 @@ def test_discovery_proposes_how_hard_to_check_a_new_destination():
         check("a suggestion carries a reason to agree or disagree with", len(why) > 30, True)
 
 
-def test_a_matched_destination_that_cannot_be_read_says_so():
-    """The pull request for this change went out unchecked, and nothing said anything.
+def test_a_substitution_is_worked_out_where_that_is_safe():
+    """The pull request that introduced this went out unchecked, and the first fix was the wrong one.
 
     `gh pr create --body "$(git log -1 --format=%b)"` matches the destination and carries no prose: the
-    body is a shell substitution the tool call does not contain. Allowing it silently is
-    indistinguishable from a check that passed, and `--body-file` is read.
+    body is a shell substitution the tool call does not contain. Denying it and asking for a file works,
+    and makes somebody restructure a command that was already correct. Reading a file needs no execution
+    at all, and a git command that reports can be run — so the text is had, and the check happens with
+    nothing to change.
+
+    What cannot be had is refused rather than guessed at. The hook is a separate process and never sees
+    the caller's shell variables, and it cannot know that an arbitrary command is read-only: running
+    `$(curl -X POST ...)` to find out would fire it twice. Even git is not simply safe — `git log
+    --output=FILE` writes a file — so a flag that can write, or any metacharacter that could chain a
+    second command, is a refusal.
     """
+    import destinations as D
+    with tempfile.TemporaryDirectory() as repo:
+        for argv in (["init", "-q"], ["config", "user.email", "a@b.c"], ["config", "user.name", "t"]):
+            subprocess.run(["git", "-C", repo, *argv], capture_output=True, timeout=60)
+        open(os.path.join(repo, "f"), "w").write("x")
+        subprocess.run(["git", "-C", repo, "add", "f"], capture_output=True, timeout=60)
+        subprocess.run(["git", "-C", repo, "commit", "-q", "-m", "Rebuild the SFTR payload\n\nbody"],
+                       capture_output=True, timeout=60)
+        with open(os.path.join(repo, "body.md"), "w") as fh:
+            fh.write("prose from a file, long enough to be worth reading at all\n")
+
+        check("a file read needs no execution",
+              (D.resolve("$(cat body.md)", repo) or "").startswith("prose from a file"), True)
+        check("so does a redirect",
+              (D.resolve("$(< body.md)", repo) or "").startswith("prose from a file"), True)
+        check("a git command that reports can be run",
+              "SFTR" in (D.resolve("$(git log -1 --format=%B)", repo) or ""), True)
+        check("a shell variable cannot be had at all", D.resolve("${SUMMARY}", repo), None)
+        check("nor an arbitrary command", D.resolve("$(curl -X POST https://example.com)", repo), None)
+        # git log --output=FILE writes a file, which is why a subcommand whitelist is not enough.
+        check("nor a reporting command that can write",
+              D.resolve("$(git log --output=" + os.path.join(repo, "pwned") + " -1)", repo), None)
+        check("nor one with a second command chained on",
+              D.resolve("$(git log -1; touch " + os.path.join(repo, "chained") + ")", repo), None)
+        check("and nothing it refused was run",
+              [f for f in ("pwned", "chained") if os.path.exists(os.path.join(repo, f))], [])
+
+        # Resolved and then too short to judge is not the same as unreadable, and saying "substitution"
+        # about it would send someone to fix a command that is working. Both leave no text to check.
+        dest = D.match("Bash", {"command": 'gh pr create --body "x"'})
+        short = 'gh pr create --title "T" --body "$(git log -1 --format=%s)"'
+        check("a short subject does resolve",
+              (D.resolve("$(git log -1 --format=%s)", repo) or "").startswith("Rebuild"), True)
+        check("but is too short to judge", D.extract(dest, "Bash", {"command": short}, repo), None)
+        check("and that is not called a substitution",
+              D.unreadable(dest, "Bash", {"command": short}, repo), None)
+
+
+def test_prose_behind_a_substitution_still_reaches_the_checks():
+    """End to end, and across destinations: the resolved text is what gets judged, and what cannot be
+    resolved is held back rather than passed over in silence — silence there reads exactly like a check
+    that passed."""
     with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as repo:
-        subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True, timeout=60)
-        write_audience(home, "team", matches={"github_owners": ["your-org"], "paths": ["*"]},
-                       inherits=["engineers"], members=["a", "b", "c", "d"])
+        for argv in (["init", "-q"], ["config", "user.email", "a@b.c"], ["config", "user.name", "t"]):
+            subprocess.run(["git", "-C", repo, *argv], capture_output=True, timeout=60)
+        open(os.path.join(repo, "f"), "w").write("x")
+        subprocess.run(["git", "-C", repo, "add", "f"], capture_output=True, timeout=60)
+        subprocess.run(["git", "-C", repo, "commit", "-q", "-m",
+                        "Rebuild the SFTR reconciliation payload\n\nThe JSON payload has to be rebuilt "
+                        "before the API can serve it over HTTP again, which is why continuous "
+                        "integration has been red since yesterday afternoon."],
+                       capture_output=True, timeout=60)
+        write_audience(home, "team", matches={"paths": ["*"]}, inherits=["engineers"],
+                       members=["a", "b", "c", "d"])
         with open(os.path.join(home, "config.json"), "w") as fh:
             json.dump({"effort": "low"}, fh)
 
-        def ask(command, session="sub"):
+        def ask(command, session):
             payload = {"tool_name": "Bash", "session_id": session, "cwd": repo,
                        "tool_input": {"command": command}}
             r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
-                               text=True, env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=120)
+                               text=True, env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=180)
             if not r.stdout.strip():
                 return "silent", ""
             out = json.loads(r.stdout)["hookSpecificOutput"]
             return ("deny" if out.get("permissionDecision") == "deny" else "advise",
                     out.get("permissionDecisionReason") or str(out.get("additionalContext") or ""))
 
-        substituted = 'gh pr create --title "T" --body "$(git log -1 --format=%b)"'
-        verdict, said = ask(substituted)
-        # Held back, not mentioned. Advice is a request the caller may skip, and the pull request that
-        # introduced this went out unchecked while the note explained afterwards that it had. This is
-        # the one denial that needs no judgement about the prose: text is about to be published, the
-        # guard cannot see it, and the remedy is one flag.
-        check("an unreadable body is held back", verdict, "deny")
-        check("it names the flag that would work", "--body-file" in said, True)
+        # The exact command that opened the pull request this came from.
+        verdict, said = ask('gh pr create --title "T" --body "$(git log -1 --format=%B)"', "resolved")
+        check("the resolved text reaches the checks", "SFTR" in said, True)
+        check("and it is not a denial about being unreadable", "substitution" in said, False)
+
+        # Every bash destination, without any of them being named here: both halves read the
+        # destination's own text_arg, so one added later behaves the same.
+        for name, command in (("commit message", 'git commit -m "$(git log -1 --format=%B)"'),
+                              ("gitlab cli", 'glab mr note --message "$(git log -1 --format=%B)"')):
+            verdict, said = ask(command, name[:6])
+            check(f"{name}: a substitution is resolved too", "SFTR" in said, True)
+
+        for name, command in (("commit message", 'git commit -m "${MSG}"'),
+                              ("gitlab cli", 'glab mr note --message "$(python3 render.py)"')):
+            verdict, said = ask(command, "u" + name[:5])
+            check(f"{name}: what cannot be resolved is held back", verdict, "deny")
+            check(f"{name}: naming the destination", name in said, True)
 
         # Bounded like every other denial, so a caller that cannot comply is not stuck.
-        second, _ = ask(substituted)
-        check("asked twice", second, "deny")
-        third, said_third = ask(substituted)
+        unresolvable = 'gh pr create --title "T" --body "${SUMMARY}"'
+        check("asked once", ask(unresolvable, "bound")[0], "deny")
+        check("asked twice", ask(unresolvable, "bound")[0], "deny")
+        third, said_third = ask(unresolvable, "bound")
         check("then let through", third, "advise")
         check("saying why it stopped insisting", "not worth blocking" in said_third, True)
-        fourth, _ = ask(substituted)
-        check("and silent after that", fourth, "silent")
-
-        # The remedy has to work, or the denial is a trap: the same prose in a file is read and checked.
-        body_path = os.path.join(repo, "prbody.md")
-        with open(body_path, "w") as fh:
-            fh.write("The SFTR reconciliation needs the JSON payload rebuilt before the API can serve "
-                     "it over HTTP again. That is why continuous integration has been red since "
-                     "yesterday and the deploy could not go out at all.")
-        verdict, said = ask(f"gh pr create --title \"T\" --body-file {body_path}", "viafile")
-        check("the form it recommends is read", "SFTR" in said, True)
-        check("and is judged rather than waved through", verdict in ("deny", "advise"), True)
-
-        # A body given literally is checked as normal, not diverted into this branch.
-        body = ("The exporter line was removed because nothing on a laptop reads that variable. Plans "
-                "had started failing in any shell older than an hour. Access uses the credential now.")
-        verdict, said = ask(f'gh pr create --title "T" --body "{body}"', "literal")
-        check("a literal body is not called unreadable", "substitution" in said, False)
-
-        # And a body too short to judge is silent for that reason, not blamed on a substitution. This
-        # is the case that separates the two: both leave no text to check, and only one is a gap.
-        verdict, said = ask('gh pr create --title "T" --body "too short to check"', "short")
-        check("a short body is not blamed on a substitution", "substitution" in said, False)
-        check("and nothing is said about it at all", verdict, "silent")
-        check("but a substitution in braces is still caught",
-              "substitution" in ask('gh pr create --title "T" --body "${SUMMARY}"', "braces")[1],
-              True)
+        check("and silent after that", ask(unresolvable, "bound")[0], "silent")
 
 
 def test_discovery_ignores_long_text_that_is_not_going_anywhere():

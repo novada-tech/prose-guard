@@ -37,14 +37,34 @@ about that from here.
 The plumbing — `git commit-tree`, `filter-branch --msg-filter`, `filter-repo` — is not matched, because
 those rewrite text somebody else wrote, usually in bulk, which is not the act this checks.
 
-`--body "$(cat file)"` used to pass in silence. The destination matches, the prose is a shell
-substitution the tool call does not contain, and nothing was checked — which reads exactly like a check
-that passed. It is **held back** now, naming `--body-file`, which is read. That is the one denial needing
-no judgement about the prose: text is about to be published, the guard cannot see it, and the remedy is
-one flag. Bounded at two, then said as advice, so a caller that cannot comply is not stuck.
+`--body "$(...)"` used to pass in silence. The destination matches, the prose is a shell substitution the
+tool call does not contain, and nothing was checked — which reads exactly like a check that passed.
 
-Advice was tried first and was not enough. The pull request that introduced the note went out unchecked
-while the note explained, afterwards, that it had. And the plumbing — `git commit-tree`,
+Most of those are now worked out rather than complained about, because asking somebody to restructure a
+command that already works is a poor trade:
+
+| written as | what happens |
+|---|---|
+| `--body "$(cat notes.md)"`, `$(< notes.md)` | the file is read. No command runs |
+| `--body "$(git log -1 --format=%B)"` | run, and the output is checked |
+| `--body-file notes.md` | read, as it always was |
+| `--body "${SUMMARY}"` | **held back**. A hook is a separate process and never sees your shell variables |
+| `--body "$(anything-else)"` | **held back**. Running it to find out would fire it twice |
+
+The whitelist is narrow on purpose. Only git subcommands that report, and not even all of those
+unconditionally: `git log --output=FILE` writes a file, so a flag that can write is refused. Chaining is
+prevented by running the command as a list of arguments with no shell, so `;` and `&&` reach git as
+arguments and git rejects them.
+
+What is held back is held back rather than mentioned, because advice was tried first and was not enough:
+the pull request that introduced the note went out unchecked while the note explained, afterwards, that
+it had. Bounded at two like every other denial, then said as advice, so a caller that cannot comply is
+not stuck. And "resolved but too short to judge" is silent — that is not a gap, and sending someone to
+fix a working command would be noise.
+
+All of it is per destination without naming any: both halves read the destination's own `text_arg`, so
+`git commit -m "$(...)"` and `glab mr note --message "$(...)"` behave the same, and one added later does
+too. And the plumbing — `git commit-tree`,
 `filter-branch --msg-filter`, `filter-repo` — is not matched at all, deliberately: those rewrite text
 somebody else wrote, usually in bulk, which is not the act this checks.
 

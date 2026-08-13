@@ -176,11 +176,11 @@ def main():
             emit("advise", note)
             return
         allow()
-    text = destinations.extract(dest, tool, tool_input)
+    text = destinations.extract(dest, tool, tool_input, cwd)
     if not text:
         # Matched, but the prose is not in the call. Say so once a session: silence here reads exactly
         # like a check that passed, which is how the pull request for this change went out unchecked.
-        why = destinations.unreadable(dest, tool, tool_input)
+        why = destinations.unreadable(dest, tool, tool_input, cwd)
         if why:
             # Held back rather than mentioned. Advice here is a request the agent is free to skip, and
             # the pull request for this very change went out unchecked while the note said so

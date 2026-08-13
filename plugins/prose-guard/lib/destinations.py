@@ -111,7 +111,7 @@ def match(tool, tool_input):
     return None
 
 
-def _from_bash(dest, cmd):
+def _from_bash(dest, cmd, cwd=None):
     for flag in dest.get("text_arg") or ():
         # A flag ending in -file, or the short -F, names a file whose contents are the prose. That
         # is how a long body is really passed, so it is read rather than matched.
@@ -128,14 +128,20 @@ def _from_bash(dest, cmd):
         parts = re.findall(re.escape(flag) + r"[= ]\s*(?:\"((?:[^\"\\]|\\.)*)\"|'([^']*)')", cmd)
         joined = "\n\n".join(a or b for a, b in parts if (a or b))
         if joined:
-            return joined.replace('\\"', '"')
+            joined = joined.replace('\\"', '"')
+            # The prose may be behind a substitution rather than in the command. Where it can be had
+            # without risking a side effect, have it: nobody should have to restructure a command to
+            # get their writing checked.
+            if joined.strip().startswith("$"):
+                return resolve(joined, cwd)
+            return joined
     return None
 
 
-def extract(dest, tool, tool_input):
+def extract(dest, tool, tool_input, cwd=None):
     """The prose about to leave, or None if there is not enough of it to judge."""
     if tool == "Bash":
-        text = _from_bash(dest, str(tool_input.get("command") or ""))
+        text = _from_bash(dest, str(tool_input.get("command") or ""), cwd)
     else:
         text = None
         for field in dest.get("text_fields") or ():
@@ -168,13 +174,61 @@ def identifiers(dest, tool, tool_input, cwd=None):
     return out
 
 
+# Substitutions the tool can work out for itself, so nobody has to restructure a command to be checked.
+#
+# Reading a file needs no execution at all. Running a command does, and the hook cannot know whether the
+# one it is looking at is read-only: `$(curl -X POST ...)` would fire twice. So execution is limited to
+# a whitelist of git subcommands that report — and even that is not enough on its own, because
+# `git log --output=FILE` writes a file, so a flag that can write is refused. Chaining is prevented by
+# something stronger than a check: the command is run as a list of arguments, with no shell, so `;` and
+# `&&` reach git as arguments and git rejects them. CHAINS is redundancy for anything that later runs
+# this through a shell — removing it changes no behaviour today, which a test cannot show.
+READS_A_FILE = re.compile(r"""^\$\(\s*(?:cat|<)\s+['"]?([^'"\s)]+)['"]?\s*\)$""")
+REPORTS = ("log", "show", "cat-file", "describe", "rev-parse", "rev-list", "tag", "notes")
+CAN_WRITE = ("--output", "-o ", "--output-directory")
+CHAINS = (";", "&&", "||", "|", "`", "$(", ">", "<")
+
+
+def resolve(value, cwd=None):
+    """The text behind a substitution, where it can be had without risking a side effect.
+
+    Returns None when it cannot, which is the honest answer for `${SUMMARY}` — the hook is a separate
+    process and never sees the caller's shell variables — and for any command it declines to run.
+    """
+    value = value.strip()
+    m = READS_A_FILE.match(value)
+    if m:
+        path = m.group(1)
+        if not os.path.isabs(path) and cwd:
+            path = os.path.join(cwd, path)
+        try:
+            with open(os.path.expanduser(path), errors="replace") as fh:
+                return fh.read()
+        except OSError:
+            return None
+    if not (value.startswith("$(") and value.endswith(")")):
+        return None
+    inner = value[2:-1].strip()
+    words = inner.split()
+    if len(words) < 2 or words[0] != "git" or words[1] not in REPORTS:
+        return None
+    if any(bad in inner for bad in CAN_WRITE) or any(bad in inner[2:] for bad in CHAINS):
+        return None
+    try:
+        got = subprocess.run(words, capture_output=True, text=True, timeout=20,
+                             cwd=cwd or os.getcwd())
+    except Exception:
+        return None
+    return got.stdout if got.returncode == 0 else None
+
+
 # A text argument whose value the tool call does not contain: `--body "$(git log -1 --format=%b)"`,
 # `--body "$(cat notes.md)"`, `--message "${SUMMARY}"`. The prose is real and is about to be published;
 # it just is not here.
 SUBSTITUTED = re.compile(r"""['"]?\$[({]""")
 
 
-def unreadable(dest, tool, tool_input):
+def unreadable(dest, tool, tool_input, cwd=None):
     """Why a matched destination yielded no text, when the reason is worth telling somebody.
 
     The alternative is what happened when the pull request for this very change was opened: the guard
@@ -190,6 +244,12 @@ def unreadable(dest, tool, tool_input):
             continue
         m = re.search(re.escape(flag) + r"[= ]\s*(\S{0,3})", cmd)
         if m and SUBSTITUTED.match(m.group(1)):
+            # Only complain about what could not be worked out. A substitution the tool can resolve is
+            # not a gap, and telling someone to restructure a command that already works would be
+            # noise.
+            whole = re.search(re.escape(flag) + r"[= ]\s*(?:\"([^\"]*)\"|'([^']*)'|(\S+))", cmd)
+            if whole and resolve(next(g for g in whole.groups() if g is not None), cwd):
+                continue
             readable = next((f for f in dest.get("text_arg") or () if f.endswith("-file")), None)
             return (f"This is going to {dest['name']} and the text came from a shell substitution, so "
                     f"nothing was checked — the prose is not in the command."
