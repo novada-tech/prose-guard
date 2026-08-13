@@ -25,4 +25,4 @@ because they arrive cold. A direct message may assume the shared context and ski
 Anything readable outside the company must avoid internal shorthand and internal links, which is
 a matter of what outsiders can resolve rather than of politeness.
 
-Reply with exactly one line: PASS, or FAIL: <what to change, quoting the span>.
+Reply with exactly one line and no reasoning: PASS, or FAIL: <what to change, quoting the span>. If you weigh an objection and reject it, the reply is PASS.

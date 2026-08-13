@@ -49,6 +49,23 @@ def read_prompt(path):
         return None
 
 
+def read_verdict(out):
+    """(ok, message) from a checker's reply.
+
+    The verdict is the LAST thing said, not the first. Asked about a hard document, a checker opened
+    with "FAIL:", reasoned itself out of the objection, and ended "PASS" — and reporting an objection
+    the checker itself retracted is worse than missing it. Reading the tail also survives a checker
+    that shows its working despite being told not to.
+    """
+    out = (out or "").strip()
+    if not out:
+        return True, ""
+    last = out.rstrip(".").split()[-1].upper()
+    if last.startswith("PASS") or "FAIL" not in out.upper():
+        return True, ""
+    return False, out.split(":", 1)[-1].strip()[:700]
+
+
 def ask(name, prompt, text, ctx=None):
     """(ok, message). Any failure to reach the checker is a pass: it must not block work."""
     import time
@@ -68,6 +85,4 @@ def ask(name, prompt, text, ctx=None):
     except Exception:
         return True, ""
     _log_usage(name, blob.get("usage") or {}, time.time() - t0)
-    if out.upper().startswith("PASS") or "FAIL" not in out.upper():
-        return True, ""
-    return False, out.split(":", 1)[-1].strip()[:700]
+    return read_verdict(out)

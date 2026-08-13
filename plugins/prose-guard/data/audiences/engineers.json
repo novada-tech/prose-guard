@@ -99,7 +99,15 @@
   "WARN": 99,
   "WIP": 99,
   "XML": 99,
-  "YAML": 99
+  "YAML": 99,
+  "README": 99,
+  "MIT": 99,
+  "LICENSE": 99,
+  "CHANGELOG": 99,
+  "REPO": 99,
+  "OSS": 99,
+  "GPL": 99,
+  "BSD": 99
  },
  "assumptions": {
   "shared_context": "low",

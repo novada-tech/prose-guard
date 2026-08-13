@@ -473,6 +473,28 @@ def test_one_config_location():
         importlib.reload(config)
 
 
+def test_verdict_parsing():
+    """A checker that argues with itself and then agrees must count as agreeing.
+
+    Running the checks on this repository's own README produced a reply that opened "FAIL:", worked
+    through the objection, and ended "PASS". Reporting a retracted objection is worse than missing one.
+    """
+    from checks.ask import read_verdict
+    cases = [
+        ("PASS", True),
+        ("PASS.", True),
+        ('FAIL: "the silent row" is a coined label', False),
+        # opened with a complaint, talked itself out of it, ended on the verdict
+        ('FAIL: "x" might be unclear — actually re-examine: this is fine. PASS', True),
+        ("", True),
+        ("I have no opinion", True),
+    ]
+    for out, want_ok in cases:
+        check(f"verdict/{out[:34]!r}", read_verdict(out)[0], want_ok)
+    check("the reason survives a real failure",
+          "coined label" in read_verdict('FAIL: "the silent row" is a coined label')[1], True)
+
+
 def test_levels():
     """Which checks each level runs, and that low never reaches a model.
 
@@ -553,7 +575,8 @@ def main():
                test_user_destinations_win, test_passive_discovery,
                test_the_hook_surfaces_a_candidate_once,
                test_hook_end_to_end, test_session_ledger_bounds_the_argument,
-               test_state_stays_out_of_the_plugin, test_one_config_location, test_levels, test_audience_editing,
+               test_state_stays_out_of_the_plugin, test_one_config_location,
+               test_verdict_parsing, test_levels, test_audience_editing,
                test_rule_installer):
         try:
             fn()

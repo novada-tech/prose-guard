@@ -21,5 +21,5 @@ sandwiches, no softening preamble, questions asked directly. A broad audience ne
 not more ceremony. Anything readable outside the company must avoid internal shorthand and
 internal links.
 
-Reply with exactly one line: PASS, or FAIL: <what to change, quoting the span>.
+Reply with exactly one line and no reasoning: PASS, or FAIL: <what to change, quoting the span>. If you weigh an objection and reject it, the reply is PASS.
 
