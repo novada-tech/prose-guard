@@ -88,6 +88,15 @@ def test_detection():
         ("a real three-word expansion", "It reads application default credentials. ADC is next.",
          []),
         ("known terms pass", "The CLI calls the API twice.", []),
+        # An acronym is by definition not a word. These all lowercase to real words and were being
+        # reported as jargon nobody had explained — a regression the rebuild reintroduced, which
+        # only showed up because the audiences skill printed its "needs explaining" pile.
+        ("capitalised English words are not acronyms",
+         "THE build WAS broken WITH a NULL logger and an ERROR in ASCII output.", []),
+        # LOGGER lowercases to a real word. DEBUG does not, and is covered by the engineers
+        # baseline instead — two different mechanisms, and it matters which one is doing the work.
+        ("nor is a code identifier that happens to be a word",
+         "The LOGGER never wrote anything at all.", []),
     ]
     for label, text, want in cases:
         check(f"detect/{label}", jargon.scan(text + PAD, is_known)[0], want)
@@ -95,6 +104,8 @@ def test_detection():
     check("considered counts known terms too",
           jargon.scan("The CLI hit the API and then ADC failed." + PAD, is_known)[1],
           ["ADC", "API", "CLI"])
+    check("and excludes things that are not acronyms at all",
+          jargon.scan("THE ERROR was in the CLI." + PAD, is_known)[1], ["CLI"])
 
 
 # --------------------------------------------------------------------- audiences
@@ -459,9 +470,16 @@ def test_one_config_location():
 
 
 def test_levels():
+    """Which checks each level runs, and that low never reaches a model.
+
+    Isolated from the developer's own config on purpose: an earlier version read
+    ~/.config/prose-guard/config.json, so it passed or failed depending on whether the person
+    running the tests happened to have the tool switched on.
+    """
     import importlib
 
     import checks
+    import paths
     from checks import config
     for level, names in (("disabled", []),
                          ("low", ["terms"]),
@@ -470,11 +488,16 @@ def test_levels():
         check(f"level/{level}", [c.NAME for c in checks.for_effort(level)], names)
     check("only the judgement checks cost a call",
           [c.COSTS_A_CALL for c in checks.for_effort("low")], [False])
-    for bad in ("", "nonsense", "LOW "):
-        os.environ["PROSE_GUARD_EFFORT"] = bad
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["PROSE_GUARD_HOME"] = tmp
+        importlib.reload(paths)
         importlib.reload(config)
-        check(f"an unrecognised level is disabled ({bad!r})", config.effort(), "disabled")
-    del os.environ["PROSE_GUARD_EFFORT"]
+        for bad in ("", "nonsense", "LOW "):
+            os.environ["PROSE_GUARD_EFFORT"] = bad
+            check(f"an unrecognised level is disabled ({bad!r})", config.effort(), "disabled")
+        del os.environ["PROSE_GUARD_EFFORT"]
+    del os.environ["PROSE_GUARD_HOME"]
+    importlib.reload(paths)
     importlib.reload(config)
 
 

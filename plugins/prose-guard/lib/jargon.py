@@ -29,6 +29,30 @@ QUOTE = re.compile(r"^\s*>.*$", re.M)
 ACRONYM = re.compile(r"\b([A-Z][A-Z0-9]{1,5})\b")
 
 
+def _dictionary():
+    """The system word list, used to tell an acronym from a capitalised English word.
+
+    An acronym is by definition not a word, so this belongs here rather than in any audience:
+    THE, WAS, LOGGER, NULL, ERROR and ASCII all lowercase to real words and were being reported as
+    jargon nobody had explained. A hand-kept exclusion list would grow for ever. A missing word list
+    means the filter simply does not fire.
+    """
+    for path in ("/usr/share/dict/words", "/usr/dict/words"):
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as fh:
+                return {w.strip().lower() for w in fh if len(w.strip()) > 2}
+        except OSError:
+            continue
+    return set()
+
+
+WORDS = _dictionary()
+
+
+def is_acronym(token):
+    return token.lower() not in WORDS
+
+
 def prose(text):
     return INLINE.sub(" ", QUOTE.sub(" ", FENCE.sub(" ", text or "")))
 
@@ -105,7 +129,7 @@ def scan(text, is_known):
     """
     body = prose(text)
     written = pairs(body)
-    considered = sorted(set(ACRONYM.findall(body)))
+    considered = sorted(t for t in set(ACRONYM.findall(body)) if is_acronym(t))
     unexplained = sorted(t for t in considered
                          if not is_known(t) and t not in written
                          and not expanded_in_prose(t, body))
