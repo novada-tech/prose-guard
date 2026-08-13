@@ -1,0 +1,75 @@
+{
+  "_meta": {
+    "what": "Where prose leaves for a person, what field carries it, and who reads it there.",
+    "how_to_extend": "Drop a file with the same shape at ~/.config/prose-guard/destinations.json. Your entries are tried BEFORE these, so you can override one as well as add one. Nothing here is required: a destination the tool does not recognise is simply not checked.",
+    "matching": "tool matches if the string appears anywhere in the tool name, so MCP prefixes need not be spelled out. bash matches a regex against the command. file matches a regex against file_path.",
+    "audience_from": "Names a field in the tool call. Its value's PREFIX is looked up in the map, longest prefix first, so a Slack channel id starting D means a direct message. Use '*' for the fallback."
+  },
+
+  "destinations": [
+    {
+      "name": "slack message",
+      "tool": ["slack_send_message", "slack_send_message_draft", "slack_schedule_message",
+               "slack_create_canvas", "slack_update_canvas"],
+      "text_fields": ["message", "text", "content"],
+      "audience_from": {
+        "field": "channel_id",
+        "map": {
+          "D": {"audience": "one colleague, in a direct message",
+                "shared_context": "high: they are already in this conversation"},
+          "C": {"audience": "a whole channel of colleagues, most of whom lack your context",
+                "shared_context": "low: readers arrive cold and out of order"},
+          "G": {"audience": "a private group of colleagues",
+                "shared_context": "medium: they share some but not all of your context"},
+          "*": {"audience": "colleagues in a chat channel"}
+        }
+      },
+      "when": {"thread_ts": "a reply inside an existing thread, not a standalone message"}
+    },
+    {
+      "name": "github comment or review",
+      "tool": ["add_issue_comment", "add_comment_to_pending_review",
+               "add_reply_to_pull_request_comment", "pull_request_review_write",
+               "create_pull_request", "update_pull_request", "issue_write"],
+      "text_fields": ["body", "description"],
+      "audience": {"audience": "engineers reviewing a change"},
+      "audience_from": {
+        "field": "owner",
+        "map": {
+          "*": {"reach": "a private repository: colleagues can open internal links"}
+        },
+        "public_owners_note": "List your public orgs under public_owners below to get the stronger warning."
+      }
+    },
+    {
+      "name": "documentation page",
+      "tool": ["notion-create-pages", "notion-update-page", "notion-create-comment",
+               "create_record_comment", "confluence", "create_page"],
+      "text_fields": ["content", "body", "text"],
+      "audience": {"audience": "colleagues reading documentation later, without you present"}
+    },
+    {
+      "name": "issue tracker comment",
+      "tool": ["linear_create_comment", "linear_update_issue", "jira_add_comment",
+               "create_issue_comment"],
+      "text_fields": ["body", "description", "comment"],
+      "audience": {"audience": "whoever picks this ticket up, possibly weeks from now"}
+    },
+    {
+      "name": "gh cli",
+      "bash": "\\bgh\\s+(pr|issue)\\s+(comment|review|create|edit)\\b",
+      "text_arg": ["--body-file", "--body"],
+      "audience": {"audience": "engineers reviewing a change"}
+    },
+    {
+      "name": "prose file on disk",
+      "file": "\\.(md|markdown|txt|rst|adoc|org)$",
+      "text_fields": ["content", "new_string"],
+      "audience": {"audience": "whoever reads this file later, without you present"},
+      "when": {"_edit": "an edit to an existing document: judge the change, not the whole document"}
+    }
+  ],
+
+  "public_owners": [],
+  "public_owners_help": "Repository owners whose content outsiders can read. Listed here rather than guessed, because telling someone a private repo is public makes them strip links their colleagues could have opened."
+}

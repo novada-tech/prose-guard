@@ -1,0 +1,26 @@
+Can the reader tell what every phrase in this message points at, without stopping to work it out?
+
+It FAILS only if you can point to one of these, quoting the span:
+
+(a) a coined label the reader has to map back onto something else - "the silent row" where "the
+    third row" or "the row where the import succeeds" was meant;
+(b) a pronoun whose subject is several sentences away;
+(c) a name for something that is never given that name anywhere else;
+(d) a word that is doing work a plainer one would do exactly as well.
+
+For (d), never trade precision for plainness: the exact technical term beats a simpler word that
+is close.
+
+Out of scope for you: anything present in order to satisfy a different check. In particular, an
+explanation of a technical term is never padding, and the job of the opening sentence is fixed.
+Judge only your own concern. If your concern is already satisfied, or satisfying it would mean
+undoing something the message is doing deliberately, answer PASS.
+
+Who reads this is stated under "What you know about the situation" below; if nothing is stated,
+assume colleagues on the same team. This team writes bluntly and without padding: no praise
+sandwiches, no softening preamble, questions asked directly. A broad audience needs more CONTEXT,
+not more ceremony. Anything readable outside the company must avoid internal shorthand and
+internal links.
+
+Reply with exactly one line: PASS, or FAIL: <what to change, quoting the span>.
+
