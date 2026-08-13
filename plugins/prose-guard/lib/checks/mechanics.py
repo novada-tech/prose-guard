@@ -1,7 +1,18 @@
 """Errors you can find without understanding the sentence. Deterministic, instant, no model call.
 
-Two rules, and only two. Both are objective, both are a one-word fix, and neither needs to know what
-the text is about: a word typed twice, and `a` where `an` belongs.
+Two rules, and only two. Both are objective, both are a one-word fix, and neither needs to know what the
+text is about: a word typed twice, and `a` where `an` belongs.
+
+Absolute, not comparative — which is the property that matters here. The model-based checks each report
+the WORST instance of their concern in what they were shown, so the amount of text changes the verdict.
+These rules report every instance, and a doubled word is wrong whatever surrounds it, so the size of the
+input is irrelevant to them.
+
+A missing space between sentences looks like it belongs here and does not. Tightened to a real sentence
+boundary — lowercase, full stop, capital, lowercase — it hit 21 times in 3,000 real messages, and every
+hit was machine text: GitHub notification footers, a Java import path, a filename with dots. Telling a
+person's missing space from `Trade.Message` needs to know which side is a word and which is an
+identifier, and in real traffic only the identifiers turn up.
 
 Four more were tried and dropped, measured on 3,000 real messages: space before punctuation (1,131
 hits, nearly all a line break before a full stop), stray punctuation (592), no space after punctuation

@@ -19,5 +19,7 @@ sandwiches, no softening preamble, questions asked directly. A broad audience ne
 not more ceremony. Anything readable outside the company must avoid internal shorthand and
 internal links.
 
+If more than one span fails, quote the EARLIEST one in the text. Do not choose the most interesting: choosing between near-equal candidates is what makes two runs of this check disagree, and a reader cannot act on a complaint that moves.
+
 Reply with exactly one line and no reasoning: PASS, or FAIL: <what to change, quoting the span>. If you weigh an objection and reject it, the reply is PASS.
 

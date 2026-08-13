@@ -42,14 +42,21 @@ sharpen them, it lowers the bar for what counts as worst. Asked about one paragr
 nothing wrong 3 times in 3, and asked about the paragraph plus everything before it, `reference` found
 something 3 times in 5.
 
-Which context a check needs is not one answer for all of them, and the prompts say so:
+The split that matters is not how much text a check sees. It is whether the check is **absolute** or
+**comparative**.
 
-| | needs | why |
-|---|---|---|
-| `mechanics` | one sentence | a doubled word is local |
-| `sentence` | the document | it reports the worst sentence, so it needs the field to compare |
-| `reference` | the document | "a pronoun whose subject is several sentences away" is about what came before, and a term used before it is explained is about what comes after |
-| `relevance`, `structure`, `address` | the document | what is missing, what order it is in, and who is addressed cannot be answered from a fragment |
+`mechanics` is absolute. A word typed twice is wrong whatever surrounds it, so the size of the text makes
+no difference to the verdict — it runs on whatever it is given and finds every instance, not the worst
+one. That is also why it is stable enough to hold a message back on its own.
+
+Everything else is comparative: each reports the worst instance of its concern in what it was shown. That
+is why they need the whole document, and why a smaller piece does not sharpen them.
+
+A rule for missing spaces between sentences was tried on the same evidence and is not here. Tightened to
+a real sentence boundary — lowercase, full stop, capital, lowercase — it hit 21 times in 3,000 messages,
+and every hit was machine text: GitHub notification footers ("mentioned.Message ID:"), a Java import
+path, a filename with dots. Not one was a person's missing space. The looser version hit 494 times, all
+of them filenames and abbreviations.
 
 ## What it does when it disagrees with you
 
@@ -243,6 +250,20 @@ confirmation, four runs of that same document reported nothing to act on.
 
 Unconfirmed findings are still printed, under a heading that says not to chase them. `--unconfirmed`
 turns the filter off and costs less.
+
+Confirmation filters the symptom. The cause is that two runs choose differently between near-equal
+candidates, and the checks that point at a span now say to quote the earliest failing one rather than the
+most interesting. On the document that produced no repeated finding at all in ten runs, that took
+agreement between two runs from nothing to about two in five — so a real finding survives confirmation
+instead of being filtered with the nits.
+
+That instruction is deliberately not on `relevance` or `address`. Neither reports a span — one asks what
+is missing and the other who is being spoken to — and telling them to quote the earliest failing span
+changed what they looked for, which showed up immediately as findings on fixtures that had been quiet.
+
+Three of five well-built fixtures produce a finding on a single run of all five checks. With confirmation,
+two of those three report nothing to change, and the third reproduces — which is the point: what survives
+is worth reading.
 
 ## Managing audiences
 
