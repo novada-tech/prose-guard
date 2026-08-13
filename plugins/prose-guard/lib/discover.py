@@ -106,10 +106,10 @@ def from_history(limit=40000):
 
 
 def unclaimed():
-    """Tools that carried long prose past the hook with no destination claiming them."""
-    path = os.path.join(destinations.config_dir(), "unclaimed-destinations.json")
+    """Shapes that carried long prose past the hook with no destination claiming them, and what has
+    been decided about each: how many uses, whether it has been mentioned, whether it was declined."""
     try:
-        with open(path) as fh:
+        with open(destinations._candidates_path()) as fh:
             return json.load(fh)
     except Exception:
         return {}
@@ -125,6 +125,16 @@ def covered():
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser(description="What here could be sending prose to a person.")
+    ap.add_argument("--decline", metavar="SHAPE",
+                    help="never suggest this shape again. Permanent, and what setup uses when you "
+                         "say no.")
+    a = ap.parse_args()
+    if a.decline:
+        print("declined for good:", destinations.decline(a.decline))
+        return
+
     servers = mcp_servers()
     used, subs = from_history()
     print("MCP servers configured here:")
@@ -144,12 +154,19 @@ def main():
             print(f"  {n:5d}x  {key}")
 
     un = unclaimed()
-    if un:
+    pending = {k: v for k, v in un.items() if not v.get("declined")}
+    declined = [k for k, v in un.items() if v.get("declined")]
+    if pending:
         print("\nAlready carried long prose past the guard, and nothing claimed it:")
-        for shape, n in sorted(un.items(), key=lambda kv: -kv[1]):
-            print(f"  {n:5d}x  {shape}")
+        for shape, entry in sorted(pending.items(), key=lambda kv: -kv[1].get("uses", 0)):
+            seen = " (already mentioned once)" if entry.get("mentioned") else ""
+            print(f"  {entry.get('uses', 0):5d}x  {shape}{seen}")
+        print("\n  To rule one out for good, so it is never suggested again:")
+        print("    python3 lib/discover.py --decline '<shape>'")
     else:
-        print("\nNothing has slipped past unclaimed yet. This fills in as you work.")
+        print("\nNothing unclaimed. This fills in as you work.")
+    if declined:
+        print(f"\nDeclined, and never suggested again: {', '.join(declined)}")
 
     print("\nAlready covered:")
     for d in covered():

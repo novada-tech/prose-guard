@@ -63,6 +63,9 @@ That prints what is already covered, plus four kinds of evidence about what is n
 configured here, outbound command-line tools on PATH, how often each appears in their shell history,
 and anything that has already carried long prose past the guard unclaimed.
 
+The last list is the one to trust: those already happened. The guard also mentions such a tool by
+itself, once, on about its third use — and only once ever, so nothing here is urgent.
+
 Then do the part no script can:
 
 - **Name the tools you can actually see.** For each MCP server it listed, say which of your own
@@ -72,6 +75,13 @@ Then do the part no script can:
   carries the text. Ask before writing.
 - **Say what each addition costs.** Every added destination is more messages checked, at the
   per-message price above.
+
+**If they say no to something, record it** — otherwise the same suggestion comes back the next time
+they use that tool, which is the fastest way to get a tool switched off:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/discover.py" --decline '<shape>'
+```
 
 Write confirmed entries to `<config dir>/destinations.json`, whose shape is documented in
 [`data/destinations.json`](../../data/destinations.json). User entries are read first, so the same

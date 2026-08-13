@@ -120,9 +120,13 @@ def main():
 
     dest = destinations.match(tool, tool_input)
     if not dest:
-        # Passive discovery: note the shape of anything carrying long prose that nothing claims, so
-        # setup can offer to add it later. Records no message text and makes no model call.
-        destinations.record_candidate(tool, tool_input)
+        # Passive discovery: count anything carrying long prose that nothing claims, so setup can
+        # offer to add it later. Records the shape only, never the text, and makes no model call.
+        # It speaks up at most once per shape, ever — see destinations.record_candidate.
+        note = destinations.record_candidate(tool, tool_input)
+        if note:
+            emit("advise", note)
+            return
         allow()
     text = destinations.extract(dest, tool, tool_input)
     if not text:

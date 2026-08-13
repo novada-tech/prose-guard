@@ -202,35 +202,88 @@ def situation(dest, tool, tool_input):
     return out
 
 
-def record_candidate(tool, tool_input):
-    """Passive discovery: a tool carrying long prose that no destination claims.
+# Passive discovery. A shape is mentioned to the user AT MOST ONCE, ever, and only once it has been
+# used enough times to be worth interrupting for. Declining is permanent and stops the counting, so
+# the sequence "used, suggested, declined, used again, suggested again" cannot happen.
+MENTION_AFTER = 3
+MAX_TRACKED = 50
 
-    Records the SHAPE only — never the text. For an MCP tool that is the tool name and the field;
-    for Bash it is the binary, its subcommand and the flag that held the long argument, so
-    `git commit -m` becomes discoverable the first time it is used rather than only if someone
-    thought to configure it. /prose-guard:setup reads this and offers to add them.
+
+def _candidates_path():
+    return os.path.join(config_dir(), "unclaimed-destinations.json")
+
+
+def _shape(tool, tool_input):
+    """The SHAPE of a call carrying long prose, never the text.
+
+    For an MCP tool that is the tool name and the field. For Bash it is the binary, its subcommand and
+    the flag that held the long argument, so `git commit -m` becomes discoverable the first time it is
+    used rather than only if someone thought to configure it.
     """
-    shape = None
     if tool == "Bash":
         cmd = str(tool_input.get("command") or "")
         m = re.search(r"(--?[A-Za-z][-\w]*)[= ]\s*['\"]([^'\"]{80,})['\"]", cmd)
-        if m:
-            words = cmd.strip().split()
-            head = " ".join(w for w in words[:2] if not w.startswith("-"))
-            shape = f"bash: {head} {m.group(1)}"
-    else:
-        for field, value in tool_input.items():
-            if isinstance(value, str) and len(value.split()) >= MIN_WORDS:
-                shape = f"tool: {tool} [{field}]"
-                break
-    if not shape:
-        return
-    path = os.path.join(config_dir(), "unclaimed-destinations.json")
+        if not m:
+            return None
+        words = cmd.strip().split()
+        head = " ".join(w for w in words[:2] if not w.startswith("-"))
+        return f"bash: {head} {m.group(1)}"
+    for field, value in tool_input.items():
+        if isinstance(value, str) and len(value.split()) >= MIN_WORDS:
+            return f"tool: {tool} [{field}]"
+    return None
+
+
+def _load_candidates():
+    data = _read(_candidates_path())
+    return data if isinstance(data, dict) else {}
+
+
+def _save_candidates(data):
     try:
-        seen = _read(path) or {}
-        seen[shape] = seen.get(shape, 0) + 1
         os.makedirs(config_dir(), exist_ok=True)
-        with open(path, "w") as fh:
-            json.dump(seen, fh, indent=1, sort_keys=True)
+        with open(_candidates_path(), "w") as fh:
+            json.dump(data, fh, indent=1, sort_keys=True)
     except OSError:
         pass
+
+
+def decline(shape):
+    """Never mention or count this shape again.
+
+    This is what makes passive discovery safe to have at all. Without it, declining a suggestion and
+    then using the tool again would produce the same suggestion a second time, which is the failure
+    that makes people turn a tool off.
+    """
+    data = _load_candidates()
+    entry = data.setdefault(shape, {"uses": 0})
+    entry["declined"] = True
+    entry["mentioned"] = True
+    _save_candidates(data)
+    return _candidates_path()
+
+
+def record_candidate(tool, tool_input):
+    """Count a call nothing claimed, and return a one-line note if now is the moment to say so.
+
+    Returns None almost always: at most one note per shape for the lifetime of the config.
+    """
+    shape = _shape(tool, tool_input)
+    if not shape:
+        return None
+    data = _load_candidates()
+    entry = data.get(shape)
+    if entry and (entry.get("declined") or entry.get("mentioned")):
+        return None                          # already settled, one way or the other
+    if entry is None and len(data) >= MAX_TRACKED:
+        return None                          # stop growing rather than track for ever
+    entry = data.setdefault(shape, {"uses": 0})
+    entry["uses"] = entry.get("uses", 0) + 1
+    note = None
+    if entry["uses"] >= MENTION_AFTER:
+        entry["mentioned"] = True
+        note = (f"prose-guard has seen long text go out through `{shape}` {entry['uses']} times and "
+                f"does not check it. Add it with /prose-guard:setup if that is worth checking. This "
+                f"is the only time it will be mentioned.")
+    _save_candidates(data)
+    return note

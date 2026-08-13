@@ -285,20 +285,60 @@ def test_user_destinations_win():
               D.extract(dest, "Bash", {"command": f'git commit -m "{long}"'}), None)
 
 
-def test_passive_discovery_records_shapes_not_text():
+def test_passive_discovery():
+    """It must speak up once, and never again — declining has to be permanent.
+
+    The failure to avoid is: tool used, suggestion made, user declines, tool used again, same
+    suggestion. That is what makes people turn a tool off.
+    """
     with tempfile.TemporaryDirectory() as home:
         _, D = fresh(home)
         secret = "swordfish " * 40
-        D.record_candidate("Bash", {"command": f'my-cli notify --text "{secret}"'})
-        D.record_candidate("mcp__example__post_update", {"body": secret})
-        D.record_candidate("mcp__example__post_update", {"body": secret})
+        bash = ("Bash", {"command": f'my-cli notify --text "{secret}"'})
+        mcp = ("mcp__example__post_update", {"body": secret})
+
+        notes = [D.record_candidate(*mcp) for _ in range(6)]
+        check("silent until it has been used enough to matter", notes[:2], [None, None])
+        check("speaks up on the third use", notes[2] is not None, True)
+        check("and never again", notes[3:], [None, None, None])
+
         raw = open(os.path.join(home, "unclaimed-destinations.json")).read()
         seen = json.loads(raw)
-        check("a bash shape is binary, subcommand and flag",
-              "bash: my-cli notify --text" in seen, True)
-        check("an mcp shape is the tool and the field",
-              seen.get("tool: mcp__example__post_update [body]"), 2)
         check("no message text is ever written down", "swordfish" in raw, False)
+        check("an mcp shape is the tool and the field",
+              "tool: mcp__example__post_update [body]" in seen, True)
+        D.record_candidate(*bash)
+        check("a bash shape is binary, subcommand and flag",
+              "bash: my-cli notify --text" in json.loads(
+                  open(os.path.join(home, "unclaimed-destinations.json")).read()), True)
+
+        # declining is permanent, and stops the counting
+        D.decline("bash: my-cli notify --text")
+        after = [D.record_candidate(*bash) for _ in range(5)]
+        check("a declined shape is never mentioned", after, [None] * 5)
+        entry = json.loads(open(os.path.join(home,
+                                             "unclaimed-destinations.json")).read())[
+            "bash: my-cli notify --text"]
+        check("and stops being counted", entry["uses"], 1)
+
+        # and the tracked set is bounded
+        for i in range(80):
+            D.record_candidate(f"mcp__example__tool{i}", {"body": secret})
+        check("the tracked set is bounded",
+              len(json.loads(open(os.path.join(home,
+                                               "unclaimed-destinations.json")).read()))
+              <= D.MAX_TRACKED, True)
+
+
+def test_the_hook_surfaces_a_candidate_once():
+    with tempfile.TemporaryDirectory() as tmp:
+        home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
+        long = "word " * 40
+        payload = {"tool_name": "mcp__example__post_update", "session_id": "pd", "cwd": tmp,
+                   "tool_input": {"body": long}}
+        verdicts = [run_guard(payload, home, state)[0] for _ in range(5)]
+        check("the hook mentions an unclaimed destination exactly once",
+              verdicts, ["allow", "allow", "advise", "allow", "allow"])
 
 
 # ------------------------------------------------------------------- the hook
@@ -446,7 +486,8 @@ def test_rule_installer():
 def main():
     for fn in (test_detection, test_matching, test_combination, test_no_subset_elimination,
                test_severity, test_routing, test_prose_files_must_be_tracked,
-               test_user_destinations_win, test_passive_discovery_records_shapes_not_text,
+               test_user_destinations_win, test_passive_discovery,
+               test_the_hook_surfaces_a_candidate_once,
                test_hook_end_to_end, test_session_ledger_bounds_the_argument,
                test_state_stays_out_of_the_plugin, test_levels, test_audience_editing,
                test_rule_installer):
