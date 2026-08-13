@@ -1,4 +1,4 @@
-# Common English words, for machines with no system dictionary.
+# Words and everyday abbreviations that no reader needs explained.
 #
 # jargon.py prefers /usr/share/dict/words and unions this in. Without either, every capitalised
 # English word — THE, WAS, WITH — is reported as unexplained jargon, which is silent degradation into
@@ -46,3 +46,9 @@ scale scaled limit limits quota quotas rate rates
 plan plans stage stages phase phases cycle cycles
 team teams member members people person
 ask asks answer answers question questions issue issues
+
+# Everyday abbreviations. Not English words and not a developer's terms either — a reader of any
+# specialism reads these without pausing, so asking someone to expand them would be noise. Kept
+# here rather than in a baseline audience because knowing them depends on reading English, not on
+# what anybody works on.
+asap fyi eta aka etc vs tldr iirc afaik imo imho kpi ceo cfo cto hr pto ooo eod eow

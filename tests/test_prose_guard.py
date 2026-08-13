@@ -160,6 +160,30 @@ def test_modern_technical_words_are_not_jargon():
         check(f"{term} still needs explaining", flagged(term), True)
 
 
+def test_everyday_abbreviations_are_not_jargon():
+    """ASAP is not an engineer's term, and it is not an English word either.
+
+    Real traffic flagged it six times in three thousand messages. Asking someone to expand ASAP is
+    noise, and it is noise for every audience, so it belongs with the word list rather than in a
+    baseline anyone could be missing.
+    """
+    import audiences
+    import jargon
+    resolved = audiences.Resolved([], "engineers")
+
+    def flagged(term):
+        return jargon.is_acronym(term) and not resolved.is_known(term)
+
+    for term in ("ASAP", "FYI", "ETA", "AKA", "TLDR", "IIRC", "KPI", "PTO", "EOD"):
+        check(f"any reader knows {term}", flagged(term), False)
+    for term in ("HTML", "CSS", "GPU", "SMTP", "ACL", "TTY", "OOM"):
+        check(f"any developer knows {term}", flagged(term), False)
+    # LF lowercases to nothing and looks like line feed, so it is tempting to ship as known. In the
+    # corpus it meant Linux Foundation in five of seven appearances, to readers who were not told.
+    # Two letters rarely carry one meaning; an audience that does share it can learn it.
+    check("LF stays flagged, being ambiguous", flagged("LF"), True)
+
+
 def test_matching():
     with tempfile.TemporaryDirectory() as home:
         write_audience(home, "chat", matches={"slack_channels": ["C1"]})
