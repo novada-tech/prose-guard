@@ -40,7 +40,10 @@ def _dictionary():
     for path in ("/usr/share/dict/words", "/usr/dict/words"):
         try:
             with open(path, encoding="utf-8", errors="ignore") as fh:
-                return {w.strip().lower() for w in fh if len(w.strip()) > 2}
+                # two-letter words included, or IS, IT, ON and AS survive as "acronyms". The cost
+                # is that IT as in information technology is filtered too, which is the right way
+                # round: a message using "IT" is almost never using it as a term to explain.
+                return {w.strip().lower() for w in fh if len(w.strip()) > 1}
         except OSError:
             continue
     return set()
@@ -49,8 +52,21 @@ def _dictionary():
 WORDS = _dictionary()
 
 
+# The system word list carries base forms, so FAILS and COINED survive it. Stripping these suffixes
+# catches the inflections without pulling in a stemmer.
+_SUFFIXES = ("s", "es", "ed", "ing", "d")
+
+
 def is_acronym(token):
-    return token.lower() not in WORDS
+    """False when this is a capitalised English word rather than an acronym.
+
+    An acronym is by definition not a word. THE, WAS, LOGGER, NULL and ASCII all lowercase to real
+    words and were being reported as jargon nobody had explained.
+    """
+    low = token.lower()
+    if low in WORDS:
+        return False
+    return not any(low.endswith(sfx) and low[: -len(sfx)] in WORDS for sfx in _SUFFIXES)
 
 
 def prose(text):

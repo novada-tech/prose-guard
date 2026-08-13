@@ -95,8 +95,12 @@ def test_detection():
          "THE build WAS broken WITH a NULL logger and an ERROR in ASCII output.", []),
         # LOGGER lowercases to a real word. DEBUG does not, and is covered by the engineers
         # baseline instead — two different mechanisms, and it matters which one is doing the work.
+        # LOGGER lowercases to a real word. DEBUG does not, and is covered by the engineers
+        # baseline instead — two mechanisms, and it matters which one is doing the work.
         ("nor is a code identifier that happens to be a word",
          "The LOGGER never wrote anything at all.", []),
+        # the word list holds base forms, so inflections need the suffix strip
+        ("nor an inflected one", "It FAILS and nobody HAS COINED a name for that yet.", []),
     ]
     for label, text, want in cases:
         check(f"detect/{label}", jargon.scan(text + PAD, is_known)[0], want)

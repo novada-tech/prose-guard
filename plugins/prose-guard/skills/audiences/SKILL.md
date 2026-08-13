@@ -89,6 +89,12 @@ something everybody knows. Being wrong is cheap either way — `accept` fixes on
 
 If the list is long, offer to take the most-used ones and leave the rest.
 
+**The third pile is not yours to take.** Terms below the borderline mark have one or two people
+behind them, which is the least evidence of all — a term one person used is exactly what breadth
+exists to exclude. If some of them are obviously shared vocabulary, say which and ask, rather than
+folding them in. Say how many there are, because the answer for 3 is different from the answer for
+80.
+
 ### 5. Create it, then read it back
 
 ```

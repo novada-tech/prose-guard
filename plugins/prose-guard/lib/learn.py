@@ -108,7 +108,9 @@ def tally(sources):
     for who, text in sources:
         docs += 1
         people.add(who)
-        for term in set(jargon.ACRONYM.findall(jargon.prose(text))):
+        # the same filter the checker uses, so the piles a human reads contain no THE, WAS or WITH
+        for term in set(t for t in jargon.ACRONYM.findall(jargon.prose(text))
+                        if jargon.is_acronym(t)):
             authors[term.upper()].add(who)
             uses[term.upper()] += 1
     return authors, uses, docs, people
