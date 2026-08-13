@@ -8,18 +8,18 @@ you now have to run.
 Nothing about those messages is badly written. They fail because they were not written for anybody in
 particular.
 
-prose-guard is a Claude Code plugin that checks a message on its way out — a chat message, a review
+`prose-guard` is a Claude Code plugin that checks a message on its way out — a chat message, a review
 comment, a commit message, a document — against two questions:
 
-**Who is going to read this, and what do they already know?**
+**Who is going to read this?**
 **Why should they care?**
 
-Six things follow from those two, and they are what it actually checks. The first is arithmetic and can
+From these two central questions of effective communication, six checks follow, and they are what actually runs. The first is arithmetic and can
 hold a message back; the other five are judgement and only ever advise.
 
 | | |
 |---|---|
-| **Terms they do not know** | an acronym never explained, judged against what your readers have actually written. Deterministic, and the only check that can hold a message back. |
+| **Terms they do not know** | an acronym never explained, judged against what your audience has actually written. Deterministic, and the only check that can hold a message back. |
 | **No reason to care** | it never says what changed for them or why it matters. |
 | **Missing what they need** | the command to run, the version, the deadline, the choice — absent. |
 | **Things they will not act on** | backstory they lived through, identifiers nobody types, reassurance nobody asked for, proof that you tested it. |
