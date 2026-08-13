@@ -38,11 +38,23 @@ def _read(path):
 
 
 def load():
-    mine = _read(os.path.join(config_dir(), "destinations.json"))
-    theirs = _read(SHIPPED)
-    return (list(mine.get("destinations") or []) + list(theirs.get("destinations") or []),
-            {str(o).lower() for o in (mine.get("public_owners") or [])}
-            | {str(o).lower() for o in (theirs.get("public_owners") or [])})
+    """Yours first, then your team's, then the shipped set. First match wins, so an earlier layer
+    overrides a later one — which is how a team stops something being checked, or checks it differently,
+    for everybody at once.
+
+    A destination is worth more shared than an audience is. An audience is measured from a corpus and
+    describes one group of readers; a destination is a fact about which tool sends prose and which field
+    carries it, and that fact is the same for everyone using that tool. One person working it out with
+    /prose-guard:setup is the whole team's answer.
+    """
+    layers = [_read(os.path.join(config_dir(), "destinations.json"))]
+    layers += [_read(os.path.join(directory, "destinations.json")) for directory in paths.shared()]
+    layers.append(_read(SHIPPED))
+    found, owners = [], set()
+    for layer in layers:
+        found += list(layer.get("destinations") or [])
+        owners |= {str(o).lower() for o in (layer.get("public_owners") or [])}
+    return found, owners
 
 
 DESTINATIONS, PUBLIC_OWNERS = load()
@@ -360,6 +372,13 @@ def _reads_like_prose(text):
     return alpha >= 0.7 * len(words)
 
 
+# This tool's own commands. Checking a check is circular, and the `--who` argument to check_prose.py is
+# a sentence describing a reader, so it passes the prose test and was offered as a destination to add.
+OWN_COMMANDS = ("check_prose.py", "learn.py", "audiences.py", "discover.py", "install_rule.py",
+                "share_dir.py", "fetch.py", "measure_check.py", "measure_cost.py", "measure_rule.py",
+                "measure_thresholds.py", "measure_destinations.py")
+
+
 def _shape(tool, tool_input):
     """The SHAPE of a call carrying outgoing prose, never the text.
 
@@ -369,6 +388,8 @@ def _shape(tool, tool_input):
     """
     if tool == "Bash":
         cmd = str(tool_input.get("command") or "")
+        if any(own in cmd for own in OWN_COMMANDS):
+            return None
         for m in re.finditer(r"(--?[A-Za-z][-\w]*)[= ]\s*['\"]([^'\"]{80,})['\"]", cmd):
             if _reads_like_prose(m.group(2)):
                 words = cmd.strip().split()

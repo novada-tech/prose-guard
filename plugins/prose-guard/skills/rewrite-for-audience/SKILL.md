@@ -36,8 +36,14 @@ that fails: in the one session where this skill was used on real work, the agent
 passes below, reported having done so, and had skipped both of the concrete outputs. Running a
 command cannot be skipped by accident.
 
-Run it again on the rewrite. The check is on the current wording, not on the draft you started
-from.
+Run it again on the rewrite. The check is on the current wording, not on the draft you started from.
+
+Then stop. Every finding is put back to the same check and kept only if it objects to the same sentence,
+so what you are shown reproduces — but findings printed under "raised once and not reproduced" are nits,
+and they are endless. Measured: on one document already through six rounds, ten runs produced nine
+findings and not one of them twice. Two passes is normally the whole job. If a third pass is still
+finding things you agree with, the text has a real problem; if it is finding different things each time,
+it is finished.
 
 ## What you hand back
 

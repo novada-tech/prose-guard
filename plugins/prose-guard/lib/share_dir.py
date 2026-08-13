@@ -8,6 +8,11 @@
 The receiving half of `audiences.py share`. One person measures an audience and commits it; everyone
 else names the directory once and gets it, and every later improvement to it, by pulling.
 
+The same directory can hold a `destinations.json`, and that is the more valuable half. An audience is
+measured from one group's writing; a destination is a fact about which tool sends prose and which field
+carries it, and that fact is the same for everyone using that tool. Working it out takes a conversation
+with an agent about tools only it can see, and nobody should have that conversation twice.
+
 Paths keep their `$VARS` and `~` unexpanded in the file and are expanded when read, so the same line
 works on machines that keep their checkouts in different places — which is why a team setup script can
 write it for everybody.
@@ -72,10 +77,22 @@ def main():
         return 0
     for entry in listed:
         real = os.path.expanduser(os.path.expandvars(entry))
-        count = len([f for f in os.listdir(real) if f.endswith(".json")]) \
-            if os.path.isdir(real) else None
-        state = f"{count} audience(s)" if count is not None else "not present on this machine"
-        print(f"  {entry}\n      {real}  —  {state}")
+        if not os.path.isdir(real):
+            print(f"  {entry}\n      {real}  —  not present on this machine")
+            continue
+        names = [f for f in os.listdir(real) if f.endswith(".json")]
+        audiences = [f for f in names if f != "destinations.json"]
+        shared_destinations = 0
+        if "destinations.json" in names:
+            try:
+                with open(os.path.join(real, "destinations.json")) as fh:
+                    shared_destinations = len(json.load(fh).get("destinations") or [])
+            except Exception:
+                shared_destinations = 0
+        held = [f"{len(audiences)} audience(s)"]
+        if shared_destinations:
+            held.append(f"{shared_destinations} destination(s)")
+        print(f"  {entry}\n      {real}  —  {', '.join(held)}")
     return 0
 
 

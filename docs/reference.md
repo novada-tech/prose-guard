@@ -3,6 +3,30 @@
 Detail that would get in the way of [the README](../README.md). Read it when you
 need it.
 
+## Spelling and grammar
+
+Two mechanical rules run at every level, free and instant: a word typed twice, and `a` where `an`
+belongs. Measured on 3,000 real messages they produce 62 findings, about 2%, and nothing at all on the
+five documents already judged well built. Both are objective and both are a one-word fix, so they hold a
+message back rather than mentioning it.
+
+Four more rules were tried and dropped, with the numbers: space before punctuation (1,131 hits, almost
+every one a line break before a full stop), stray punctuation (592), no space after punctuation (512,
+mostly URLs and version numbers), unbalanced brackets (498, mostly brackets spanning lines). Together
+they flagged a third of everything written.
+
+Grammar in general is not checked, and a third-party checker was measured rather than dismissed.
+LanguageTool 6.6 locally: 240MB to download, 390MB unpacked, Java, 1.6 seconds a run. It found nothing on
+the sentence that prompted the question — a fragment with no main verb — nor on three other fragments
+tried. It caught word repeats and `a`/`an`, which are already here, plus subject-verb agreement, which is
+one rule more. On prose judged well built it flagged four documents of six, mostly its spell checker
+firing on technical terms, which is the noise a measured vocabulary exists to prevent.
+
+The fragment class is caught by the checks that already exist, when the text is short enough. Asked about
+that sentence on its own, `structure` found it in three runs of three and `sentence` in two of three. It
+got through inside 370 words. That is dilution, and the fix for it is to check long text in pieces rather
+than to add a sixth opinion about the whole thing.
+
 ## What it does when it disagrees with you
 
 It names one problem and hands the message back. It does not rewrite: a check that rewrites cannot
@@ -181,6 +205,20 @@ Exact overlap between audiences is **not computable**, and the tool says so rath
 chat export names someone "Sam"; a repository names the same person "sam-t". A plain
 intersection reported zero shared members while ten people were in both, so `overlap` prints a
 prefix-matched guess, labelled as one, and nothing depends on it.
+
+## Findings have to reproduce
+
+Every finding from a model-based check is put back to the same check, and kept only if it objects to the
+same sentence. One extra call for a check that fired, nothing for one that did not.
+
+This exists because the rewrite loop did not terminate. On one 370-word document already through six
+rounds of editing, ten runs of the five model-based checks gave one clean result and nine findings, with
+no finding raised twice — `reference` objected on every run and to a different sentence almost every
+time. Past the substantive problems, the checks generate nits, and chasing nits is work with no end. With
+confirmation, four runs of that same document reported nothing to act on.
+
+Unconfirmed findings are still printed, under a heading that says not to chase them. `--unconfirmed`
+turns the filter off and costs less.
 
 ## Managing audiences
 

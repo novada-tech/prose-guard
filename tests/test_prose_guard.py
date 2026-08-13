@@ -486,6 +486,162 @@ def test_discovery_proposes_how_hard_to_check_a_new_destination():
         check("a suggestion carries a reason to agree or disagree with", len(why) > 30, True)
 
 
+def test_the_mechanical_errors_are_found_without_a_model():
+    """A word typed twice and `a` where `an` belongs. Two rules, because the others were noise.
+
+    Measured on 3,000 real messages: these two produce 62 findings, about 2%, and nothing at all on the
+    five documents already judged well built. Four more rules were tried and dropped — space before
+    punctuation alone hit 1,131 times, almost every one a line break before a full stop, and together
+    they flagged a third of everything written.
+
+    Grammar in general is deliberately absent. The sentence that prompted this was a fragment with no
+    main verb, which needs the sentence understood rather than pattern-matched — and asked about that
+    sentence alone, `structure` found it in three runs of three and `sentence` in two of three. It got
+    through because it sat inside 370 words, which is dilution, not a missing check.
+    """
+    from checks import mechanics
+    for text, expected in (("we we should ship it", "typed twice"),
+                           ("this is a interesting result", 'wants "an"'),
+                           ("an legal opinion arrived today", 'wants "a"'),
+                           ("the the same thing", "typed twice")):
+        found = mechanics.scan(text)
+        check(f"caught: {text[:26]}", bool(found) and expected in found[0], True)
+
+    # Pronunciation, not spelling. Getting this wrong would flag correct English constantly.
+    for correct in ("an FpML mapping arrived", "a UPI value", "a unique identifier", "a unanimous vote",
+                    "an hour later", "a useful idea", "that that clause"):
+        check(f"left alone: {correct[:24]}", mechanics.scan(correct), [])
+
+    # Not prose: a doubled identifier in code, and a table row that repeats its heading.
+    # Across a line break, a repeat is two headings or a heading and its text, not a typo. This was the
+    # single biggest source of false positives before the rule was narrowed to one line.
+    check("a heading repeated below itself is not a typo",
+          mechanics.scan("Meeting\n\nMeeting notes follow"), [])
+    check("nor a heading followed by its own text", mechanics.scan("labels\nLabels are set"), [])
+    check("but the same line still counts", bool(mechanics.scan("we set the the labels")), True)
+    check("code spans are not prose", mechanics.scan("run `git git log` twice"), [])
+    check("table rows are not prose", mechanics.scan("| CDM CDM | x |"), [])
+    check("indented blocks are not prose", mechanics.scan("    for for x in y:"), [])
+
+    import audiences
+    ctx = Ctx(audiences.Resolved([], "engineers"))
+    from checks import BLOCK
+    finding = mechanics.run("we we should ship this today, and it is a interesting result", ctx)
+    check("it holds the message back", finding.severity, BLOCK)
+    check("naming both", "typed twice" in finding.message and 'wants "an"' in finding.message, True)
+    check("and says nothing about clean prose",
+          mechanics.run("this sentence is entirely fine", ctx), None)
+    check("costing no model call", mechanics.COSTS_A_CALL, False)
+
+
+def test_a_finding_has_to_be_raised_twice():
+    """A check that cannot reproduce its own complaint is generating nits, and chasing nits has no end.
+
+    Measured on one 370-word document already through six rounds of editing: ten runs of the five
+    model-based checks gave one clean result and nine findings, with no finding raised twice. `reference`
+    objected on every run and to a different sentence almost every time. So a finding is put back to the
+    same check and kept only if it points at the same sentence — after which four runs of the same
+    document reported nothing actionable, which is what makes the rewrite loop terminate.
+    """
+    import checks
+    text = ("One idea here and nothing else. A second sentence about the resolver and what it does. "
+            "A third one entirely.")
+
+    def about(span):
+        return checks.Finding("advise", f'Consider: "{span}" is unclear')
+
+    same = about("A second sentence about the resolver")
+    reworded = about("second sentence about the resolver and what")
+    elsewhere = about("A third one entirely")
+    check("two findings on one sentence agree",
+          checks._points_at(text, same), checks._points_at(text, reworded))
+    check("two findings on different sentences do not",
+          checks._points_at(text, same) == checks._points_at(text, elsewhere), False)
+    check("a finding quoting nothing in the text points nowhere",
+          checks._points_at(text, checks.Finding("advise", "no quotation at all")), -1)
+
+    class Stub:
+        NAME = "stub"
+        COSTS_A_CALL = True
+
+        def __init__(self, replies):
+            self.replies = list(replies)
+
+        def run(self, text, ctx):
+            return self.replies.pop(0) if self.replies else None
+
+    check("a check that says the same thing twice is believed",
+          checks.confirms(Stub([reworded]), text, None, same), True)
+    check("one that objects to something else is not",
+          checks.confirms(Stub([elsewhere]), text, None, same), False)
+    check("one that says nothing the second time is not",
+          checks.confirms(Stub([]), text, None, same), False)
+    # A deterministic check will say the same thing every time, so paying for a second run is waste.
+    class Cheap(Stub):
+        COSTS_A_CALL = False
+    check("a deterministic finding needs no confirming",
+          checks.confirms(Cheap([]), text, None, same), True)
+
+
+def test_destinations_can_be_shared_like_audiences():
+    """A destination is worth more shared than an audience.
+
+    An audience is measured from one group's writing. A destination records which tool sends prose and
+    which field carries it, and that is the same fact for everyone using that tool — worked out by an
+    agent listing tools only it can see, confirmed by a person. Nobody should do that twice.
+    """
+    import destinations as D
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as team:
+        os.environ["PROSE_GUARD_HOME"] = home
+        mine = {"destinations": [{"name": "wiki page", "tool": ["wiki_write"],
+                                  "text_fields": ["content"]}]}
+        with open(os.path.join(home, "destinations.json"), "w") as fh:
+            json.dump(mine, fh)
+        _, D = fresh(home)
+
+        import importlib
+        import discover
+        importlib.reload(discover)
+        message = discover.share(team)
+        check("it says what it copied", "wiki page" in message, True)
+        landed = json.load(open(os.path.join(team, "destinations.json")))
+        check("the destination travels", landed["destinations"][0]["name"], "wiki page")
+        # Copying the shipped set would put a stale duplicate in front of the maintained one.
+        check("and only what this machine added", len(landed["destinations"]), 1)
+        check("sharing twice adds nothing", "0 added" in discover.share(team), True)
+
+        # A colleague with nothing of their own but the directory registered.
+        with tempfile.TemporaryDirectory() as theirs:
+            with open(os.path.join(theirs, "config.json"), "w") as fh:
+                json.dump({"shared": [team]}, fh)
+            _, D2 = fresh(theirs)
+            long = ("The exporter line went because nothing on a laptop reads that variable. Plans had "
+                    "started failing in any shell older than an hour. Access uses the credential now.")
+            got = D2.match("mcp__team__wiki_write", {"content": long})
+            check("they have it without configuring anything", (got or {}).get("name"), "wiki page")
+            # Their own file still wins, so they can stop checking it locally.
+            with open(os.path.join(theirs, "destinations.json"), "w") as fh:
+                json.dump({"destinations": [{"name": "mine instead", "tool": ["wiki_write"],
+                                             "text_fields": ["content"]}]}, fh)
+            _, D3 = fresh(theirs)
+            check("and can override it locally",
+                  D3.match("mcp__team__wiki_write", {"content": long})["name"], "mine instead")
+
+
+def test_discovery_ignores_this_tool_talking_to_itself():
+    """`--who` is a sentence describing a reader, so it passes the prose test, and the checker's own
+    invocation was offered as a destination to add. Checking a check is circular."""
+    import destinations as D
+    prose = ("Engineers on this team read a pull request description for a plugin they use but did not "
+             "write. They know git and the shell. They have not read this plugin internals at all.")
+    for own in (f'python3 lib/check_prose.py draft.md --who "{prose}"',
+                f'python3 measure/measure_rule.py --rule x --who "{prose}"',
+                f'python3 lib/learn.py create team cand.json --who "{prose}"'):
+        check(f"not a destination: {own.split()[1]}", D._shape("Bash", {"command": own}), None)
+    check("but a real command still is",
+          D._shape("Bash", {"command": f'git commit -m "{prose}"'}), "bash: git commit -m")
+
+
 def test_a_substitution_is_worked_out_where_that_is_safe():
     """The pull request that introduced this went out unchecked, and the first fix was the wrong one.
 
@@ -844,13 +1000,13 @@ def test_levels():
     import paths
     from checks import config
     for level, names in (("disabled", []),
-                         ("low", ["terms"]),
-                         ("medium", ["terms", "judgement"]),
-                         ("high", ["terms", "relevance", "structure", "sentence", "reference",
-                                   "address"])):
+                         ("low", ["terms", "mechanics"]),
+                         ("medium", ["terms", "mechanics", "judgement"]),
+                         ("high", ["terms", "mechanics", "relevance", "structure", "sentence",
+                                   "reference", "address"])):
         check(f"level/{level}", [c.NAME for c in checks.for_effort(level)], names)
-    check("only the judgement checks cost a call",
-          [c.COSTS_A_CALL for c in checks.for_effort("low")], [False])
+    check("nothing at low costs a call",
+          [c.COSTS_A_CALL for c in checks.for_effort("low")], [False, False])
     with tempfile.TemporaryDirectory() as tmp:
         os.environ["PROSE_GUARD_HOME"] = tmp
         importlib.reload(paths)

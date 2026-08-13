@@ -27,7 +27,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audiences  # noqa: E402
-from checks import BLOCK, config, for_effort  # noqa: E402
+from checks import BLOCK, config, confirms, for_effort  # noqa: E402
 
 
 class Context:
@@ -47,6 +47,9 @@ def main():
     ap.add_argument("--who",
                     help="describe the reader in a sentence, for the model-based checks. It cannot "
                          "change which terms are known; use --for for that")
+    ap.add_argument("--unconfirmed", action="store_true",
+                    help="report every finding, including ones the check does not raise twice. "
+                         "Costs less and gives you nits to chase")
     ap.add_argument("--effort", choices=[x for x in config.LEVELS if x != "disabled"],
                     default="high")
     a = ap.parse_args()
@@ -86,16 +89,29 @@ def main():
     if a.who:
         print(f'reader described as:  "{a.who}"  (read by the model-based checks, not by terms)')
     problems = 0
+    unconfirmed = []
     for check in for_effort(a.effort):
         finding = check.run(text, ctx)
         if finding is None:
             print(f"  {check.NAME:10s} ok")
+            continue
+        # Every finding is put to the same check a second time, and kept only if it objects to the same
+        # sentence. Ten runs of the model-based checks over one document that had already been through
+        # six rounds of editing produced nine findings and no repeats: past the substantive problems,
+        # they generate nits, and acting on nits is work with no end. See docs/thresholds.md.
+        if not a.unconfirmed and not confirms(check, text, ctx, finding):
+            unconfirmed.append((check.NAME, finding.message))
+            print(f"  {check.NAME:10s} ok (raised something once and not again — see below)")
             continue
         problems += 1
         mark = "must fix" if finding.severity == BLOCK else "consider"
         print(f"  {check.NAME:10s} [{mark}] {finding.message}")
     if not problems:
         print("\nNothing to change.")
+    if unconfirmed:
+        print("\nRaised once and not reproduced, so not worth acting on. Read them, do not chase them:")
+        for name, message in unconfirmed:
+            print(f"  {name}: {message[:160]}")
     return 0
 
 

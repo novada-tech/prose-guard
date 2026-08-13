@@ -96,6 +96,17 @@ they use that tool, which is the fastest way to get a tool switched off:
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/discover.py" --decline '<shape>'
 ```
 
+Once they are confirmed, offer to share them. Working out which tool sends prose and which field
+carries it takes this conversation, and a destination is the same fact for everyone using that tool — so
+nobody should have this conversation twice:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/discover.py" --share <a directory their team clones>
+```
+
+It copies only what this machine added, never the shipped set, and skips anything already there.
+Everyone else registers the directory once, or has their team's setup script do it.
+
 Write confirmed entries to `<config dir>/destinations.json`, whose shape is documented in
 [`data/destinations.json`](../../data/destinations.json). User entries are read first, so the same
 file also overrides a shipped entry — that is how to stop checking something.
