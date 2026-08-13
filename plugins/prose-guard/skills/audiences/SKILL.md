@@ -68,6 +68,11 @@ tool would be no different with it than without it.
   very corpus being measured. If no export command exists, offer to write one; `docs/sources.md` has
   working recipes for Slack, Teams, Discord and mail. Skip anything recent enough to have been
   written by an agent, or the measurement learns the agent's vocabulary rather than the team's.
+
+If the source needs a credential, do not ask for "a token". Name the kind, the minimum scope, and give
+the URL that creates it — someone handed over the token they already had, which authenticated and then
+failed on the first read, and they had to go and find the right page themselves. If you do not know
+which kind that service uses, say so and find out before asking.
 - **Commit messages** (`--git .`) — free and always present, but thin: few people put acronyms in a
   commit subject, so on its own it will under-measure.
 

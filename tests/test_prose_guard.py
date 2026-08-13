@@ -716,6 +716,65 @@ def test_a_vocabulary_can_come_from_any_command():
         r = scan("exit 3", out=out + ".2")
         check("a failing command is reported, not swallowed", "warning" in r.stderr, True)
 
+        # A credential that authenticates and then has no data access exits 0 and prints an error
+        # object. From here that is indistinguishable from an empty channel, and it was being written
+        # up as a clean scan of nothing — the summary reads the same whatever the count is.
+        r = scan('echo \'{"ok":false,"error":"missing_scope"}\'', out=out + ".3")
+        check("a source that yields nothing usable is called out", "warning" in r.stderr, True)
+        check("and it says a credential can look like this", "credential" in r.stderr, True)
+        check("measuring an empty corpus is refused outright", r.returncode, 1)
+
+        r = scan(emit, 'echo \'{}\'', out=out + ".4")
+        check("one dead source among working ones does not stop the scan", r.returncode, 0)
+        check("but it is named", "echo" in r.stderr and "warning" in r.stderr, True)
+
+
+def test_a_rebuild_says_what_it_takes_away():
+    """A rebuild wrote the routing under a key nothing read, and create printed success.
+
+    The audience went on applying to its repositories and silently stopped applying to either chat
+    channel, so nothing looked broken from any direction. The same shape of evidence catches a corpus
+    that was read only part way: fewer people, fewer terms past the cut, fewer documents than last time.
+    """
+    with tempfile.TemporaryDirectory() as home:
+        e = {**os.environ, "PROSE_GUARD_HOME": home}
+        write_audience(home, "team",
+                       matches={"repos": ["your-org/infra"], "channels": ["C1", "C2"]},
+                       members=["ann", "bob", "cat", "dan"], vocabulary={"BSP": 9, "NFS": 5},
+                       _meta={"learned_from": {"documents": 3879}})
+        cand = os.path.join(home, "rebuild.json")
+        with open(cand, "w") as fh:
+            json.dump({"_meta": {"documents": 1200, "inherits": "engineers"},
+                       "members": ["ann", "bob", "cat"], "known": ["BSP"],
+                       "counts": {"BSP": {"authors": 4, "uses": 9}}}, fh)
+
+        def run(*args):
+            r = subprocess.run([sys.executable, os.path.join(LIB, "learn.py"), "create", "team",
+                                cand, "--who", "the team", *args],
+                               capture_output=True, text=True, env=e, timeout=120)
+            return r.returncode, r.stdout + r.stderr
+
+        code, out = run("--match-repo", "your-org/infra")
+        check("a rebuild that drops routing is refused", code, 1)
+        check("and it says which identifiers", "C1, C2" in out, True)
+        after = json.load(open(os.path.join(home, "audiences", "team.json")))
+        check("the existing audience is untouched", after["matches"].get("channels"), ["C1", "C2"])
+
+        code, out = run("--match-repo", "your-org/infra", "--force")
+        check("--force writes it anyway", code, 0)
+
+        write_audience(home, "team",
+                       matches={"repos": ["your-org/infra"], "channels": ["C1", "C2"]},
+                       members=["ann", "bob", "cat", "dan"], vocabulary={"BSP": 9, "NFS": 5},
+                       _meta={"learned_from": {"documents": 3879}})
+        code, out = run("--match-repo", "your-org/infra", "--match-channel", "C1",
+                        "--match-channel", "C2")
+        check("keeping the routing is not refused", code, 0)
+        # A narrower corpus is legitimate, so these warn rather than block — but silently is how a
+        # truncated read gets written, and the document count looks reasonable whatever it is.
+        check("a person leaving the corpus is reported", "dan" in out, True)
+        check("a term falling below the cut is reported", "NFS" in out, True)
+        check("and a corpus that shrank is reported", "3879 documents to 1200" in out, True)
 
 
 def test_routing_can_be_edited_without_hand_editing_json():

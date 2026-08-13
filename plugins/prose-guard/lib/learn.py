@@ -86,22 +86,36 @@ def from_command(commands):
     for cmd in commands:
         try:
             proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=3600)
-        except Exception:
+        except Exception as exc:
+            print(f"  warning: `{cmd[:60]}` could not be run: {exc}", file=sys.stderr)
             continue
         if proc.returncode != 0:
             print(f"  warning: `{cmd[:60]}` exited {proc.returncode}: "
                   f"{(proc.stderr or '').strip()[:160]}", file=sys.stderr)
+        printed = used = 0
         for line in proc.stdout.splitlines():
             line = line.strip()
             if not line:
                 continue
+            printed += 1
             try:
                 row = json.loads(line)
             except ValueError:
                 continue
             who = str(row.get("author") or "").strip()
             if who and not BOT.search(who):
+                used += 1
                 yield who, str(row.get("text") or "")
+        # A source that authenticates and then has no data access exits 0 and prints an error object,
+        # which looks from here exactly like a channel with nothing in it. Saying what arrived is the
+        # difference between finding that out now and measuring an empty corpus.
+        if used == 0:
+            detail = (f"printed {printed} line(s), none of them "
+                      f"{{\"author\": ..., \"text\": ...}}" if printed else "printed nothing")
+            print(f"  warning: `{cmd[:60]}` {detail}. A rejected credential looks like this.",
+                  file=sys.stderr)
+        elif used < printed:
+            print(f"  note: `{cmd[:60]}` gave {used} usable of {printed} line(s)", file=sys.stderr)
 
 
 def from_jsonl(paths):
@@ -189,12 +203,55 @@ def cmd_scan(a):
     with open(a.out, "w") as fh:
         json.dump(out, fh, indent=1)
         fh.write("\n")
+    if not docs:
+        raise SystemExit("no documents were read, so there is nothing to measure. Check the warnings "
+                         "above: every source either failed or produced no usable lines.")
     print(f"{docs} documents from {len(people)} people; {len(rows)} terms not already inherited.")
     print(f"  {len(known):4d} reached {cut}+ people — shared knowledge")
     print(f"  {len(borderline):4d} at exactly {cut - 1} — worth a human look: "
           f"{', '.join(borderline[:12])}{' …' if len(borderline) > 12 else ''}")
     print(f"  {len(rest):4d} below that — need explaining")
     print(f"\nwritten to {a.out}")
+
+
+def _losses(name, fresh):
+    """What a rebuild would take away from an audience that already exists.
+
+    Rebuilding is a normal thing to do — a wider corpus, a second source — and overwriting was silent.
+    Two ways that went wrong in practice. A script wrote the routing under a key nothing read, so the
+    audience kept applying to its repositories and silently stopped applying to either chat channel,
+    while create printed a success line. And a read against a live API died part way through: the
+    corpus looked complete, because a document count looks reasonable whatever it is, and the only
+    evidence was that fewer terms reached the cut than the run before.
+
+    Both show up as something the previous file had and this one does not.
+    """
+    old = audiences.ALL.get(name)
+    if old is None:
+        return [], []
+    was = audiences._read(old.path) or {}
+    routing, other = [], []
+
+    for key, before in (was.get("matches") or {}).items():
+        gone = [v for v in before if v not in (fresh["matches"].get(key) or [])]
+        if gone:
+            routing.append(f"{key}: {', '.join(gone)}")
+
+    lost_people = sorted(set(was.get("members") or []) - set(fresh["members"]))
+    if lost_people:
+        other.append(f"{len(lost_people)} of {len(was.get('members') or [])} people are no longer in "
+                     f"the corpus: {', '.join(lost_people[:8])}"
+                     f"{' …' if len(lost_people) > 8 else ''}")
+    lost_terms = sorted(set(was.get("vocabulary") or {}) - set(fresh["vocabulary"]))
+    if lost_terms:
+        other.append(f"{len(lost_terms)} measured term(s) dropped below the cut: "
+                     f"{', '.join(lost_terms[:12])}{' …' if len(lost_terms) > 12 else ''}")
+    before_docs = ((was.get("_meta") or {}).get("learned_from") or {}).get("documents")
+    now_docs = (fresh["_meta"].get("learned_from") or {}).get("documents")
+    if before_docs and now_docs and now_docs < before_docs:
+        other.append(f"the corpus shrank, {before_docs} documents to {now_docs} — if a source failed "
+                     f"part way through, this is the only sign of it")
+    return routing, other
 
 
 def cmd_create(a):
@@ -227,6 +284,18 @@ def cmd_create(a):
             "assumptions": {"shared_context": a.shared_context, "reach": a.reach},
             "_meta": {"learned_from": cand.get("_meta", {}),
                       "accepted_by_hand": [t.upper() for t in a.also_known]}}
+    routing, other = _losses(a.name, data)
+    if routing and not a.force:
+        raise SystemExit(
+            f"{a.name} already exists, and this would stop it applying to:\n"
+            + "".join(f"  {line}\n" for line in routing)
+            + "It would keep working everywhere else, so nothing would look broken. Pass the same "
+              "identifiers again, or --force if dropping them is deliberate.")
+    for line in other:
+        print(f"  warning: {line}")
+    if routing:
+        for line in routing:
+            print(f"  warning: no longer applies to {line} (--force)")
     path = audiences.save(a.name, data)
     print(f"{a.name}: {len(vocab)} measured terms, {len(data['members'])} people -> {path}")
     print("Unexplained terms for this audience will now be held back rather than guessed at.")
@@ -263,6 +332,8 @@ def main():
                    help="every repository under this owner")
     c.add_argument("--match-path", action="append", default=[], metavar="GLOB",
                    help="file paths this audience reads")
+    c.add_argument("--force", action="store_true",
+                   help="rebuild even though it drops routing the existing audience had")
     c.add_argument("--also-known", nargs="*", default=[])
     c.add_argument("--not-known", nargs="*", default=[])
     c.add_argument("--shared-context", choices=audiences.CONTEXT_ORDER, default="low")

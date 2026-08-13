@@ -36,23 +36,54 @@ measuring the corpus to avoid.
 A command fixes both, and it means a source nobody here has thought of works on the day you write
 the shell for it.
 
+## Writing a command that reads a live service
+
+Two things go wrong here, and both produce a corpus that looks fine.
+
+**Say which credential, and where it comes from.** "A token with `channels:history`" was not enough:
+someone reached for the token they had, a Slack CLI app-configuration token, which authenticated
+successfully and then failed on the first data call. Every recipe below names the kind of credential
+and links to the page that creates it, and a recipe you write for your own source should do the same.
+The exact scope matters less than the kind — a token of the wrong kind fails in a way that reads as
+your command being broken.
+
+**Read the whole thing, or say you did not.** A file either opens or it does not; an API call fails
+part way through and leaves you holding two-thirds of a channel. One real read died at 5,564 messages
+on a connection reset and would have been written up as complete. So retry transient errors with a
+backoff, honour rate limits (`429`, and `Retry-After` where the service sends one), and let one
+unreadable page cost that page rather than the rest of the run.
+
+`scan` catches what it can see: a source that yields no usable lines is named as a warning, a corpus of
+nothing refuses outright, and rebuilding an audience over a smaller corpus than last time says so. What
+it cannot see is a source that quietly stopped at two-thirds and exited 0. That one is yours.
+
 ## Recipes
 
 Each of these emits the contract above. They are starting points, not supported integrations.
 
-**Slack**, via any token you already have:
+**Slack**, via a bot token:
 
 ```sh
 #!/bin/sh
-# ./export-chat.sh CHANNEL_ID — needs SLACK_TOKEN with channels:history
+# ./export-chat.sh CHANNEL_ID
+# SLACK_TOKEN must be a BOT token — it starts `xoxb-`, and comes from
+#   https://api.slack.com/apps -> your app -> OAuth & Permissions -> Bot User OAuth Token
+# with the `channels:history` scope, and the bot invited to the channel.
+# A `xoxe.xoxp-` token from the Slack CLI is an app-configuration token: it authenticates and then
+# returns `missing_scope` on any data call.
 curl -s "https://slack.com/api/conversations.history?channel=$1&limit=1000" \
      -H "Authorization: Bearer $SLACK_TOKEN" \
-  | jq -c '.messages[] | select(.subtype == null)
-           | {author: .user, text: .text}'
+  | jq -c 'if .ok then .messages[] | select(.subtype == null)
+                       | {author: .user, text: .text}
+           else "slack: " + .error | halt_error(1) end'
 ```
 
-`.user` is a user id, which is stable and is what the destination reports, so no name lookup is
-needed for counting.
+`.user` is a user id, which is stable and is what the destination reports, so no name lookup is needed
+for counting. The `if .ok` is the point of that `jq`: without it a rejected token prints one error
+object and the pipeline exits 0.
+
+Paging past the first 1,000 messages, retrying and rate-limit handling are left out to keep the recipe
+readable — see the section above for why a real read needs them.
 
 **A Slack workspace export** (Settings → Import/Export), which is JSON on disk and needs no token:
 
@@ -60,7 +91,9 @@ needed for counting.
 jq -c '.[] | {author: .user, text: .text}' export/general/*.json
 ```
 
-**Microsoft Teams**, via Graph:
+**Microsoft Teams**, via Graph. `az login` first; reading another team's messages needs the
+`ChannelMessage.Read.All` application permission, granted by an administrator at
+https://portal.azure.com -> App registrations -> your app -> API permissions:
 
 ```sh
 az rest --uri "https://graph.microsoft.com/v1.0/teams/$TEAM/channels/$CHAN/messages" \
@@ -71,7 +104,10 @@ Teams returns message bodies as markup rather than plain text. The tags cost not
 acronym pattern does not match `<div>` — but strip them if you want to read the candidate list
 yourself.
 
-**Discord**, via [DiscordChatExporter](https://github.com/Tyrrrz/DiscordChatExporter) in JSON mode:
+**Discord**, via [DiscordChatExporter](https://github.com/Tyrrrz/DiscordChatExporter) in JSON mode. It
+takes a bot token from https://discord.com/developers/applications -> your app -> Bot -> Token, with
+the Message Content intent enabled — without that intent every `content` field comes back empty, which
+looks like a channel of blank messages rather than a permission problem:
 
 ```sh
 jq -c '.messages[] | {author: .author.id, text: .content}' export.json
