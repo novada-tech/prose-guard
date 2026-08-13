@@ -217,6 +217,11 @@ def main():
         save_state(path, state)
         if finding is None:
             continue
+        # A destination can refuse to block at all. Blocking is justified by the text being about to
+        # reach a reader unreviewed; where it is not — a draft that lands in your own compose box —
+        # the finding is worth saying and not worth a turn spent arguing.
+        if finding.severity == BLOCK and dest.get("max_severity") == "advise":
+            finding = finding._replace(severity="advise")
         if finding.severity == BLOCK:
             used = state["denials"].get(check.NAME, 0)
             if used < MAX_PER_CHECK and state["total_denials"] < MAX_DENIALS:

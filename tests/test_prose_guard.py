@@ -1078,6 +1078,55 @@ def test_a_shared_audience_arrives_without_being_measured():
         check("an absent shared directory is skipped", "engineers" in A.ALL, True)
 
 
+def test_a_destination_can_cap_effort_and_severity():
+    """Two different reasons to do less, and they are not the same knob.
+
+    Effort: measured across all eight destinations on the same 77 words of well-built prose, every one
+    costs about 15 seconds and 5 model calls — the cost is in the phases and the phases do not care
+    where the text is going. So there is no such thing as an expensive destination. What varies is
+    whether the questions apply: the phases ask whether this reader will care and whether the ask is
+    clear, and a commit message has neither an addressee nor an ask.
+
+    Severity: blocking is justified by the text being about to reach a reader unreviewed. A draft lands
+    in your own compose box, so it has a reader already, and holding it back spends a turn arguing
+    about text you were about to read anyway.
+    """
+    import checks
+    check("a cap below the level applies", checks.capped("high", "low"), "low")
+    check("a cap above it does not", checks.capped("low", "high"), "low")
+    check("no cap changes nothing", checks.capped("high", None), "high")
+    check("a nonsense cap changes nothing", checks.capped("high", "sideways"), "high")
+
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as repo:
+        write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"],
+                       members=["a", "b", "c", "d"])
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"effort": "low"}, fh)
+        body = ("The SFTR job needs the JSON payload rebuilt before the API can serve it over HTTP "
+                "again, which is why CI has been red since yesterday and the deploy could not go out.")
+
+        def ask(tool):
+            payload = {"tool_name": tool, "session_id": tool[-8:], "cwd": repo,
+                       "tool_input": {"channel_id": "C1", "message": body}}
+            r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
+                               text=True, env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=120)
+            if not r.stdout.strip():
+                return "allowed", ""
+            out = json.loads(r.stdout)["hookSpecificOutput"]
+            if out.get("permissionDecision") == "deny":
+                return "deny", out["permissionDecisionReason"]
+            return "advise", str(out.get("additionalContext") or "")
+
+        sent, said_sent = ask("mcp__slack__slack_send_message")
+        draft, said_draft = ask("mcp__slack__slack_send_message_draft")
+        check("a message about to be posted is held back", sent, "deny")
+        check("the same text as a draft is not", draft, "advise")
+        # The finding itself must be identical: the destination changes what is done about it, never
+        # whether the tool noticed.
+        check("and the finding is the same either way",
+              "SFTR" in said_sent and "SFTR" in said_draft, True)
+
+
 def test_words_already_there_are_not_words_you_wrote():
     """Someone was asked to scrub a client's name out of published commit messages.
 

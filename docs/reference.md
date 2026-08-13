@@ -56,19 +56,37 @@ to the destination that already claims prose files.
 
 ## Not every destination is worth the same effort
 
-A destination can cap the level it is checked at, and the commit message does: `low`, the term check
-only, whatever you have configured. Measured on one commit message at `high`, four runs: about 20
-seconds and four model calls each, and the findings were unstable — two runs raised something, two said
-nothing about the same text.
+A destination can cap two things, for two different reasons.
 
-That is the wrong trade for a commit message, and the reason is in what the higher levels ask. They ask
-whether this reader will care and whether the ask is clear. A commit message has no addressee and no
-ask; it is read years later by someone finding out when a line changed. The term check still applies,
-because an acronym nobody expands is exactly as unhelpful there as anywhere, and it costs no model call
-and about a tenth of a second.
+**`max_effort` — the questions do not apply here.** The commit message caps at `low`: the term check
+only, whatever you have configured. Not because it is expensive. Measured across all eight destinations
+on the same 77 words of well-built prose, three runs each, every one costs about 15 seconds and 5 model
+calls — the cost is in the phases and the phases do not care where the text is going. There is no such
+thing as an expensive destination.
 
-`max_effort` on any destination does the same, and your own `destinations.json` is read before the
-shipped one, so raising it back is a two-line file.
+What varies is whether the questions apply. The phases ask whether this reader will care and whether the
+ask is clear. A commit message has neither an addressee nor an ask; it is read years later by somebody
+finding out when a line changed. The term check still applies, because an acronym nobody expands is
+exactly as unhelpful in a permanent record as anywhere, and it costs no model call and a tenth of a
+second.
+
+**`max_severity` — nothing is about to reach anyone unreviewed.** A draft is its own destination and
+caps at `advise`. Blocking is justified by text being about to reach a reader with nobody in between;
+`slack_send_message_draft` lands in your own compose box, so it has a reader already, and holding it
+back spends a turn arguing about text you were about to read. The finding is identical either way — the
+destination changes what is done about it, never whether the tool noticed.
+
+Reproduce the cost table with:
+
+```
+python3 measure/measure_destinations.py --effort high --reps 3
+```
+
+False positives were rare: one complaint in 24 runs over text already judged well built. So neither cap
+is there to quieten a noisy check.
+
+Both fields work on any destination, and your own `destinations.json` is read before the shipped one, so
+changing either is a two-line file.
 
 ## When the words were already there
 

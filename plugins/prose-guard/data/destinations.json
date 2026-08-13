@@ -8,10 +8,26 @@
  },
  "destinations": [
   {
+   "name": "chat message you will read before sending",
+   "tool": [
+    "slack_send_message_draft"
+   ],
+   "text_fields": [
+    "message",
+    "text",
+    "content"
+   ],
+   "identifiers": {
+    "channel": "channel_id"
+   },
+   "max_severity": "advise",
+   "note": "whoever reads that channel \u2014 but you see this one first, in your own compose box",
+   "caveat": "Findings here are advice, never a block. A draft has a reader already: you. Blocking it would spend a turn arguing about text you were about to read anyway."
+  },
+  {
    "name": "chat message",
    "tool": [
     "slack_send_message",
-    "slack_send_message_draft",
     "slack_schedule_message",
     "slack_create_canvas",
     "slack_update_canvas",
