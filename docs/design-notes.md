@@ -25,7 +25,22 @@ down to 0–5%, which is the more interesting result — a check that has to poi
 more stable check.
 
 Every check is now validated in both directions: it catches planted defects **and** passes ordinary
-prose. 2–3 of 3 planted, 11–15 of 15 real.
+prose. `docs/measure_check.py` is the harness, and `--reps 2` also reports how often a check disagrees
+with itself, which bounds how much of any difference is real.
+
+At `claude-sonnet-5`, medium effort, 13 positives and 5 negatives:
+
+| check | catches the defect | passes real prose | disagrees with itself |
+|---|---|---|---|
+| terms | 2/2 | 10/10 | 0% |
+| relevance | 6/6 | 10/10 | 0% |
+| structure | 6/6 | 9/10 | 12% |
+| sentence | 6/6 | 8/10 | 0% |
+| reference | 5/6 | 10/10 | 12% |
+
+`structure` and `reference` are the weak ones: `structure` false-alarms and `reference` misses an
+invented name in one run of two. Both are advisory, which is the right severity for a check at that
+reliability.
 
 ## Freezing a passed check loses nothing measurable
 
@@ -79,6 +94,15 @@ how the cases are known to be load-bearing:
 - declining a suggested destination not being permanent
 - the acronym filter dropped, so capitalised English words are reported as jargon
 - the rule symlinked instead of copied
+
+## One config directory, not two
+
+The hook and the skills were reading different files. The per-plugin data directory reaches a hook's
+environment but not a skill's shell, so the setup skill wrote settings to one path and the guard read
+another: setup reported success and the guard stayed disabled, with nothing anywhere saying why.
+
+The cause was three copies of the path resolution, one per file. There is one now, and a test resolves
+it in a subprocess with the per-plugin variable set and asserts it is ignored.
 
 ## Thresholds
 
