@@ -8,7 +8,8 @@ description: Rewrite a specific piece of text so a named audience can act on it 
 ## Run the checks first, before you read any further
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/lib/check_prose.py" <file> --audience "who reads this"
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/check_prose.py" <file> --for <audience>
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/check_prose.py" <file> --who "who reads this, in your own words"
 ```
 
 These are the same checks prose-guard runs on a message you send, so what it
@@ -17,8 +18,12 @@ to, because this is one deliberate run rather than every message someone sends: 
 term check, then four separate checks for relevance, structure, sentences and reference. Four
 model calls of a few seconds each.
 
-Pass `--effort low` if you only want the term check — instant, no model call — or `medium` for
-one combined judgement call instead of four.
+`--for` names an audience whose vocabulary has been measured, and is the better one: run
+`python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" list` to see what exists. `--who` describes the
+reader in a sentence when no audience fits, and leaves the term check guessing rather than blocking.
+
+Pass `--effort low` if you only want the term check — instant, no model call — or `medium` for one
+combined judgement call instead of five.
 
 Do this first because the rest of this file is self-assessment, and self-assessment is the part
 that fails: in the one session where this skill was used on real work, the agent applied the

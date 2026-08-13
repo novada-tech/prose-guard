@@ -46,6 +46,14 @@ def one(args):
     os.makedirs(os.path.join(work, ".claude"), exist_ok=True)
     with open(os.path.join(work, "notes.txt"), "w") as fh:
         fh.write(FIXTURE)
+    # A git working tree, because the prose-file destination only claims a file that is tracked and
+    # not ignored — that is how it tells a document someone will read from a scratch file. Without
+    # this the guard never fires and the whole measurement reads zero, which looks like "free"
+    # rather than "not measured".
+    for cmd in (["git", "init", "-q"],
+                ["git", "-c", "user.email=m@e", "-c", "user.name=m", "commit", "-q",
+                 "--allow-empty", "-m", "fixture"]):
+        subprocess.run(cmd, cwd=work, capture_output=True)
     settings = {}
     if level != "disabled":
         settings["hooks"] = {"PreToolUse": [{"hooks": [{"type": "command", "command": GUARD}]}]}
@@ -79,6 +87,11 @@ def one(args):
             calls += 1
             tokens += json.loads(line).get("output_tokens", 0)
     wrote = os.path.join(work, "announce.md")
+    if calls == 0 and level != "disabled":
+        # Say so rather than reporting zero as a result. A level that spends no call has either
+        # nothing to check or a destination that did not match, and those are different.
+        print(f"  {tag:16s} WARNING: the guard never ran. Check that announce.md landed inside the "
+              f"git tree and that the level is set.", flush=True)
     row = {"level": level, "rep": rep, "seconds": round(seconds, 1),
            "turns": blob.get("num_turns"),
            "your_output_tokens": usage.get("output_tokens", 0),

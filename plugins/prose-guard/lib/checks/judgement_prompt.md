@@ -15,8 +15,14 @@ It FAILS only if you can point to one of these, quoting the span:
     silent row" where "the third row" was meant, a pronoun whose subject is several sentences
     away, or a name for something that is never given that name anywhere else.
 
+(g) "you", "your", a named individual, or "as we discussed" where the destination is read by a
+    group or read later by people who were not there, so a reader cannot tell whether it means
+    them. Second person is correct in a direct message or a thread reply — do not fail those;
+(h) a fact the destination already displays beside the message, such as which branch a pull
+    request targets.
+
 Do not fail it for length alone, and do not ask for fragments or telegraphic phrasing. If none
-of (a) to (f) applies, answer PASS.
+of (a) to (h) applies, answer PASS.
 
 On register, which depends on the audience. This team writes bluntly and without padding: no
 praise sandwiches, no softening preamble, questions asked directly. Do not ask for more

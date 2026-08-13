@@ -81,6 +81,25 @@ POSITIVES = {
          "Anyone still on the old chart should upgrade at some point soon (you need 1.14.2 or later, "
          "earlier ones drop the annotation) and then restart their shells." + PAD),
     ],
+    "address": [
+        # from real feedback on a pull request body: "mentions 'your review' — this is not
+        # targeting me"
+        ("second person at a broadcast",
+         "The two files worth your review are the rule and the skill. Everything else follows from "
+         "them, and the rule is the one that costs tokens on every turn, so it is the one you should "
+         "argue with first." + PAD),
+        ("names people as the audience",
+         "You both praised the failing test arriving in its own pull request, so the skill now says "
+         "to do that. David's objection to the phrase was in neither file, so both now say to name "
+         "what a phrase points at." + PAD),
+        ("restates what the destination shows",
+         "This targets the master branch and changes eleven files across the backend and the user "
+         "interface. It removes the exporter line, so shells no longer need a daily login before "
+         "the first deploy of the day." + PAD),
+        ("assumes the reader was there",
+         "As we discussed on Tuesday, the fallback now happens automatically, so per your comment "
+         "the extra flag is gone and the thing you raised about ordering is handled." + PAD),
+    ],
     "reference": [
         ("coined label", "The silent row is the one worth prioritising, since it is the only case "
                          "where nothing surfaces to the caller. The other two at least raise "
@@ -98,9 +117,11 @@ DEFAULT_NEGATIVES = os.path.join(HERE, "fixtures", "well-built", "*.md")
 
 
 class Ctx:
-    def __init__(self, audience):
+    def __init__(self, audience, who=None):
         self.audience = audience
         self.situation = {"destination": "a draft being measured, not sent"}
+        if who:
+            self.situation["who reads this"] = who
 
 
 def cell(job):
@@ -117,7 +138,13 @@ def main():
     ap.add_argument("--negatives", default=DEFAULT_NEGATIVES,
                     help="glob of ordinary well-built prose files it must PASS")
     ap.add_argument("--audience", help="measure against this audience instead of the baseline")
+    ap.add_argument("--who", help="describe the reader, for fixtures whose correctness depends on it "
+                                  "— see measure/fixtures/one-reader/")
     ap.add_argument("--reps", type=int, default=1, help="ask each question N times; 2 shows drift")
+    ap.add_argument("--negatives-only", action="store_true",
+                    help="skip the planted defects. Use with --who: a positive written for a "
+                         "broadcast does not apply once you name a single reader, so its result "
+                         "would be meaningless rather than bad")
     ap.add_argument("--workers", type=int, default=8)
     a = ap.parse_args()
 
@@ -131,9 +158,9 @@ def main():
         aud = audiences.ALL.get(a.audience)
         if aud is None:
             raise SystemExit(f"no audience called {a.audience!r}")
-        ctx = Ctx(audiences.Resolved([aud]))
+        ctx = Ctx(audiences.Resolved([aud]), a.who)
     else:
-        ctx = Ctx(audiences.resolve({}))
+        ctx = Ctx(audiences.resolve({}), a.who)
 
     negatives = []
     for path in sorted(glob.glob(a.negatives)):
@@ -146,7 +173,7 @@ def main():
 
     jobs = []
     for check in checks:
-        for tag, text in POSITIVES.get(check.NAME, []):
+        for tag, text in (() if a.negatives_only else POSITIVES.get(check.NAME, [])):
             for rep in range(a.reps):
                 jobs.append((check, "positive", tag, text, ctx, rep))
         for tag, text in negatives:

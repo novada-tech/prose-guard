@@ -16,9 +16,13 @@ Five steps. The first two always, the rest when they apply.
 
 ```
 python3 tests/test_prose_guard.py
+python3 tests/test_docs_match_code.py
 ```
 
-Standard library only, no setup, about fifteen seconds. Every case pins a design decision, so a failure
+Standard library only, no setup, about fifteen seconds. The second one reads every SKILL.md, finds the
+commands it tells someone to run, and checks each against the real interface — a skill documented
+`--audience` for a script that takes `--for`, and the person who hit it lost time before anything else
+could go wrong. Every case pins a design decision, so a failure
 usually means you changed a decision rather than broke an implementation — say which in the pull
 request.
 
@@ -59,9 +63,14 @@ Where it stands today, at `claude-sonnet-5` and medium effort, 13 positives and 
 |---|---|---|---|
 | terms | 2/2 | 10/10 | 0% |
 | relevance | 6/6 | 10/10 | 0% |
-| structure | 6/6 | 9/10 | 12% |
-| sentence | 6/6 | 8/10 | 0% |
-| reference | 5/6 | 10/10 | 12% |
+| structure | 5/6 | 10/10 | 12% |
+| sentence | 5/6 | 10/10 | 12% |
+| reference | 5/6 | 9/10 | 25% |
+| address | 7/8 | 10/10 | 11% |
+
+**These figures move between runs on unchanged prompts.** Three consecutive runs of `address` alone gave
+5/5, 5/5 and 4/5 on the negatives. So a one-cell difference is not a result, and a change worth claiming
+has to move more than that or be run more times.
 
 Do not make one column better by making the other worse without saying so. Both directions matter, and
 the failure that actually loses users is a check that fires on good prose.
