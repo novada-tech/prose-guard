@@ -1,0 +1,78 @@
+name: tests
+
+# Everything here is free: no model calls, no API keys, standard library only. The measurement
+# harnesses under measure/ are deliberately NOT run — they spend real tokens, so they stay a thing a
+# contributor runs deliberately and reports in the pull request.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The filter that tells an acronym from a capitalised English word prefers the system word
+      # list. A bare Ubuntu image has none, and the shipped floor in data/common-words.txt covers
+      # that case — but the tests should exercise the path a developer machine actually takes.
+      - name: install a system word list
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq wamerican
+
+      - name: word list present
+        run: |
+          test -f /usr/share/dict/words && wc -l < /usr/share/dict/words \
+            || echo "no system word list; the shipped floor is what is being tested"
+
+      - run: python3 tests/test_prose_guard.py
+      - run: python3 tests/test_docs_match_code.py
+
+      # And prove the suites need no model: a missing `claude` binary must not change the result.
+      - name: no model calls
+        run: |
+          mkdir -p "$RUNNER_TEMP/nobin"
+          PATH="/usr/bin:/bin:/usr/sbin:/sbin" python3 tests/test_prose_guard.py
+
+  version:
+    # Nobody's installed copy moves unless the version does: `claude plugin install` is a no-op when
+    # the plugin is already present at any version, and `plugin update` only moves on a version
+    # change. Eight commits shipped under 0.1.0 once, and the people who had installed it kept a
+    # skill with a flag that did not exist.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: the version must move when the plugin does
+        run: |
+          base="origin/${{ github.base_ref }}"
+          git fetch -q origin "${{ github.base_ref }}"
+          if git diff --quiet "$base"...HEAD -- plugins/; then
+            echo "no change under plugins/, so no version bump needed"
+            exit 0
+          fi
+          before=$(git show "$base":plugins/prose-guard/.claude-plugin/plugin.json \
+                   | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          after=$(python3 -c 'import json; print(json.load(open("plugins/prose-guard/.claude-plugin/plugin.json"))["version"])')
+          echo "plugin.json: $before -> $after"
+          if [ "$before" = "$after" ]; then
+            echo "::error::plugins/ changed but the version is still $after. Nobody's installed copy"
+            echo "::error::will update: plugin install is a no-op at any version, and plugin update"
+            echo "::error::only moves on a version change. Bump it in BOTH plugin.json and"
+            echo "::error::.claude-plugin/marketplace.json."
+            exit 1
+          fi
+          market=$(python3 -c 'import json; d=json.load(open(".claude-plugin/marketplace.json")); print([p["version"] for p in d["plugins"] if p["name"]=="prose-guard"][0])')
+          if [ "$market" != "$after" ]; then
+            echo "::error::plugin.json says $after and marketplace.json says $market. They must match"
+            echo "::error::or the catalogue offers a version the plugin does not claim."
+            exit 1
+          fi
