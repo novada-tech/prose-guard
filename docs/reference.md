@@ -29,11 +29,22 @@ That last rule replaces matching on `.md`. What matters is whether somebody othe
 the file, and "it gets committed" is a deterministic proxy — so your README is checked and your scratch
 notes are not.
 
-Three gaps, stated rather than hidden. `git commit` with no `-m` opens an editor and that text never
-reaches a tool call. `--body "$(cat file)"` cannot be read — the destination matches and the prose is not
-in the call, so the guard now says so once per session and names `--body-file`, which is read. It stayed
-silent until the pull request for that change went out unchecked, and silence there reads exactly like a
-check that passed. And the plumbing — `git commit-tree`,
+Two gaps, stated rather than hidden, and one that used to be a gap.
+
+`git commit` with no `-m` opens an editor, and that text never reaches a tool call. Nothing can be done
+about that from here.
+
+The plumbing — `git commit-tree`, `filter-branch --msg-filter`, `filter-repo` — is not matched, because
+those rewrite text somebody else wrote, usually in bulk, which is not the act this checks.
+
+`--body "$(cat file)"` used to pass in silence. The destination matches, the prose is a shell
+substitution the tool call does not contain, and nothing was checked — which reads exactly like a check
+that passed. It is **held back** now, naming `--body-file`, which is read. That is the one denial needing
+no judgement about the prose: text is about to be published, the guard cannot see it, and the remedy is
+one flag. Bounded at two, then said as advice, so a caller that cannot comply is not stuck.
+
+Advice was tried first and was not enough. The pull request that introduced the note went out unchecked
+while the note explained, afterwards, that it had. And the plumbing — `git commit-tree`,
 `filter-branch --msg-filter`, `filter-repo` — is not matched at all, deliberately: those rewrite text
 somebody else wrote, usually in bulk, which is not the act this checks.
 

@@ -511,12 +511,33 @@ def test_a_matched_destination_that_cannot_be_read_says_so():
             return ("deny" if out.get("permissionDecision") == "deny" else "advise",
                     out.get("permissionDecisionReason") or str(out.get("additionalContext") or ""))
 
-        verdict, said = ask('gh pr create --title "T" --body "$(git log -1 --format=%b)"')
-        check("an unreadable body is not passed over in silence", verdict, "advise")
+        substituted = 'gh pr create --title "T" --body "$(git log -1 --format=%b)"'
+        verdict, said = ask(substituted)
+        # Held back, not mentioned. Advice is a request the caller may skip, and the pull request that
+        # introduced this went out unchecked while the note explained afterwards that it had. This is
+        # the one denial that needs no judgement about the prose: text is about to be published, the
+        # guard cannot see it, and the remedy is one flag.
+        check("an unreadable body is held back", verdict, "deny")
         check("it names the flag that would work", "--body-file" in said, True)
-        # Once per session. A gap worth mentioning is not worth mentioning on every call.
-        again, _ = ask('gh pr create --title "T" --body "$(git log -1 --format=%b)"')
-        check("and says it once", again, "silent")
+
+        # Bounded like every other denial, so a caller that cannot comply is not stuck.
+        second, _ = ask(substituted)
+        check("asked twice", second, "deny")
+        third, said_third = ask(substituted)
+        check("then let through", third, "advise")
+        check("saying why it stopped insisting", "not worth blocking" in said_third, True)
+        fourth, _ = ask(substituted)
+        check("and silent after that", fourth, "silent")
+
+        # The remedy has to work, or the denial is a trap: the same prose in a file is read and checked.
+        body_path = os.path.join(repo, "prbody.md")
+        with open(body_path, "w") as fh:
+            fh.write("The SFTR reconciliation needs the JSON payload rebuilt before the API can serve "
+                     "it over HTTP again. That is why continuous integration has been red since "
+                     "yesterday and the deploy could not go out at all.")
+        verdict, said = ask(f"gh pr create --title \"T\" --body-file {body_path}", "viafile")
+        check("the form it recommends is read", "SFTR" in said, True)
+        check("and is judged rather than waved through", verdict in ("deny", "advise"), True)
 
         # A body given literally is checked as normal, not diverted into this branch.
         body = ("The exporter line was removed because nothing on a laptop reads that variable. Plans "

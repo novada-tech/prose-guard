@@ -104,11 +104,13 @@ Already covered without asking: chat messages, GitHub and GitLab comments and PR
 documentation pages, issue trackers, `git commit` and `git tag -m`, and prose files that are inside
 a git working tree and not ignored.
 
-Two known gaps worth stating rather than hiding: `git commit` with no `-m` opens an editor and that text
-never reaches a tool call, and a body passed as `--body "$(cat file)"` is a shell substitution that the
-tool call does not contain. The second one now says so, once per session, and names the `--body-file`
-form that is read — silence there was indistinguishable from a check that passed, and the pull request
-for that very change went out unchecked.
+One known gap worth stating rather than hiding: `git commit` with no `-m` opens an editor, and that text
+never reaches a tool call.
+
+A body passed as `--body "$(cat file)"` used to be a second gap. The prose is a shell substitution the
+tool call does not contain, so nothing was checked — and passing silently reads exactly like a check that
+passed. That is held back now, naming `--body-file`, which is read. Write long bodies to a file and pass
+them that way and it never comes up.
 
 ## 5. Offer audiences, and be honest about what it buys
 

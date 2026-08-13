@@ -37,6 +37,7 @@ from checks import BLOCK, EFFORT, IN_ORDER as CHECKS  # noqa: E402
 MAX_PER_CHECK = 2      # one complaint, then one more if the fix did not land
 MAX_DENIALS = 6        # a ceiling across all of them, so one message cannot eat a session
 MAX_CALLS = 12         # and a ceiling on calls, since a re-verified check can be asked again
+MAX_UNREADABLE = 2     # times a session is asked to make its text visible before it is let through
 
 
 class Context:
@@ -181,11 +182,23 @@ def main():
         # like a check that passed, which is how the pull request for this change went out unchecked.
         why = destinations.unreadable(dest, tool, tool_input)
         if why:
+            # Held back rather than mentioned. Advice here is a request the agent is free to skip, and
+            # the pull request for this very change went out unchecked while the note said so
+            # afterwards. This is the one case where blocking needs no judgement about the prose: text
+            # is about to be published and the guard cannot see it, and the remedy is one flag.
+            #
+            # Bounded like every other denial, so a caller that cannot comply is not stuck: after
+            # MAX_UNREADABLE it is said as advice and the call goes through.
             path, state = load_state(str(payload.get("session_id") or "no-session"))
-            if not state.get("told_unreadable"):
-                state["told_unreadable"] = True
-                save_state(path, state)
-                emit("advise", why)
+            held = state.get("unreadable", 0)
+            state["unreadable"] = held + 1
+            save_state(path, state)
+            if held < MAX_UNREADABLE:
+                emit(BLOCK, why.rstrip("."))
+                return
+            if held == MAX_UNREADABLE:
+                emit("advise", why + " Letting it through: this has come up "
+                                     f"{held + 1} times and the check is not worth blocking on.")
                 return
         allow()
 
