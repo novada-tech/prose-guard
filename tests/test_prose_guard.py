@@ -784,11 +784,18 @@ def test_discovery_ignores_long_text_that_is_not_going_anywhere():
             ("a long regex", shape("Bash", command=f"grep -E '{pattern}' -r .")),
             ("a script passed to -c", shape("Bash", command=f'python3 -c "{script}"')),
             ("a search whose pattern is words", shape("Bash", command=f"git log --grep '{search}'")),
-            ("the text an edit replaces", shape("Edit", file_path="/x/y.md", old_string=prose,
-                                                new_string=prose)),
-            ("an instruction to a subagent", shape("Agent", prompt=prose)),
-            ("a file being written", shape("Write", file_path="/x/y.md", content=prose))):
+            ("an instruction to a subagent", shape("Agent", prompt=prose))):
         check(f"not a destination: {label}", got, None)
+
+    # Writing a file IS worth mentioning, and excluding it was a mistake. The prose-file destination
+    # only claims a file that is tracked, and discovery is asked only about calls nothing claimed — so
+    # excluding Write silenced the one case that needed saying: a blog plan written to a directory that
+    # is not a git repository at all went unchecked and unmentioned.
+    check("a file being written is a candidate",
+          shape("Write", file_path="/x/y.md", content=prose), "tool: Write [content]")
+    # The field an edit replaces is still not outgoing, whatever tool carries it.
+    check("but not the text an edit replaces",
+          D._shape("Edit", {"file_path": "/x/y.md", "old_string": prose}), None)
 
     # And the things that are, still are.
     check("a commit message is", shape("Bash", command='git commit -m "' + prose + '"'),

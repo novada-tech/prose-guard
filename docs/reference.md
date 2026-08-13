@@ -24,8 +24,32 @@ firing on technical terms, which is the noise a measured vocabulary exists to pr
 
 The fragment class is caught by the checks that already exist, when the text is short enough. Asked about
 that sentence on its own, `structure` found it in three runs of three and `sentence` in two of three. It
-got through inside 370 words. That is dilution, and the fix for it is to check long text in pieces rather
-than to add a sixth opinion about the whole thing.
+got through inside 370 words.
+
+Checking long text one paragraph at a time was the obvious fix, and it was measured and dropped. Pooled
+over eight runs of a 371-word document with that fragment planted in it, the whole document caught it
+twice in eight and so did paragraph-at-a-time — no difference in what was found, nine times the model
+calls, and a complaint about prose already judged well built in nearly every pass instead of one pass in
+five. Reproduce it with:
+
+```
+python3 measure/measure_splitting.py --reps 5
+```
+
+The reason is worth knowing, because it explains the instability above as well. These checks are
+comparative: asked about a piece of text they report the worst thing in it, so a smaller piece does not
+sharpen them, it lowers the bar for what counts as worst. Asked about one paragraph the same check found
+nothing wrong 3 times in 3, and asked about the paragraph plus everything before it, `reference` found
+something 3 times in 5.
+
+Which context a check needs is not one answer for all of them, and the prompts say so:
+
+| | needs | why |
+|---|---|---|
+| `mechanics` | one sentence | a doubled word is local |
+| `sentence` | the document | it reports the worst sentence, so it needs the field to compare |
+| `reference` | the document | "a pronoun whose subject is several sentences away" is about what came before, and a term used before it is explained is about what comes after |
+| `relevance`, `structure`, `address` | the document | what is missing, what order it is in, and who is addressed cannot be answered from a fragment |
 
 ## What it does when it disagrees with you
 

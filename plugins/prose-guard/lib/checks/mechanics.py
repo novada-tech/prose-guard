@@ -21,8 +21,8 @@ What is deliberately NOT here is grammar in general. The sentence that prompted 
 with no main verb, and it needs the sentence understood, not pattern-matched. Asked about that
 sentence on its own, the existing checks find it: `structure` in three runs of three and `sentence` in
 two of three, all pointing at the same sentence. It got through because it was one sentence inside 370
-words, which is dilution rather than a missing check — so this adds no sixth model call to re-find
-what two checks already find.
+words — so this adds no sixth model call to re-find what two checks already find. Splitting the document
+to sharpen those checks was measured and dropped; see docs/reference.md.
 """
 import re
 

@@ -351,9 +351,11 @@ def _candidates_path():
 # outgoing, and discovery gets one mention per shape — spending it on these is spending it on nothing.
 NOT_OUTGOING = ("old_string", "prompt", "pattern", "command", "query", "regex", "expression",
                 "description", "script", "code", "diff", "input")
-# Tools where a file destination already decides. A prose file is claimed by extension and by being
-# tracked; suggesting "add Write" would add a rule that ignores both.
-WRITES_A_FILE = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+# Nothing is excluded for writing a file, and that was a mistake worth recording. The reasoning was
+# that the prose-file destination already decides which files count — but it only claims a file that
+# is TRACKED, and discovery is asked only about calls nothing claimed. So excluding Write silenced the
+# one case that needed saying: a blog plan written to ~/novada, which is not a git repository at all,
+# was never checked and, with the exclusion in place, was never mentioned either.
 
 
 def _reads_like_prose(text):
@@ -395,8 +397,6 @@ def _shape(tool, tool_input):
                 words = cmd.strip().split()
                 head = " ".join(w for w in words[:2] if not w.startswith("-"))
                 return f"bash: {head} {m.group(1)}"
-        return None
-    if tool in WRITES_A_FILE:
         return None
     for field, value in tool_input.items():
         if field in NOT_OUTGOING:
