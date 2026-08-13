@@ -533,7 +533,8 @@ def test_levels():
     for level, names in (("disabled", []),
                          ("low", ["terms"]),
                          ("medium", ["terms", "judgement"]),
-                         ("high", ["terms", "relevance", "structure", "sentence", "reference"])):
+                         ("high", ["terms", "relevance", "structure", "sentence", "reference",
+                                   "address"])):
         check(f"level/{level}", [c.NAME for c in checks.for_effort(level)], names)
     check("only the judgement checks cost a call",
           [c.COSTS_A_CALL for c in checks.for_effort("low")], [False])
