@@ -117,4 +117,4 @@ message. Read the ordering rather than the digits: your own traffic and your own
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE).
+Apache 2.0, copyright NovAda BV. See [LICENSE](LICENSE).

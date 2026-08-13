@@ -1,6 +1,6 @@
 {
   "name": "prose-guard",
-  "version": "0.7.1",
+  "version": "1.0.0",
   "description": "Checks a message, review comment, documentation page or document on its way out, and hands it back with one problem named.",
   "author": {
     "name": "Simon Cockx"
@@ -12,5 +12,6 @@
       "title": "How much to check outgoing prose",
       "description": "disabled, low, medium or high. medium is the level the measurements support. Leave empty and run /prose-guard:setup instead."
     }
-  }
+  },
+  "license": "Apache-2.0"
 }

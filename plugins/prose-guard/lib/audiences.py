@@ -195,8 +195,8 @@ def possible_overlap():
 
     Exact overlap is not computable and the tool does not pretend otherwise. Sources name people
     differently — a chat export gives display names, a repository gives logins — so "Sam" and
-    "sam-t" are one person that no comparison here can join with confidence, and a plain
-    set intersection reports zero while several people are in both.
+    "sam-t" are one person that no comparison here can join with confidence, and a plain set
+    intersection reports zero while several people are in both.
 
     So this matches on a normalised prefix and is labelled as a guess. Nothing depends on it:
     audiences are never merged or dropped on the strength of it, because a wrong guess would widen

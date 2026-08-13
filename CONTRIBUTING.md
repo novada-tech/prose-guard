@@ -175,4 +175,5 @@ A false alarm on ordinary prose is a defect even when the check's reasoning soun
 
 ## Licence
 
-Contributions are under the MIT licence, the same as the rest of the repository.
+Apache 2.0, the same as the rest of the repository. Section 5 of that licence means anything you send
+in a pull request is offered under it, so there is no separate agreement to sign.
