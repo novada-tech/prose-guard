@@ -652,18 +652,35 @@ def test_rule_installer():
         run("--remove")
         check("removable", os.path.exists(target), False)
 
+def teardown_function(_fn):
+    """Make pytest as honest as running this file directly.
+
+    `check` records rather than raises, so one test reports every one of its failures instead of
+    stopping at the first. That also means a test function returns normally when it has failed, so
+    under pytest all of these passed unconditionally — including three that were mutation-tested
+    against broken code and never noticed. pytest calls this after each test.
+    """
+    if FAILS:
+        recorded, FAILS[:] = list(FAILS), []
+        raise AssertionError("\n" + "\n".join(recorded))
+
 
 def main():
-    for fn in (test_detection, test_it_survives_a_machine_with_no_dictionary,
-               test_modern_technical_words_are_not_jargon, test_matching, test_combination, test_no_subset_elimination,
-               test_severity, test_routing, test_prose_files_must_be_tracked,
-               test_user_destinations_win, test_passive_discovery,
-               test_the_hook_surfaces_a_candidate_once,
-               test_hook_end_to_end, test_session_ledger_bounds_the_argument,
-               test_state_stays_out_of_the_plugin, test_one_config_location,
-               test_verdict_parsing, test_the_two_check_prose_flags_do_different_jobs,
-               test_levels, test_audience_editing,
-               test_rule_installer):
+    # Discovered, not listed. A hand-maintained list silently skipped three tests that had been
+    # written, committed and were passing locally.
+    tests = sorted((fn for name, fn in globals().items()
+                    if name.startswith("test_") and callable(fn)),
+                   key=lambda fn: fn.__code__.co_firstlineno)
+    # Every test this file defines has to be one that ran. Three were written, committed and green
+    # locally while the runner skipped them, and "all checks passed" is a worse outcome than a red
+    # build: it is the same words as a real pass.
+    import re
+    defined = set(re.findall(r"^def (test_\w+)", open(__file__).read(), re.M))
+    missed = defined - {fn.__name__ for fn in tests}
+    if missed:
+        print(f"FAIL these tests are defined but were not run: {', '.join(sorted(missed))}")
+        return 1
+    for fn in tests:
         try:
             fn()
         except Exception as exc:                # a test that cannot run is a failure, not a pass
@@ -671,9 +688,9 @@ def main():
     for line in FAILS:
         print(line)
     if FAILS:
-        print(f"\n{len(FAILS)} failure(s)")
+        print(f"\n{len(FAILS)} failure(s) in {len(tests)} tests")
         return 1
-    print("prose-guard: all checks passed")
+    print(f"prose-guard: all checks passed ({len(tests)} tests)")
     return 0
 
 
