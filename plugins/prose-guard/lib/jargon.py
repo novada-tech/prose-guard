@@ -164,7 +164,12 @@ def scan(text, is_known):
     """
     body = prose(text)
     written = pairs(body)
-    considered = sorted(t for t in set(ACRONYM.findall(body)) if is_acronym(t))
+    # A term the audience is known to use IS a term the reader had to handle, whatever the local
+    # dictionary thinks of it. Without that clause the denominator moves between machines: Ubuntu's
+    # wamerican contains "api" and macOS's web2 does not, so API counted as an acronym on one and as
+    # an English word on the other — and the share threshold is computed against this count.
+    considered = sorted(t for t in set(ACRONYM.findall(body))
+                        if is_known(t) or is_acronym(t))
     unexplained = sorted(t for t in considered
                          if not is_known(t) and t not in written
                          and not expanded_in_prose(t, body))

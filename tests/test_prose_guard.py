@@ -102,12 +102,17 @@ def test_detection():
     ]
     for label, text, want in cases:
         check(f"detect/{label}", jargon.scan(text + PAD, is_known)[0], want)
-    # the denominator: every acronym-shaped term the reader met, known or not
+    # The denominator: every acronym-shaped term the reader met, known or not. A known term counts
+    # even where the local dictionary happens to contain it — otherwise this number, and the share
+    # threshold computed from it, differ between Linux and macOS.
     check("considered counts known terms too",
           jargon.scan("The CLI hit the API and then ADC failed." + PAD, is_known)[1],
           ["ADC", "API", "CLI"])
     check("and excludes things that are not acronyms at all",
           jargon.scan("THE ERROR was in the CLI." + PAD, is_known)[1], ["CLI"])
+    # ZZQ is in no dictionary on any platform, so this case cannot drift with the word list
+    check("an unknown non-word always counts",
+          jargon.scan("The ZZQ pipeline broke." + PAD, is_known)[1], ["ZZQ"])
 
 
 # --------------------------------------------------------------------- audiences
