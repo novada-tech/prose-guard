@@ -104,6 +104,25 @@ another: setup reported success and the guard stayed disabled, with nothing anyw
 The cause was three copies of the path resolution, one per file. There is one now, and a test resolves
 it in a subprocess with the per-plugin variable set and asserts it is ignored.
 
+## The word list is from 1913
+
+`/usr/share/dict/words` is the web2 dictionary. It has no modern computing vocabulary, so the filter
+that tells an acronym from a capitalised English word passes THE and WAS and flags INLINE.
+
+Someone ran the checker on a real draft and the only thing it reported was `INLINE` — from their own
+scaffolding header, not from the text they were about to post. Probing 44 common technical terms found
+29 in the same position: KUBECTL, TERRAFORM, CIDR, SUBNET, GRPC, MONOREPO, ZSH and the rest.
+
+80 of them are now in the `engineers` baseline, grouped by kind so a reviewer can argue with a group
+rather than a list. Measured effect on 800 real messages from two corpora: **one detection**, because
+those corpora are financial-model discussions and barely mention infrastructure. The class is real and
+the measured impact here is small; an infrastructure-heavy corpus would show more.
+
+Nothing that should be flagged was swallowed: ADC, GKE, SFTR, MSCI, FTSE, CDM, DRR, FQN, GAV and ISDA
+all still need explaining. A test asserts both halves, and asserts the *outcome* rather than baseline
+membership — two mechanisms produce it, and KAFKA is handled by the word list because Kafka was an
+author.
+
 ## Thresholds
 
 The author cut and the share threshold, with the corpora behind them and what the measurement fails to

@@ -47,8 +47,15 @@ def main():
     if a.audience:
         aud = audiences.ALL.get(a.audience)
         if aud is None:
-            raise SystemExit(f"no audience called {a.audience!r}. Try: "
-                             f"python3 lib/audiences.py list")
+            # Say what IS there, and where it is looked for. An audience can vanish — a config
+            # directory gets cleaned up, PROSE_GUARD_HOME differs between two shells — and "no such
+            # audience" on its own leaves you guessing which of those happened.
+            have = ", ".join(sorted(audiences.ALL)) or "none"
+            raise SystemExit(f"No audience called {a.audience!r}.\n"
+                             f"  looked in: {audiences.user_dir()}\n"
+                             f"  found:     {have}\n"
+                             f"Create it with /prose-guard:audiences, or pass --who to describe the "
+                             f"reader in your own words instead.")
         resolved = audiences.Resolved([aud])
     else:
         resolved = audiences.resolve({})

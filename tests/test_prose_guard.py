@@ -95,8 +95,6 @@ def test_detection():
          "THE build WAS broken WITH a NULL logger and an ERROR in ASCII output.", []),
         # LOGGER lowercases to a real word. DEBUG does not, and is covered by the engineers
         # baseline instead — two different mechanisms, and it matters which one is doing the work.
-        # LOGGER lowercases to a real word. DEBUG does not, and is covered by the engineers
-        # baseline instead — two mechanisms, and it matters which one is doing the work.
         ("nor is a code identifier that happens to be a word",
          "The LOGGER never wrote anything at all.", []),
         # the word list holds base forms, so inflections need the suffix strip
@@ -113,6 +111,31 @@ def test_detection():
 
 
 # --------------------------------------------------------------------- audiences
+def test_modern_technical_words_are_not_jargon():
+    """The system word list is the 1913 web2 dictionary and knows none of this.
+
+    Someone ran the checker on a draft and the only thing it flagged was INLINE, from their own
+    scaffolding header. INLINE is not an acronym, is not in the word list, and was not in the
+    baseline — a whole class: KUBECTL, TERRAFORM, CIDR and 80 others were in the same position.
+    """
+    import audiences
+    import jargon
+    # Assert the OUTCOME, not which mechanism produces it. Two do: the word list catches anything
+    # that lowercases to English (KAFKA is in it, for the author), and the baseline carries the rest.
+    # A test on baseline membership would fail for a term the word list already handles.
+    resolved = audiences.Resolved([], "engineers")
+    def flagged(term):
+        return jargon.is_acronym(term) and not resolved.is_known(term)
+
+    for term in ("INLINE", "ASYNC", "ENUM", "REGEX", "KUBECTL", "TERRAFORM", "CIDR", "SUBNET",
+                 "GRPC", "WEBHOOK", "MONOREPO", "CRON", "ZSH", "TMUX", "REDIS", "KAFKA", "TOML",
+                 "SEMVER", "OTEL", "P99"):
+        check(f"a developer knows {term}", flagged(term), False)
+    # and nothing that genuinely needs explaining was swallowed to get there
+    for term in ("ADC", "GKE", "SFTR", "MSCI", "FTSE", "CDM", "DRR", "FQN", "GAV", "ISDA"):
+        check(f"{term} still needs explaining", flagged(term), True)
+
+
 def test_matching():
     with tempfile.TemporaryDirectory() as home:
         write_audience(home, "chat", matches={"slack_channels": ["C1"]})
@@ -570,7 +593,7 @@ def test_rule_installer():
 
 
 def main():
-    for fn in (test_detection, test_matching, test_combination, test_no_subset_elimination,
+    for fn in (test_detection, test_modern_technical_words_are_not_jargon, test_matching, test_combination, test_no_subset_elimination,
                test_severity, test_routing, test_prose_files_must_be_tracked,
                test_user_destinations_win, test_passive_discovery,
                test_the_hook_surfaces_a_candidate_once,
