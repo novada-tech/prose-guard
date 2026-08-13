@@ -41,8 +41,8 @@ is in [docs/design-notes.md](docs/design-notes.md); add yours to it.
 ### 3. If you touched a check, measure whether it discriminates
 
 ```
-python3 docs/measure_check.py --reps 2
-python3 docs/measure_check.py --check sentence --reps 2      # just yours
+python3 measure/measure_check.py --reps 2
+python3 measure/measure_check.py --check sentence --reps 2      # just yours
 ```
 
 A check that fails everything carries no information, and neither does one that fails nothing. Both cost
@@ -50,7 +50,7 @@ a model call. This asks in both directions and reports how often the check disag
 the same text, which is the number that decides whether any threshold on top of it can mean anything.
 
 Adding a check means adding fixtures for it: three positives in `POSITIVES` in that script, written to
-carry your defect and nothing else. Negatives live in `docs/fixtures/well-built/` and every check shares
+carry your defect and nothing else. Negatives live in `measure/fixtures/well-built/` and every check shares
 them.
 
 Where it stands today, at `claude-sonnet-5` and medium effort, 13 positives and 5 negatives:
@@ -69,7 +69,7 @@ the failure that actually loses users is a check that fires on good prose.
 ### 4. Measure what it costs the person using it
 
 ```
-python3 docs/measure_cost.py --levels disabled,medium --reps 5
+python3 measure/measure_cost.py --levels disabled,medium --reps 5
 ```
 
 These are real sessions. Five reps of two levels means ten of them, so expect a few minutes and expect
@@ -88,7 +88,7 @@ moves any of those by more than a few seconds, say so in the title of the pull r
 ### 5. If you touched a threshold, re-measure it
 
 ```
-python3 docs/measure_thresholds.py --corpus a.jsonl --audience audience-a \
+python3 measure/measure_thresholds.py --corpus a.jsonl --audience audience-a \
                                    --corpus b.jsonl --audience audience-b
 ```
 

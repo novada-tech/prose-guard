@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Does a check discriminate, or does it just fire? Run this on any check you add or change.
 
-    python3 docs/measure_check.py                       every check
-    python3 docs/measure_check.py --check sentence      one of them
-    python3 docs/measure_check.py --negatives mine/*.md --reps 2
+    python3 measure/measure_check.py                       every check
+    python3 measure/measure_check.py --check sentence      one of them
+    python3 measure/measure_check.py --negatives mine/*.md --reps 2
 
 A check that fails everything carries no information, and neither does one that fails nothing. Both
 cost a model call and one of them costs a blocked turn as well. So every check has to be measured in

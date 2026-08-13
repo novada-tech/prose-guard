@@ -25,7 +25,7 @@ down to 0–5%, which is the more interesting result — a check that has to poi
 more stable check.
 
 Every check is now validated in both directions: it catches planted defects **and** passes ordinary
-prose. `docs/measure_check.py` is the harness, and `--reps 2` also reports how often a check disagrees
+prose. `measure/measure_check.py` is the harness, and `--reps 2` also reports how often a check disagrees
 with itself, which bounds how much of any difference is real.
 
 At `claude-sonnet-5`, medium effort, 13 positives and 5 negatives:

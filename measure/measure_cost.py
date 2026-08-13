@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What a change costs the person using it. Run this before proposing one.
 
-    python3 docs/measure_cost.py --levels disabled,medium --reps 5
+    python3 measure/measure_cost.py --levels disabled,medium --reps 5
 
 Paired sessions: the same task and the same fixture, once per level, several times each. It reports
 what YOUR session spent, which is the part a teammate feels — a held-back message costs an extra agent

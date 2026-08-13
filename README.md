@@ -113,6 +113,7 @@ message. Read the ordering rather than the digits: your own traffic and your own
 | [docs/design-notes.md](docs/design-notes.md) | what was measured, and the two ideas that did not survive it |
 | [docs/thresholds.md](docs/thresholds.md) | the two numbers that decide whether a message is held back |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | how to test and measure a change |
+| [measure/](measure/) | the harnesses that do the measuring |
 
 ## Licence
 

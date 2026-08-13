@@ -56,5 +56,5 @@ when almost nothing is in play.
 
 ## Re-running this
 
-`docs/measure_thresholds.py` takes two corpora of `{"author": ..., "text": ...}` lines and prints the
+`measure/measure_thresholds.py` takes two corpora of `{"author": ..., "text": ...}` lines and prints the
 table above for your own audiences. Worth doing if your writing looks unlike either corpus here.

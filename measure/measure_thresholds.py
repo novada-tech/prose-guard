@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Re-measure the share threshold on your own audiences.
 
-    python3 docs/measure_thresholds.py \
+    python3 measure/measure_thresholds.py \
         --corpus a.jsonl --audience audience-a \
         --corpus b.jsonl --audience audience-b
 
