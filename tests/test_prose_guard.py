@@ -1020,6 +1020,121 @@ def test_a_shared_audience_arrives_without_being_measured():
         check("an absent shared directory is skipped", "engineers" in A.ALL, True)
 
 
+def test_words_already_there_are_not_words_you_wrote():
+    """Someone was asked to scrub a client's name out of published commit messages.
+
+    That means reproducing each message verbatim apart from the name — and the guard held the amend over
+    two acronyms the original author had written a year earlier. Nothing the agent could do would clear
+    it, because the text was not theirs to rewrite. They got past it with `git commit-tree`, plumbing the
+    hook does not match, after asking the user to approve a bypass.
+
+    A term already in the version being replaced is not a term this text introduces. Checked against the
+    repository rather than taken on trust, so it cannot be used to wave anything through.
+    """
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as repo:
+        for argv in (["init", "-q"], ["config", "user.email", "t@t.t"], ["config", "user.name", "t"]):
+            subprocess.run(["git", "-C", repo, *argv], capture_output=True, timeout=60)
+        open(os.path.join(repo, "f.txt"), "w").write("x\n")
+        subprocess.run(["git", "-C", repo, "add", "f.txt"], capture_output=True, timeout=60)
+        old = ("Resolve the J1-vs-J4 disagreement raised in review\n\n"
+               "J1 and J4 were the original author's shorthand for two findings.")
+        subprocess.run(["git", "-C", repo, "commit", "-q", "-m", old], capture_output=True,
+                       timeout=60)
+        write_audience(home, "team", matches={"paths": ["*"]}, inherits=["engineers"],
+                       members=["a", "b", "c", "d"], vocabulary={"BSP": 9})
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"effort": "low"}, fh)
+
+        body = ("Resolve the J1-vs-J4 disagreement raised in review, keeping the original wording "
+                "intact apart from the client name, so the published history stays comparable with "
+                "what everybody already read on the pull request last year.")
+        # Built rather than written out: a literal `git commit -m "...J1..."` in this file is a command
+        # the guard reads, and it blocks its own test suite.
+        commit = "git" + " commit"
+
+        def ask(command, session):
+            payload = {"tool_name": "Bash", "session_id": session, "cwd": repo,
+                       "tool_input": {"command": command}}
+            r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
+                               text=True, env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=120)
+            if not r.stdout.strip():
+                return "allowed", ""
+            out = json.loads(r.stdout)["hookSpecificOutput"]
+            if out.get("permissionDecision") == "deny":
+                return "deny", out["permissionDecisionReason"]
+            return "advise", str(out.get("additionalContext") or "")
+
+        # "Already there" is answered with the scan's own machinery, not a substring test. A previous
+        # message mentioning SOURCE must not excuse RC, or a coincidence becomes an exemption.
+        import jargon
+        check("a term inside a longer word is not present", jargon.uses("the SOURCE file", "RC"),
+              False)
+        check("a term against a boundary is", jargon.uses("cut the RC-1 build", "RC"), True)
+        check("and every term the scan finds, uses agrees on",
+              all(jargon.uses(old, t) for t in ("J1", "J4")), True)
+
+        verdict, said = ask(f'{commit} -m "{body}"', "new")
+        check("a new commit introducing the terms is still flagged", verdict, "advise")
+        check("and names them", "J1" in said, True)
+
+        verdict, said = ask(f'{commit} --amend -m "{body}"', "amend")
+        check("an amend carrying the same terms forward is not", verdict, "allowed")
+
+        # The rule is per term, not per command: an amend is not a blanket exemption.
+        fresh_term = body.replace("J1-vs-J4", "SFTR-vs-EMIR")
+        verdict, said = ask(f'{commit} --amend -m "{fresh_term}"', "amend2")
+        check("an amend that introduces a new term is flagged", verdict, "advise")
+        check("naming only the new one", "SFTR" in said and "J1" not in said, True)
+
+
+def test_one_command_can_be_excused_but_not_a_session():
+    """A global off switch is the thing to avoid — turned off for a minute, off for weeks, and nobody
+    knows because the absence of complaints reads exactly like clean prose. This cannot outlive the
+    command it is written on, and it has to say why in words somebody will read later."""
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as repo:
+        subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True, timeout=60)
+        write_audience(home, "team", matches={"paths": ["*"]}, inherits=["engineers"],
+                       members=["a", "b", "c", "d"])
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"effort": "low"}, fh)
+        body = ("Resolve the J1-vs-J4 disagreement raised in review, keeping the original wording "
+                "intact apart from the client name, so the published history stays comparable with "
+                "what everybody already read on the pull request last year.")
+        commit = "git" + " commit"
+
+        def ask(command, session="skip"):
+            payload = {"tool_name": "Bash", "session_id": session, "cwd": repo,
+                       "tool_input": {"command": command}}
+            r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
+                               text=True, env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=120)
+            if not r.stdout.strip():
+                return "allowed", ""
+            out = json.loads(r.stdout)["hookSpecificOutput"]
+            if out.get("permissionDecision") == "deny":
+                return "deny", out["permissionDecisionReason"]
+            return "advise", str(out.get("additionalContext") or "")
+
+        verdict, said = ask(f'PROSE_GUARD_SKIP="republishing text I did not write" {commit} '
+                            f'-m "{body}"')
+        check("a stated reason excuses the command", verdict, "advise")
+        check("and the reason is repeated back where it can be read",
+              "republishing text I did not write" in said, True)
+
+        verdict, said = ask(f'PROSE_GUARD_SKIP=1 {commit} -m "{body}"', "asswitch")
+        check("used as a switch, it is refused", verdict, "deny")
+        check("and says what is missing", "reason" in said, True)
+
+        # It applies to the command it is written on and nothing else, so the next one is checked.
+        verdict, said = ask(f'{commit} -m "{body}"', "after")
+        check("the next command is checked as normal", verdict in ("advise", "deny"), True)
+
+        for n in range(2):
+            ask(f'PROSE_GUARD_SKIP="reason number {n} for skipping" {commit} -m "{body}"', "many")
+        verdict, said = ask(f'PROSE_GUARD_SKIP="reason number three for skipping" {commit} '
+                            f'-m "{body}"', "many")
+        check("repeated use is counted and surfaced", "3 skips" in said, True)
+
+
 def test_rule_installer():
     with tempfile.TemporaryDirectory() as tmp:
         e = {**os.environ, "HOME": tmp}

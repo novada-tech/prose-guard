@@ -22,6 +22,7 @@ Every failure path allows the call. A broken writing check must never block outb
 import hashlib
 import json
 import os
+import re
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -45,11 +46,38 @@ class Context:
         ids = destinations.identifiers(dest, tool, tool_input, cwd)
         self.audience = audiences.resolve(ids, unresolved_default=default_audience())
         self.situation = destinations.situation(dest, tool, tool_input)
+        # The version this text replaces, where one exists. A term already in it is not one this
+        # message introduces, and holding a message back over words somebody else wrote is a demand
+        # nobody can satisfy.
+        self.previous = destinations.previous(dest, tool, tool_input, cwd)
         # A destination can say the readers are better informed than the audience assumes, e.g. a
         # direct message inside a channel-wide audience. Never the other way round.
         override = self.situation.pop("_shared_context", None)
         if override:
             self.audience.shared_context = override
+
+
+# One command, not one session. A global off switch is the thing to avoid: someone turns it off for a
+# minute and finds out weeks later it was never turned back on, having believed all along that their
+# prose was being checked. This cannot outlive the command it is written on, and it appears in the
+# transcript beside whatever it let through.
+SKIP = re.compile(r"""(?:^|\s|;|&&|\|\|)PROSE_GUARD_SKIP=(?:"([^"]*)"|'([^']*)'|(\S+))\s""")
+
+
+def skipped(tool_input):
+    """The stated reason for skipping this one command, if there is one.
+
+    A reason is required, and not because it is checked — nothing here can tell a good reason from a bad
+    one. It is required because writing one is a sentence someone reads later, which is a different act
+    from flipping a switch. `PROSE_GUARD_SKIP=1` does not work.
+    """
+    match = SKIP.search(str(tool_input.get("command") or "") + " ")
+    if not match:
+        return None
+    reason = next((g for g in match.groups() if g), "").strip()
+    if len(reason) < 8 or reason.isdigit():
+        return ""                            # present but empty: refuse, and say what is missing
+    return reason
 
 
 def default_audience():
@@ -115,6 +143,23 @@ def main():
     tool = payload.get("tool_name") or ""
     tool_input = payload.get("tool_input") or {}
     cwd = payload.get("cwd")
+
+    reason = skipped(tool_input)
+    if reason == "":
+        emit(BLOCK, ('PROSE_GUARD_SKIP needs a reason someone can read rather than a value — e.g. '
+                     'PROSE_GUARD_SKIP="republishing a message I did not write". It applies to this '
+                     'one command'))
+        return
+    if reason:
+        path, state = load_state(str(payload.get("session_id") or "no-session"))
+        state["skipped"] = state.get("skipped", []) + [reason]
+        save_state(path, state)
+        count = len(state["skipped"])
+        emit("advise", f"Writing check skipped for this command: {reason}"
+                       + (f". That is {count} skips this session — if the check is wrong about "
+                          f"something in general, /prose-guard:audiences is the fix that lasts"
+                          if count >= 3 else ""))
+        return
 
     dest = destinations.match(tool, tool_input)
     if not dest:

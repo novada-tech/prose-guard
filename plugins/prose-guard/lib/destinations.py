@@ -168,6 +168,39 @@ def identifiers(dest, tool, tool_input, cwd=None):
     return out
 
 
+def previous(dest, tool, tool_input, cwd=None):
+    """The text this one replaces, where there is one. Empty string when there is not.
+
+    A term already in the text being replaced is not a term this message introduces. Someone was asked
+    to scrub a client's name from published commit messages, which meant reproducing each message
+    verbatim apart from that name — and the guard held the amend over two acronyms the original author
+    had written a year earlier. Nothing the agent could do would fix that, because the text was not
+    theirs to rewrite. It worked around the guard with plumbing, and asked the user to approve a bypass.
+
+    This is deliberately a property of the repository or the disk rather than a claim by the caller, so
+    it cannot be used to wave anything through.
+    """
+    if dest.get("bash") and re.search(r"\bgit\s+commit\b", str(tool_input.get("command") or "")):
+        if re.search(r"--amend\b", str(tool_input.get("command") or "")):
+            try:
+                got = subprocess.run(["git", "-C", cwd or os.getcwd(), "log", "-1", "--format=%B"],
+                                     capture_output=True, text=True, timeout=10)
+                return got.stdout if got.returncode == 0 else ""
+            except Exception:
+                return ""
+        return ""
+    # An edit to a file: at PreToolUse the write has not happened, so the file on disk still holds the
+    # version being replaced.
+    path = tool_input.get("file_path")
+    if path and dest.get("file"):
+        try:
+            with open(path, errors="replace") as fh:
+                return fh.read()
+        except OSError:
+            return ""
+    return ""
+
+
 def situation(dest, tool, tool_input):
     """Facts about the moment rather than the reader: a thread reply, an edit, a public repo."""
     out = {}

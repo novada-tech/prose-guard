@@ -29,8 +29,10 @@ That last rule replaces matching on `.md`. What matters is whether somebody othe
 the file, and "it gets committed" is a deterministic proxy — so your README is checked and your scratch
 notes are not.
 
-Two gaps, stated rather than hidden: `git commit` with no `-m` opens an editor and that text never
-reaches a tool call, and `--body "$(cat file)"` cannot be read.
+Three gaps, stated rather than hidden. `git commit` with no `-m` opens an editor and that text never
+reaches a tool call. `--body "$(cat file)"` cannot be read. And the plumbing — `git commit-tree`,
+`filter-branch --msg-filter`, `filter-repo` — is not matched at all, deliberately: those rewrite text
+somebody else wrote, usually in bulk, which is not the act this checks.
 
 **Your tools are not mine**, so setup asks rather than assumes. `lib/discover.py` reads four local
 sources — MCP servers you have configured, outbound command-line tools on your `PATH`, how often each
@@ -42,6 +44,35 @@ You will install something new next month, and the guard notices on its own: whe
 call carrying long prose it records the *shape* — `bash: git commit -m`, `tool: example__post [body]` —
 never the text. It mentions it **once**, on about the third use, and never again. Decline and it is
 declined for good.
+
+## When the words were already there
+
+A term the previous version already used is not a term this text introduces, so it is not held against
+you. Amending a commit message compares against the message being replaced; editing a document compares
+against the file on disk, which at that moment still holds the version being replaced.
+
+This exists because of a job nobody could finish otherwise. Someone was asked to scrub a client's name
+out of published commit messages, which meant reproducing each one verbatim apart from that name — and
+the guard blocked the amend over two acronyms the original author had written a year earlier. No edit
+could have cleared it. It is per term, not per command: an amend that introduces a term the old message
+did not have is still checked.
+
+It reads the repository rather than believing the caller, so it is not a way to wave anything through.
+
+## Excusing one command
+
+```
+PROSE_GUARD_SKIP="republishing a message I did not write" git commit --amend -m '...'
+```
+
+For the cases the rule above does not cover. It applies to the command it is written on and nothing
+else — there is deliberately no way to turn the check off for a session, because that is the switch that
+gets left off, and the absence of complaints reads exactly like clean prose.
+
+The reason is required. Nothing checks whether it is a good one; requiring it means writing a sentence
+somebody reads later, which is a different act from flipping a switch. `PROSE_GUARD_SKIP=1` is refused.
+Each use is echoed back, counted, and after the third the tool points at `/prose-guard:audiences`, which
+is the fix that lasts when the check is wrong about a term in general.
 
 ## One message, two audiences
 

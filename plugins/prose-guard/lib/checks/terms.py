@@ -35,6 +35,13 @@ ALWAYS_ACTIONABLE = 2
 def run(text, ctx):
     from . import ADVISE, BLOCK, Finding
     bad, considered = jargon.scan(text, ctx.audience.is_known)
+    # Terms the previous version already used are not terms this text introduces. Rewriting a
+    # published commit message to remove a client's name should not require also explaining the
+    # original author's shorthand, and demanding it produces a block nobody can clear.
+    before = getattr(ctx, "previous", "") or ""
+    if before and bad:
+        inherited = [t for t in bad if jargon.uses(before, t)]
+        bad = [t for t in bad if t not in inherited]
     if not bad:
         return None
     fix = ("Explain each where it first appears, by anchoring it to something this reader already "

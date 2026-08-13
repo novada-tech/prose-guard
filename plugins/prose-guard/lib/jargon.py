@@ -163,6 +163,16 @@ def expanded_in_prose(short, text):
     return re.search(pat, text, re.I) is not None
 
 
+def uses(text, term):
+    """Whether this text already contains that term.
+
+    Deliberately the scan's own machinery rather than a substring test or a second regex: the question
+    is "would this term have been found here", and answering it any other way lets the two disagree.
+    `RC` is not found inside `SOURCE`, and is found in `RC-1`, because that is what the scan does.
+    """
+    return term in set(ACRONYM.findall(prose(text)))
+
+
 def scan(text, is_known):
     """(unexplained, considered). `considered` is every acronym-shaped term the reader had to
     handle, known or not — the denominator for asking whether the audience model is wrong.
