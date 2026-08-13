@@ -14,7 +14,7 @@ comment, a commit message, a document — against two questions:
 **Who is going to read this?**
 **Why should they care?**
 
-From these two fundamental questions in effective communication, six checks follow, and they are what actually runs. The first is arithmetic and can
+From these two central questions of effective communication, six checks follow, and they are what actually runs. The first is arithmetic and can
 hold a message back; the other five are judgement and only ever advise.
 
 | | |
