@@ -21,7 +21,7 @@ the two disagree.
 
 ## Before you open a pull request
 
-Five steps. The first two always, the rest when they apply.
+Six steps. The first two always, the rest when they apply.
 
 ### 1. The tests must pass
 
@@ -110,7 +110,21 @@ Report the model and effort you used. A cost measured on one model says little a
 Today, on one fixture: `low` adds about 12s, `medium` 19s, `high` 75s per message sent. If your change
 moves any of those by more than a few seconds, say so in the title of the pull request, not the body.
 
-### 5. If you touched a threshold, re-measure it
+### 5. If you touched the rule, measure what it changes
+
+```
+python3 measure/measure_rule.py --rule rule/engineer-communication.md --rule none --reps 6
+```
+
+The rule is the only always-on part, which makes a change to it the hardest to notice and the easiest
+to get wrong. Each `--rule` is an arm and `none` is the unguarded control; both belong in every run.
+
+Read the bootstrap intervals rather than the means. At six replicates the interval on the code-block
+share is about nine points wide, so this rules out a large regression and not a small one. Growing the
+rule from 156 words to 246 cost nothing measurable on it; a longer draft before that measurably diluted
+adherence, so the effect it looks for is real.
+
+### 6. If you touched a threshold, re-measure it
 
 ```
 python3 measure/measure_thresholds.py --corpus a.jsonl --audience audience-a \
