@@ -73,19 +73,23 @@ python3 lib/audiences.py list
 python3 lib/audiences.py show platform-team
 python3 lib/audiences.py accept platform-team GKE      # one term is wrong; applies immediately
 python3 lib/audiences.py match platform-team channel C054ZDE533R   # change when it applies
-python3 lib/audiences.py rm platform-team
+python3 lib/audiences.py share platform-team --to ~/work/team-scripts/claude/audiences
 ```
 
 Files on disk, one per audience. Read them, diff them, edit them.
+
+[audiences.md](audiences.md) is the whole of it: the three layers that get read, how one person
+measures an audience and everybody else gets it by pulling, and what does and does not travel with it.
 
 What an audience *knows* comes from scanning writing those people already did, from any source you can
 pipe — [sources.md](sources.md) has the contract and recipes for chat, mail and wikis. What an audience
 *applies to* is the separate list of identifiers `match` edits. Confusing the two is easy, and the
 flags are named to make it harder.
 
-`engineers` is a shipped baseline: 96 acronyms any developer knows, with no identifiers of its own, so
-it never applies alone — audiences inherit it. That is where the tool's bias lives, and it is
-deliberate. Other baselines are welcome as data files beside it.
+`engineers` is a shipped baseline: acronyms any developer knows, with no identifiers of its own, so it
+never applies alone — audiences inherit it. That is where the tool's bias lives, and it is deliberate.
+Other baselines are welcome as data files beside it, and a team can override this one for everybody by
+sharing a file of the same name.
 
 ## Where everything lives
 
@@ -93,7 +97,7 @@ deliberate. Other baselines are welcome as data files beside it.
 
 | file | what |
 |---|---|
-| `config.json` | effort level, and which baseline to assume when no audience matches |
+| `config.json` | effort level, which baseline to assume when no audience matches, and any shared directories |
 | `audiences/*.json` | one per audience: who they are, what they know, who is in them |
 | `destinations.json` | your own or overridden destinations, read before the shipped ones |
 | `unclaimed-destinations.json` | shapes passive discovery noticed, and what you decided |

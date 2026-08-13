@@ -88,6 +88,19 @@ check the warnings before reading the piles.
 
 It prints three piles: reached the cut of 4 distinct people, exactly one person short, and below.
 
+While it runs it reports documents, people and terms past the cut every few seconds. If they ask how
+long it will take, the honest answer is that the tool cannot know — a source does not say how much it
+holds until it has been read. Give them the rate and the count so far, and this:
+
+- Stopping early is safe in one direction only. A term needs a fixed number of distinct authors and
+  authors only accumulate, so a short read can only *under*-measure, and an under-measured audience
+  holds messages back that it should have let through. It cannot let unexplained jargon out.
+- What that costs, measured on 11,754 real documents: reading half changed 3.5% of verdicts, reading a
+  tenth changed 16.5%.
+- So `--max-documents N` is a reasonable answer to "this is taking too long", and re-running later to
+  rebuild is strictly additive. Use `--keep FILE` and pass it back as `--jsonl` to avoid re-reading
+  what was already read.
+
 ### 4. Bring them only the middle pile
 
 The first and third piles need no human. One person short of the cut is exactly where counting
@@ -123,6 +136,26 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" match <name> repo owner/repo --
 
 Then `show` it and read the result back to them. Say what changed: unexplained terms for that
 audience are now held back rather than reported as a guess.
+
+### 6. Offer to share it, if a team would use it
+
+Measuring is the expensive part and it only has to happen once. If this audience describes colleagues
+rather than one person's correspondents, offer to put it in a directory their team already clones:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" share <name> --to <dir>
+```
+
+Offer, do not assume. Some audiences describe a handful of people, or a client, and are nobody else's
+business. Names of the people counted stay on this machine unless they ask for `--with-names`, and the
+command refuses that outright for a public repository. The count travels either way.
+
+If they have no shared directory yet, the receiving half is one line per colleague, or nothing at all
+if their setup script runs it for them:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/share_dir.py" --add '$TEAM_REPO/claude/audiences'
+```
 
 ## When a message reaches two audiences at once
 

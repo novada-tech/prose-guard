@@ -939,6 +939,87 @@ def test_the_fetcher_survives_what_an_api_does():
         server.server_close()
 
 
+def test_an_audience_can_be_shared_with_a_team():
+    """One person measures, everyone gets it by pulling — but only the ones they chose to share.
+
+    Deliberate in both directions. A scan produces audiences that describe a handful of people by
+    name, so sharing is a separate verb naming one audience, and whether the names travel is a choice
+    with the safe default. The count travels either way, because "measured over 94 people" is the
+    provenance a colleague needs and it names nobody.
+    """
+    import audiences
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as team:
+        shared_dir = os.path.join(team, "audiences")
+        write_audience(home, "platform", matches={"channels": ["C7"], "repos": ["your-org/infra"]},
+                       members=["ann", "bob", "cat"], vocabulary={"BSP": 9})
+        write_audience(home, "private-thing", matches={"channels": ["C9"]},
+                       members=["ann"], vocabulary={"SECRET": 9})
+        A, _ = fresh(home)
+
+        target, people = A.share("platform", shared_dir)
+        check("it says how many were counted", people, 3)
+        landed = json.load(open(target))
+        check("names do not travel by default", "members" in landed, False)
+        check("the count does", landed["_meta"]["measured_over_people"], 3)
+        check("routing travels", landed["matches"]["channels"], ["C7"])
+        check("vocabulary travels", landed["vocabulary"]["BSP"], 9)
+        check("and only what was named is shared",
+              sorted(os.listdir(shared_dir)), ["platform.json"])
+
+        A.share("platform", shared_dir, with_names=True)
+        check("names travel when asked", json.load(open(target))["members"], ["ann", "bob", "cat"])
+
+        # An audience with no identifiers can never apply on anyone else's machine, so sharing it
+        # would look like it worked and do nothing at all.
+        write_audience(home, "nowhere", matches={}, vocabulary={"AAA": 9})
+        A, _ = fresh(home)
+        try:
+            A.share("nowhere", shared_dir)
+            check("an audience that can never apply is refused", "no error", "ValueError")
+        except ValueError:
+            pass
+
+
+def test_a_shared_audience_arrives_without_being_measured():
+    import audiences
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as team:
+        shared_dir = os.path.join(team, "audiences")
+        os.makedirs(shared_dir)
+        with open(os.path.join(shared_dir, "platform.json"), "w") as fh:
+            json.dump({"name": "platform", "who": "the platform team",
+                       "matches": {"channels": ["C7"]}, "inherits": ["engineers"],
+                       "vocabulary": {"BSP": 9}}, fh)
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"shared": [shared_dir]}, fh)
+
+        A, _ = fresh(home)
+        check("the team's audience is loaded", "platform" in A.ALL, True)
+        check("and marked as theirs, not yours", A.ALL["platform"].origin, "shared")
+        r = A.resolve({"channel": "C7"})
+        check("it routes", r.names, ["platform"])
+        check("and its vocabulary applies", r.is_known("BSP"), True)
+
+        # Deleting the file locally would take it from everybody on the next push, and it would come
+        # back on the next pull. Overriding is the local answer.
+        try:
+            A.remove("platform")
+            check("a shared audience cannot be deleted locally", "no error", "PermissionError")
+        except PermissionError:
+            pass
+        write_audience(home, "platform", matches={"channels": ["C7"]},
+                       vocabulary={"BSP": 9, "SFTR": 9})
+        A, _ = fresh(home)
+        check("your own copy wins", A.ALL["platform"].origin, "yours")
+        check("and it is the one that applies", A.resolve({"channel": "C7"}).is_known("SFTR"), True)
+
+        # A directory that is configured but absent is skipped, not fatal: a colleague may add the
+        # line before the checkout lands.
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"shared": [os.path.join(team, "not-cloned-yet")]}, fh)
+        A, _ = fresh(home)
+        check("an absent shared directory is skipped", "engineers" in A.ALL, True)
+
+
 def test_rule_installer():
     with tempfile.TemporaryDirectory() as tmp:
         e = {**os.environ, "HOME": tmp}
