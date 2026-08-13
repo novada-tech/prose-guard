@@ -6,11 +6,18 @@ document written to disk — and hands it back with one problem named. A Claude 
 ```
 /plugin marketplace add novada-tech/prose-guard
 /plugin install prose-guard@novada
-/prose-guard:setup
+/plugin configure prose-guard@novada     # choose a level: low, medium or high
 ```
 
-It is off until `setup` runs, and it needs nothing but `python3`. No packages, no virtualenv, no
-API key beyond the one Claude Code already has.
+Or in one line from a shell, then restart Claude Code:
+
+```
+claude plugin install prose-guard@novada --config effort=medium
+```
+
+It is off until you choose a level, and it needs nothing but `python3` — no packages, no
+virtualenv, no API key beyond the one Claude Code already has. `/prose-guard:setup` walks through
+the same choice conversationally and offers the optional vocabulary step.
 
 ## What it actually catches
 
@@ -205,6 +212,39 @@ The pattern here generalises, and it is the interesting part of the design:
 4. **Deterministic extraction, agent judgement, human confirmation** — in that order, each step's
    output inspectable.
 5. **Write plain files.** Everything lands where the user can read, diff and hand-edit it.
+
+## What it stores, and where
+
+Nothing in the plugin directory, which a plugin update replaces. Everything under
+`CLAUDE_PLUGIN_DATA` — `~/.claude/plugins/data/prose-guard-novada/` — which survives updates:
+
+| file | what | written by |
+|---|---|---|
+| `config.json` | the effort level, if not set through `/plugin configure` | `/prose-guard:setup` |
+| `vocabulary.json` | terms your audience shares, and how many people used each | `/prose-guard:learn-vocabulary` |
+| `known-terms.txt` | terms you accepted by hand, one per line | you, or `vocabulary.accept()` |
+| `destinations.json` | your own or overridden destinations | you |
+| `sessions/` | per-session denial bookkeeping | the hook |
+
+Set `PROSE_GUARD_HOME` to put them somewhere else. Outside a plugin install they default to
+`$XDG_CONFIG_HOME/prose-guard`.
+
+## Notes for anyone building a similar plugin
+
+Four things about Claude Code plugins that cost me time, all verified on 2.1.228 rather than read:
+
+- **`userConfig` works, and reaches a hook as `CLAUDE_PLUGIN_OPTION_<KEY>`.** Set it with
+  `/plugin configure <plugin>` or `--config KEY=VALUE`; it lands in settings under
+  `pluginConfigs.<plugin>.options`. I failed to make it work twice before finding those, because
+  guessing the settings shape without the `options` level gets you nothing and no error.
+- **`CLAUDE_PLUGIN_ROOT` is the marketplace *source* directory for a directory marketplace, and
+  the install cache for a git one.** A git install copies only the plugin directory, so anything
+  the hook needs has to live inside it. A sibling path resolves to nothing and the hook fails
+  open in silence — which is how this tool nearly shipped broken.
+- **`CLAUDE_PLUGIN_DATA` is exported into the hook environment**, not merely interpolated into the
+  command string, and it survives updates.
+- **A plugin cannot ship a rule.** A `rules/` directory in a plugin does not load. Skills, hooks,
+  commands, agents, MCP servers and output styles do.
 
 ## Licence
 

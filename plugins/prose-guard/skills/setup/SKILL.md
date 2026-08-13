@@ -38,12 +38,21 @@ Two things worth telling them, because both are counter-intuitive:
 - **`high` is not known to be better than `medium`.** Both satisfied every concern on every message
   measured, which is a judge at its ceiling rather than evidence they are equal.
 
-`medium` is the level the evidence supports. Then:
+`medium` is the level the evidence supports. Set it whichever way suits them:
+
+```
+/plugin configure prose-guard@novada
+```
+
+That is the first-class path — Claude Code stores it and passes it to the hook. If they would
+rather have a file they can read and commit, or they installed some other way:
 
 ```
 python3 -c "import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/lib'); \
 from checks import config; print(config.save('medium'))"
 ```
+
+`/plugin configure` wins if both are set.
 
 ## 3. Offer to measure their vocabulary, and say what it buys
 
