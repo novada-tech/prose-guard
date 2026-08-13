@@ -74,6 +74,10 @@ WORDS = SYSTEM_WORDS | SHIPPED_WORDS
 # The system word list carries base forms, so FAILS and COINED survive it. Stripping these suffixes
 # catches the inflections without pulling in a stemmer.
 _SUFFIXES = ("s", "es", "ed", "ing", "d")
+# What is left has to be a word in its own right, not two letters. Without this floor AMD reduced to
+# "am" and AWS to "aw" — both in the dictionary — so neither was ever reported, and adding any
+# two-letter abbreviation to the word list silently retired a whole family of acronyms with it.
+_SHORTEST_STEM = 3
 
 
 def is_acronym(token):
@@ -85,7 +89,8 @@ def is_acronym(token):
     low = token.lower()
     if low in WORDS:
         return False
-    return not any(low.endswith(sfx) and low[: -len(sfx)] in WORDS for sfx in _SUFFIXES)
+    return not any(low.endswith(sfx) and len(low) - len(sfx) >= _SHORTEST_STEM
+                   and low[: -len(sfx)] in WORDS for sfx in _SUFFIXES)
 
 
 def prose(text):

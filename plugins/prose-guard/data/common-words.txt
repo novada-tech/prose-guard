@@ -51,4 +51,17 @@ ask asks answer answers question questions issue issues
 # specialism reads these without pausing, so asking someone to expand them would be noise. Kept
 # here rather than in a baseline audience because knowing them depends on reading English, not on
 # what anybody works on.
-asap fyi eta aka etc vs tldr iirc afaik imo imho kpi ceo cfo cto hr pto ooo eod eow
+asap fyi eta aka etc vs tldr iirc afaik imo imho kpi cfo cto hr pto ooo eod eow
+
+# General knowledge rather than anybody's vocabulary: places, time, dates, units, currencies, job
+# titles, company suffixes and office file formats. These were reaching the borderline pile in a real
+# scan — FAQ, UK and GDPR at three authors each — which means every team that measures an audience
+# spends its human judgement on the same terms. They belong here, where every audience gets them,
+# rather than in a baseline only developers inherit: a client-services reader should not be asked to
+# expand FRI either.
+faq uk usa gdpr nato gmt cet est bst am pm bc ad
+ceo coo cio vp pr qa nda sla llc ltd inc plc gmbh
+diy rsvp ps nb tbc tbd tba
+mon tue wed thu fri sat sun jan feb mar apr jun jul aug sep oct nov dec
+km cm mm gb mb kb tb doc xls ppt www email
+usd eur gbp jpy chf

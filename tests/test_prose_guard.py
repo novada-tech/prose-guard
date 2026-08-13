@@ -176,12 +176,40 @@ def test_everyday_abbreviations_are_not_jargon():
 
     for term in ("ASAP", "FYI", "ETA", "AKA", "TLDR", "IIRC", "KPI", "PTO", "EOD"):
         check(f"any reader knows {term}", flagged(term), False)
+    # A real scan put FAQ, UK and GDPR in the borderline pile at three authors each, for a human to
+    # judge. Every team that measures an audience would spend its judgement on the same terms, so
+    # general knowledge — places, dates, units, currencies, titles — is universal here rather than
+    # something each organisation re-measures.
+    for term in ("FAQ", "UK", "GDPR", "GMT", "CET", "FRI", "SEP", "GB", "MB", "KM", "USD", "EUR",
+                 "CEO", "VP", "LLC", "TBC", "PPT"):
+        check(f"general knowledge, not vocabulary: {term}", flagged(term), False)
     for term in ("HTML", "CSS", "GPU", "SMTP", "ACL", "TTY", "OOM"):
         check(f"any developer knows {term}", flagged(term), False)
     # LF lowercases to nothing and looks like line feed, so it is tempting to ship as known. In the
     # corpus it meant Linux Foundation in five of seven appearances, to readers who were not told.
     # Two letters rarely carry one meaning; an audience that does share it can learn it.
     check("LF stays flagged, being ambiguous", flagged("LF"), True)
+
+
+def test_a_stripped_suffix_must_leave_a_word_behind():
+    """AWS was missing from a 225-term developer baseline and nothing ever reported it.
+
+    The filter that tells an acronym from a capitalised English word strips plural and past-tense
+    suffixes so FAILS and COINED are not treated as jargon. With no floor on what is left, AWS reduced
+    to "aw" and AMD to "am" — both in the dictionary — so both were silently exempt, and every
+    two-letter abbreviation added to the word list retired another family of acronyms with it.
+    """
+    import jargon
+    for term in ("FAILS", "COINED", "USES", "USED", "RUNS", "PODS", "JOBS"):
+        check(f"{term} is an inflected word, not an acronym", jargon.is_acronym(term), False)
+    # Each of these reduces to a real two-letter word: am, aw, pr, id, ad. That is the whole failure.
+    for term in ("AMD", "AWS", "PRD", "IDS", "ADS"):
+        check(f"{term} is an acronym whatever it ends in", jargon.is_acronym(term), True)
+
+    import audiences
+    resolved = audiences.Resolved([], "engineers")
+    for term in ("AWS", "GCP", "TDD", "AMD", "CMD"):
+        check(f"and a developer knows {term}", resolved.is_known(term), True)
 
 
 def test_matching():
@@ -678,10 +706,16 @@ def test_a_vocabulary_can_come_from_any_command():
         check("a bot is not a person", found["counts"]["BSP"]["authors"], 4)
         check("nor is it a member", "deploy-bot" in found["members"], False)
 
-        r = subprocess.run([sys.executable, os.path.join(LIB, "learn.py"), "scan",
-                            "--command", "exit 3", "--out", out + ".2"],
-                           capture_output=True, text=True, env=e, timeout=120)
+        def scan(*commands, out=out):
+            argv = [sys.executable, os.path.join(LIB, "learn.py"), "scan"]
+            for c in commands:
+                argv += ["--command", c]
+            return subprocess.run(argv + ["--out", out], capture_output=True, text=True, env=e,
+                                  timeout=120)
+
+        r = scan("exit 3", out=out + ".2")
         check("a failing command is reported, not swallowed", "warning" in r.stderr, True)
+
 
 
 def test_routing_can_be_edited_without_hand_editing_json():
