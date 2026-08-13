@@ -16,6 +16,7 @@ detection serves any audience. audiences.py decides what is known.
     python3 lib/jargon.py <file>
     cat draft.md | python3 lib/jargon.py
 """
+import os
 import re
 import sys
 
@@ -29,19 +30,18 @@ QUOTE = re.compile(r"^\s*>.*$", re.M)
 ACRONYM = re.compile(r"\b([A-Z][A-Z0-9]{1,5})\b")
 
 
-def _dictionary():
+def _system_words():
     """The system word list, used to tell an acronym from a capitalised English word.
 
-    An acronym is by definition not a word, so this belongs here rather than in any audience:
-    THE, WAS, LOGGER, NULL, ERROR and ASCII all lowercase to real words and were being reported as
-    jargon nobody had explained. A hand-kept exclusion list would grow for ever. A missing word list
-    means the filter simply does not fire.
+    An acronym is by definition not a word, so this belongs here rather than in any audience: THE,
+    WAS, LOGGER, NULL, ERROR and ASCII all lowercase to real words and were being reported as jargon
+    nobody had explained. A hand-kept exclusion list would grow for ever.
     """
     for path in ("/usr/share/dict/words", "/usr/dict/words"):
         try:
             with open(path, encoding="utf-8", errors="ignore") as fh:
-                # two-letter words included, or IS, IT, ON and AS survive as "acronyms". The cost
-                # is that IT as in information technology is filtered too, which is the right way
+                # two-letter words included, or IS, IT, ON and AS survive as "acronyms". The cost is
+                # that IT as in information technology is filtered too, which is the right way
                 # round: a message using "IT" is almost never using it as a term to explain.
                 return {w.strip().lower() for w in fh if len(w.strip()) > 1}
         except OSError:
@@ -49,7 +49,26 @@ def _dictionary():
     return set()
 
 
-WORDS = _dictionary()
+def _shipped_words():
+    """The floor, for a machine with no system dictionary at all.
+
+    Many Linux containers have none. Without this the filter never fires and every capitalised
+    English word is reported as unexplained jargon — the tool degrades into noise, and says nothing
+    about having done so.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data",
+                        "common-words.txt")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return {w for line in fh if not line.startswith("#")
+                    for w in line.split() if len(w) > 1}
+    except OSError:
+        return set()
+
+
+SHIPPED_WORDS = _shipped_words()
+SYSTEM_WORDS = _system_words()
+WORDS = SYSTEM_WORDS | SHIPPED_WORDS
 
 
 # The system word list carries base forms, so FAILS and COINED survive it. Stripping these suffixes

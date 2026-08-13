@@ -111,6 +111,25 @@ def test_detection():
 
 
 # --------------------------------------------------------------------- audiences
+def test_it_survives_a_machine_with_no_dictionary():
+    """Many Linux containers have no /usr/share/dict/words, and the filter that tells an acronym from
+    a capitalised English word depends on it. Without a floor, THE, WAS and WITH are reported as
+    unexplained jargon and the tool is noise — silently, which is the worst part.
+    """
+    import audiences
+    import jargon
+    real, jargon.WORDS = jargon.WORDS, jargon.SHIPPED_WORDS
+    try:
+        check("a floor ships with the tool", len(jargon.SHIPPED_WORDS) > 300, True)
+        resolved = audiences.Resolved([], "engineers")
+        bad, _ = jargon.scan(
+            "THE build WAS broken WITH a NULL logger and an ERROR in ASCII output today, so nobody "
+            "could tell what the GKE cluster did.", resolved.is_known)
+        check("without a system dictionary only the real term is flagged", bad, ["GKE"])
+    finally:
+        jargon.WORDS = real
+
+
 def test_modern_technical_words_are_not_jargon():
     """The system word list is the 1913 web2 dictionary and knows none of this.
 
@@ -594,7 +613,8 @@ def test_rule_installer():
 
 
 def main():
-    for fn in (test_detection, test_modern_technical_words_are_not_jargon, test_matching, test_combination, test_no_subset_elimination,
+    for fn in (test_detection, test_it_survives_a_machine_with_no_dictionary,
+               test_modern_technical_words_are_not_jargon, test_matching, test_combination, test_no_subset_elimination,
                test_severity, test_routing, test_prose_files_must_be_tracked,
                test_user_destinations_win, test_passive_discovery,
                test_the_hook_surfaces_a_candidate_once,

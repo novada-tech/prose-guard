@@ -1,0 +1,48 @@
+# Common English words, for machines with no system dictionary.
+#
+# jargon.py prefers /usr/share/dict/words and unions this in. Without either, every capitalised
+# English word — THE, WAS, WITH — is reported as unexplained jargon, which is silent degradation into
+# noise. Many Linux containers have no dictionary installed, so this is the floor.
+#
+# Closed-class words first, because those are the ones that appear in shouty prose and headings.
+# Then the words that turn up in logs, status lines and commit subjects. One per line, lowercase.
+the a an and or but nor so yet for if then else when while until because since although though
+this that these those it its they them their there here who whom whose which what where why how
+is are was were be been being am do does did done doing have has had having
+will would shall should can could may might must ought need dare
+i we you he she me us him her my our your his hers ours yours mine
+in on at by to from with without within into onto out off over under above below across through
+against between among during before after up down near past about around beyond
+all any both each every few many more most much no none one only other others own same several
+some such than too very not never always often sometimes again still just even also
+new old first last next previous current latest final initial original
+add added adding remove removed removing fix fixed fixing change changed changing update updated
+make made making take taken taking give given get got gets set sets put puts run runs ran
+use used using try tried trying find found leave left keep kept move moved moving
+work works worked call called calls need needed needs want wanted show shown shows
+build built builds test tested tests check checked checks pass passed passes fail failed fails
+start started starts stop stopped stops open opened opens close closed closes
+read reads write writes send sent sends receive received load loaded loads save saved saves
+error errors warning warnings info debug trace fatal panic critical notice
+null true false none void empty blank default custom unknown invalid valid missing present
+name names value values type types size sizes count counts total sum average
+time times date dates day days week weeks month months year years hour hours minute minutes second
+number numbers line lines file files path paths dir directory folder folders
+user users group groups role roles owner owners admin
+data record records table tables field fields key keys index indexes list lists item items
+state status result results output input source target
+version release branch commit merge push pull clone fetch tag tags
+code codes text texts word words page pages part parts step steps
+help note notes todo done fixme review reviews
+yes ok okay good bad best worst high low fast slow
+up down left right top bottom front back inside outside
+green red amber blue black white
+main master base head root leaf node nodes edge edges
+job jobs task tasks queue queues event events message messages
+host hosts port ports server servers client clients service services
+memory disk cache caches pool pools thread threads process processes
+level levels mode modes flag flags option options config
+scale scaled limit limits quota quotas rate rates
+plan plans stage stages phase phases cycle cycles
+team teams member members people person
+ask asks answer answers question questions issue issues

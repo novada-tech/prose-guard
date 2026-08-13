@@ -8,6 +8,17 @@ request.** Every command you need is below and none of them takes long.
 If you cannot measure something, say so in the pull request. An unmeasured change with an honest note is
 reviewable. An unmeasured change presented as safe is not.
 
+## Bump the version if you change anything under `plugins/`
+
+Nobody's installed copy moves unless the version does. `claude plugin install` is a no-op when the
+plugin is already present at any version, and `claude plugin update` only moves on a version change.
+Eight commits once shipped under `0.1.0`, and the people who had installed it kept running a skill
+documenting a flag that no longer existed.
+
+Bump it in **both** `plugins/prose-guard/.claude-plugin/plugin.json` and
+`.claude-plugin/marketplace.json`. Continuous integration fails the pull request if you forget, or if
+the two disagree.
+
 ## Before you open a pull request
 
 Five steps. The first two always, the rest when they apply.
@@ -19,8 +30,13 @@ python3 tests/test_prose_guard.py
 python3 tests/test_docs_match_code.py
 ```
 
-Standard library only, no setup, about fifteen seconds. The second one reads every SKILL.md, finds the
-commands it tells someone to run, and checks each against the real interface — a skill documented
+Standard library only, no setup, about fifteen seconds, and no model calls — continuous integration
+runs both on every pull request, on Linux and macOS, and proves the second point by removing `claude`
+from `PATH`. The measurement harnesses under `measure/` are deliberately not in CI: they spend real
+tokens, so they stay something you run deliberately and report here.
+
+The second suite reads every SKILL.md, finds the commands it tells someone to run, and checks each
+against the real interface — a skill documented
 `--audience` for a script that takes `--for`, and the person who hit it lost time before anything else
 could go wrong. Every case pins a design decision, so a failure
 usually means you changed a decision rather than broke an implementation — say which in the pull
