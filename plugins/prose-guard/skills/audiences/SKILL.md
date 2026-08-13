@@ -61,10 +61,13 @@ tool would be no different with it than without it.
 
 - **Issues, pull requests and review comments** (`--gh owner/repo`) — the best source. A review
   comment is written to a colleague, so it uses exactly the vocabulary they share.
-- **A chat channel** — as good, and needs exporting first. Write one JSON object per line,
-  `{"author": ..., "text": ...}`, and pass `--jsonl`. Read the channel with whatever tool is
-  available; skip bots, and skip anything recent enough to have been written by an agent, or the
-  measurement will learn the agent's vocabulary rather than the team's.
+- **A chat channel** — as good, and needs a command that exports it. Anything printing one JSON
+  object per line, `{"author": ..., "text": ...}`, works: pass it as `--command`. Do not read the
+  channel yourself and retype it — a page of a hundred messages costs about 12,000 tokens of your
+  context to move text a shell command moves for nothing, and retyping can introduce errors into the
+  very corpus being measured. If no export command exists, offer to write one; `docs/sources.md` has
+  working recipes for Slack, Teams, Discord and mail. Skip anything recent enough to have been
+  written by an agent, or the measurement learns the agent's vocabulary rather than the team's.
 - **Commit messages** (`--git .`) — free and always present, but thin: few people put acronyms in a
   commit subject, so on its own it will under-measure.
 
@@ -72,8 +75,11 @@ tool would be no different with it than without it.
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/learn.py" scan \
-  --gh owner/repo --jsonl /tmp/channel.jsonl --out /tmp/candidates.json
+  --gh owner/repo --command './export-chat.sh general' --out /tmp/candidates.json
 ```
+
+Sources combine, and the counts merge. A failing command is reported rather than silently dropped, so
+check the warnings before reading the piles.
 
 It prints three piles: reached the cut of 4 distinct people, exactly one person short, and below.
 
@@ -99,7 +105,15 @@ folding them in. Say how many there are, because the answer for 3 is different f
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/learn.py" create <name> /tmp/candidates.json \
-  --who "..." --slack-channel C0123 --repo owner/repo --also-known TERM1 TERM2
+  --who "..." --match-channel C0123 --match-repo owner/repo --also-known TERM1 TERM2
+```
+
+The `--match-*` flags say when the audience applies. They are not sources — reading them as "learn
+from this channel" is the mistake to avoid. To change them later, without editing the file by hand:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" match <name> channel C0123
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" match <name> repo owner/repo --rm
 ```
 
 Then `show` it and read the result back to them. Say what changed: unexplained terms for that

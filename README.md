@@ -38,7 +38,7 @@ many of them have actually used each term in writing they have already done.
 ```json
 { "name": "platform-team",
   "who": "Engineers who run our Kubernetes and Terraform. They read incident threads cold.",
-  "matches": { "slack_channels": ["C054ZDE533R"], "repos": ["your-org/infra"] },
+  "matches": { "channels": ["C054ZDE533R"], "repos": ["your-org/infra"] },
   "vocabulary": { "KUBECTL": 6, "GKE": 5 } }
 ```
 

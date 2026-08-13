@@ -74,7 +74,10 @@ class Audience:
     def matches(self, ctx):
         """ctx carries whatever the tool call revealed: channel, repo, owner, path, cwd_repo."""
         m = self.matches_on
-        if ctx.get("channel") and ctx["channel"] in (m.get("slack_channels") or []):
+        # `channels` is the generic key: any chat destination yields a channel id, whatever product
+        # it came from. `slack_channels` is the original name and still works.
+        if ctx.get("channel") and ctx["channel"] in ((m.get("channels") or [])
+                                                     + (m.get("slack_channels") or [])):
             return True
         for key in ("repo", "cwd_repo"):
             if ctx.get(key) and ctx[key] in (m.get("repos") or []):
@@ -250,6 +253,43 @@ def accept(name, term):
     return save(a.name, data)
 
 
+# The dimensions an audience can be routed on. `channels` is generic on purpose: a channel id is a
+# channel id whether it came from Slack, Teams or Discord, and the destination that produced it
+# already knows which product it is. Nothing below this line is Slack-specific.
+DIMENSIONS = {
+    "channel": "channels",
+    "repo": "repos",
+    "owner": "github_owners",
+    "path": "paths",
+}
+
+
+def route(name, dimension, values, drop=False):
+    """Add or remove the identifiers that decide when an audience applies.
+
+    Without this the only way to widen an audience was to hand-edit its JSON, which someone did —
+    and hand-editing is where a typo silently stops an audience from ever matching again.
+    """
+    a = ALL.get(name)
+    if a is None or a.builtin:
+        raise KeyError(f"{name} is not an audience you can edit")
+    key = DIMENSIONS[dimension]
+    data = _read(a.path) or {}
+    matches = data.setdefault("matches", {})
+    have = list(matches.get(key) or [])
+    if drop:
+        after = [v for v in have if v not in values]
+    else:
+        after = have + [v for v in values if v not in have]
+    if after == have:
+        return None, have                     # say nothing changed rather than claim it did
+    if after:
+        matches[key] = after
+    else:
+        matches.pop(key, None)
+    return save(a.name, data), after
+
+
 def _cli():
     import argparse
     ap = argparse.ArgumentParser(description="Inspect and manage audiences.")
@@ -262,8 +302,29 @@ def _cli():
     p = sub.add_parser("accept", help="mark one term known for one audience")
     p.add_argument("name")
     p.add_argument("term")
+    p = sub.add_parser("match", help="change when an audience applies")
+    p.add_argument("name")
+    p.add_argument("dimension", choices=sorted(DIMENSIONS),
+                   help="channel: a chat channel id | repo: owner/repo | owner: every repo under "
+                        "an owner | path: a file glob")
+    p.add_argument("values", nargs="+", metavar="VALUE")
+    p.add_argument("--rm", action="store_true", help="remove these instead of adding them")
     sub.add_parser("overlap", help="people who may be in two audiences at once (a guess)")
     a = ap.parse_args()
+
+    if a.cmd == "match":
+        try:
+            path, now = route(a.name, a.dimension, a.values, drop=a.rm)
+        except KeyError as exc:
+            raise SystemExit(str(exc).strip("\'"))
+        verb = "no longer" if a.rm else "now"
+        if path is None:
+            print(f"{a.name} already reads exactly that — nothing changed")
+        else:
+            print(f"{a.name} {verb} covers {a.dimension} " + ", ".join(a.values))
+            print(f"  {a.dimension}s: " + (", ".join(now) or "none"))
+            print(f"  {path}")
+        return
 
     if a.cmd == "list":
         if not ALL:

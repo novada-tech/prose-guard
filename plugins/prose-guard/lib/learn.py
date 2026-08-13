@@ -69,6 +69,41 @@ def from_gh(slug, limit=400):
                     yield cw, c.get("body") or ""
 
 
+def from_command(commands):
+    """Anything that can emit `{"author": ..., "text": ...}` lines on stdout.
+
+    This exists because `--gh` shells out to the `gh` CLI, so repository text travels disk to disk
+    and never passes through an agent's context — and nothing else had that property. Reading a chat
+    channel meant an agent reading a page and retyping it into a file: expensive (one page of 100
+    messages measured at about 12,000 tokens, much of it stack traces that contribute nothing to an
+    acronym count) and, worse, *transcription* rather than piping, which risks introducing errors
+    into the corpus being measured.
+
+    So the tool takes a command instead of growing a source per product. A Slack export, a Teams
+    dump, a Discord archive, a wiki, an mbox — anything you can pipe. See the recipes in
+    docs/sources.md.
+    """
+    for cmd in commands:
+        try:
+            proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=3600)
+        except Exception:
+            continue
+        if proc.returncode != 0:
+            print(f"  warning: `{cmd[:60]}` exited {proc.returncode}: "
+                  f"{(proc.stderr or '').strip()[:160]}", file=sys.stderr)
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            who = str(row.get("author") or "").strip()
+            if who and not BOT.search(who):
+                yield who, str(row.get("text") or "")
+
+
 def from_jsonl(paths):
     """Anything you can export as {"author": ..., "text": ...} per line — chat history, a wiki."""
     for path in paths:
@@ -124,10 +159,12 @@ def cmd_scan(a):
         streams.append(from_gh(slug))
     if a.jsonl:
         streams.append(from_jsonl(a.jsonl))
+    if a.command:
+        streams.append(from_command(a.command))
     if a.text:
         streams.append(from_text(a.text))
     if not streams:
-        raise SystemExit("give at least one of --git, --gh, --jsonl or --text")
+        raise SystemExit("give at least one of --git, --gh, --jsonl, --text or --command")
 
     def chained():
         for s in streams:
@@ -171,17 +208,17 @@ def cmd_create(a):
     for t in a.not_known:
         vocab.pop(t.upper(), None)
     matches = {}
-    if a.slack_channel:
-        matches["slack_channels"] = a.slack_channel
-    if a.repo:
-        matches["repos"] = a.repo
-    if a.github_owner:
-        matches["github_owners"] = a.github_owner
-    if a.path:
-        matches["paths"] = a.path
+    if a.match_channel:
+        matches["channels"] = a.match_channel
+    if a.match_repo:
+        matches["repos"] = a.match_repo
+    if a.match_owner:
+        matches["github_owners"] = a.match_owner
+    if a.match_path:
+        matches["paths"] = a.match_path
     if not matches:
         raise SystemExit("an audience needs at least one identifier to match on, or it can never "
-                         "apply: --slack-channel, --repo, --github-owner or --path")
+                         "apply: --match-channel, --match-repo, --match-owner or --match-path")
     data = {"name": a.name, "who": a.who or "",
             "matches": matches,
             "inherits": [cand.get("_meta", {}).get("inherits") or "engineers"],
@@ -205,6 +242,9 @@ def main():
     s.add_argument("--gh", action="append", default=[], metavar="OWNER/REPO")
     s.add_argument("--jsonl", nargs="+", default=[], metavar="FILE",
                    help='lines of {"author": ..., "text": ...}')
+    s.add_argument("--command", action="append", default=[], metavar="SHELL",
+                   help='any command emitting those lines on stdout — a chat export, a wiki dump, '
+                        'an mbox. Keeps the text out of an agent\'s context. See docs/sources.md')
     s.add_argument("--text", nargs="+", default=[], metavar="FILE")
     s.add_argument("--inherits", help="baseline to subtract and inherit (default engineers)")
     s.add_argument("--out", default="candidates.json")
@@ -213,10 +253,17 @@ def main():
     c.add_argument("name")
     c.add_argument("candidates")
     c.add_argument("--who", help="prose describing the people. Read by the checks, never by routing")
-    c.add_argument("--slack-channel", action="append", default=[])
-    c.add_argument("--repo", action="append", default=[])
-    c.add_argument("--github-owner", action="append", default=[])
-    c.add_argument("--path", action="append", default=[])
+    # These decide when the audience APPLIES. They are not sources — someone reached for
+    # --slack-channel expecting it to read that channel. Old names still work.
+    c.add_argument("--match-channel", "--slack-channel", action="append", default=[],
+                   dest="match_channel", metavar="ID",
+                   help="a chat channel id this audience READS, not one to learn from")
+    c.add_argument("--match-repo", "--repo", action="append", default=[], dest="match_repo",
+                   metavar="OWNER/REPO", help="a repository this audience reads")
+    c.add_argument("--match-owner", "--github-owner", action="append", default=[],
+                   dest="match_owner", metavar="OWNER", help="every repository under this owner")
+    c.add_argument("--match-path", "--path", action="append", default=[], dest="match_path",
+                   metavar="GLOB", help="file paths this audience reads")
     c.add_argument("--also-known", nargs="*", default=[])
     c.add_argument("--not-known", nargs="*", default=[])
     c.add_argument("--shared-context", choices=audiences.CONTEXT_ORDER, default="low")

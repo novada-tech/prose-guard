@@ -654,6 +654,64 @@ def test_audience_editing():
             pass
 
 
+def test_a_vocabulary_can_come_from_any_command():
+    """The only built-in sources were git and gh. Reading a chat channel meant an agent retyping it.
+
+    A command emitting the JSONL contract keeps any other source disk-to-disk, so no corpus has to
+    pass through a context window to be counted.
+    """
+    with tempfile.TemporaryDirectory() as home:
+        e = {**os.environ, "PROSE_GUARD_HOME": home}
+        out = os.path.join(home, "candidates.json")
+        rows = [json.dumps({"author": who, "text": "the BSP run hit NFS latency again"})
+                for who in ("ann", "bob", "cat", "dan")]
+        rows.append(json.dumps({"author": "deploy-bot", "text": "BSP BSP BSP BSP BSP"}))
+        emit = "printf '%s\\n' " + " ".join(repr(r) for r in rows)
+        r = subprocess.run([sys.executable, os.path.join(LIB, "learn.py"), "scan",
+                            "--command", emit, "--out", out],
+                           capture_output=True, text=True, env=e, timeout=120)
+        check("the scan succeeds", r.returncode, 0)
+        found = json.load(open(out))
+        check("BSP reached the known pile", "BSP" in found["known"], True)
+        # The bot wrote BSP five times on its own. Counting writers rather than writings is what
+        # stops one loud automated account from teaching the tool a term nobody read.
+        check("a bot is not a person", found["counts"]["BSP"]["authors"], 4)
+        check("nor is it a member", "deploy-bot" in found["members"], False)
+
+        r = subprocess.run([sys.executable, os.path.join(LIB, "learn.py"), "scan",
+                            "--command", "exit 3", "--out", out + ".2"],
+                           capture_output=True, text=True, env=e, timeout=120)
+        check("a failing command is reported, not swallowed", "warning" in r.stderr, True)
+
+
+def test_routing_can_be_edited_without_hand_editing_json():
+    """Someone widening an audience hand-edited its file, which is where a typo silently stops it
+    matching. The dimensions are named generically: a channel id is a channel id, whatever chat
+    product produced it."""
+    import audiences
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "team", matches={"repos": ["your-org/infra"]})
+        A, _ = fresh(home)
+        path, now = A.route("team", "channel", ["C1", "C2"])
+        check("adding a channel writes the file", bool(path), True)
+        check("both are kept", now, ["C1", "C2"])
+        A, _ = fresh(home)
+        check("the generic key routes", A.resolve({"channel": "C2"}).names, ["team"])
+        check("and the old key still routes", A.resolve({"repo": "your-org/infra"}).names, ["team"])
+        A, _ = fresh(home)
+        check("re-adding changes nothing", A.route("team", "channel", ["C1"])[0], None)
+        A.route("team", "channel", ["C1", "C2"], drop=True)
+        A, _ = fresh(home)
+        gone = A.resolve({"channel": "C2"})
+        check("dropping the last one stops it matching", gone.names, [])
+        check("and that reads as unresolved rather than as a match", gone.resolved, False)
+        try:
+            A.route("engineers", "channel", ["C9"])
+            check("a built-in cannot be rerouted", "no error", "KeyError")
+        except KeyError:
+            pass
+
+
 def test_rule_installer():
     with tempfile.TemporaryDirectory() as tmp:
         e = {**os.environ, "HOME": tmp}

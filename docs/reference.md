@@ -72,10 +72,16 @@ prefix-matched guess, labelled as one, and nothing depends on it.
 python3 lib/audiences.py list
 python3 lib/audiences.py show platform-team
 python3 lib/audiences.py accept platform-team GKE      # one term is wrong; applies immediately
+python3 lib/audiences.py match platform-team channel C054ZDE533R   # change when it applies
 python3 lib/audiences.py rm platform-team
 ```
 
 Files on disk, one per audience. Read them, diff them, edit them.
+
+What an audience *knows* comes from scanning writing those people already did, from any source you can
+pipe — [sources.md](sources.md) has the contract and recipes for chat, mail and wikis. What an audience
+*applies to* is the separate list of identifiers `match` edits. Confusing the two is easy, and the
+flags are named to make it harder.
 
 `engineers` is a shipped baseline: 96 acronyms any developer knows, with no identifiers of its own, so
 it never applies alone — audiences inherit it. That is where the tool's bias lives, and it is
