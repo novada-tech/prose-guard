@@ -200,11 +200,19 @@ def test_a_stripped_suffix_must_leave_a_word_behind():
     two-letter abbreviation added to the word list retired another family of acronyms with it.
     """
     import jargon
-    for term in ("FAILS", "COINED", "USES", "USED", "RUNS", "PODS", "JOBS"):
-        check(f"{term} is an inflected word, not an acronym", jargon.is_acronym(term), False)
-    # Each of these reduces to a real two-letter word: am, aw, pr, id, ad. That is the whole failure.
-    for term in ("AMD", "AWS", "PRD", "IDS", "ADS"):
-        check(f"{term} is an acronym whatever it ends in", jargon.is_acronym(term), True)
+    # Against a word list written here, not the machine's. Ubuntu's wamerican holds amd, aws, ids and
+    # ads outright while macOS's web2 does not, so asserting on the real dictionary tests the platform
+    # rather than the floor — and passed on one of them.
+    words = jargon.WORDS
+    jargon.WORDS = {"am", "aw", "pr", "id", "ad", "fail", "coin", "use", "run", "pod", "job"}
+    try:
+        for term in ("FAILS", "COINED", "USES", "USED", "RUNS", "PODS", "JOBS"):
+            check(f"{term} is an inflected word, not an acronym", jargon.is_acronym(term), False)
+        # Each of these reduces to a two-letter word in that list. That is the whole failure.
+        for term in ("AMD", "AWS", "PRD", "IDS", "ADS"):
+            check(f"{term} is an acronym whatever it ends in", jargon.is_acronym(term), True)
+    finally:
+        jargon.WORDS = words
 
     import audiences
     resolved = audiences.Resolved([], "engineers")
