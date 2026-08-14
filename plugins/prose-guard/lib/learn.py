@@ -398,6 +398,10 @@ def _folded(expansions):
 
 
 def cmd_create(a):
+    if not audiences.usable_name(a.name):
+        raise SystemExit(f"{a.name!r} cannot be an audience name: it becomes a filename, so it starts "
+                         f"with a letter or digit and holds only letters, digits, dot, dash and "
+                         f"underscore, up to 64 characters")
     with open(a.candidates) as fh:
         cand = json.load(fh)
     counts = cand.get("counts") or {}

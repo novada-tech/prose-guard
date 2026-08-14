@@ -2020,6 +2020,70 @@ def test_a_reason_that_ends_in_the_word_pass_is_still_a_failure():
           read_verdict("FAIL: \x1b[2Jrewrite\x07 the opening\x00")[1], "rewrite the opening")
 
 
+def test_an_audience_file_cannot_choose_where_it_is_written():
+    """A name is not a path, and the name is not typed by the person running the command.
+
+    It comes out of the audience file, which arrives in a repository somebody pulled — so `accept`,
+    `match` and `share` all wrote attacker-chosen JSON to an attacker-chosen path with `.json`
+    appended. `save` keeps keys it knows nothing about, so `../../.claude/settings` was a working
+    hooks file, which the checker then executed.
+    """
+    import audiences
+    with tempfile.TemporaryDirectory() as tmp:
+        home = os.path.join(tmp, "home")
+        team = os.path.join(tmp, "team")
+        os.makedirs(os.path.join(home, "audiences"))
+        with open(os.path.join(home, "audiences", "innocent-looking.json"), "w") as fh:
+            json.dump({"name": "../../CLOBBERED", "who": "nobody",
+                       "matches": {"channels": ["C1"]}, "vocabulary": {"ABC": 9}, "expansions": {},
+                       "hooks": {"SessionStart": [{"hooks": [{"type": "command",
+                                                              "command": "echo attacker"}]}]}}, fh)
+        A, _ = fresh(home)
+        check("a traversing name is not even listed", "../../CLOBBERED" in A.ALL, False)
+        check("the file is listed under its filename instead", "innocent-looking" in A.ALL, True)
+        for bad in ("../../CLOBBERED", "/etc/passwd", "..", ".hidden", "with space", "a" * 65, ""):
+            try:
+                A.path_for(bad)
+                check(f"path_for refuses {bad!r}", "wrote a path", "refused")
+            except ValueError:
+                pass
+        check("a usable name still resolves",
+              A.path_for("platform-team.2"),
+              os.path.join(home, "audiences", "platform-team.2.json"))
+        for name in ("../../CLOBBERED", "../../.claude/settings"):
+            for attempt in (lambda: A.accept(name, "NEWTERM"),
+                            lambda: A.route(name, "channel", ["C2"]),
+                            lambda: A.share(name, team)):
+                try:
+                    attempt()
+                    check(f"a write under {name!r} is refused", "wrote it", "refused")
+                except (KeyError, ValueError, PermissionError):
+                    pass
+        stray = [p for p in os.listdir(tmp) if p not in ("home", "team")]
+        check("nothing landed beside the config directory", stray, [])
+        check("nor beside the share directory",
+              os.path.exists(os.path.join(tmp, "CLOBBERED.json")), False)
+        target, _ = A.share("innocent-looking", team)
+        check("a share writes inside the directory it was given",
+              os.path.dirname(os.path.abspath(target)), os.path.abspath(team))
+
+
+def test_learn_refuses_an_audience_name_that_is_a_path():
+    with tempfile.TemporaryDirectory() as tmp:
+        candidates = os.path.join(tmp, "candidates.json")
+        with open(candidates, "w") as fh:
+            json.dump({"_meta": {}, "members": [], "expansions": {}, "known": ["ABC"],
+                       "counts": {"ABC": {"authors": 4}}}, fh)
+        r = subprocess.run([sys.executable, os.path.join(LIB, "learn.py"), "create",
+                            "../../CLOBBERED", candidates, "--match-channel", "C1"],
+                           capture_output=True, text=True, timeout=60,
+                           env={**os.environ, "PROSE_GUARD_HOME": os.path.join(tmp, "home")})
+        check("it refuses", r.returncode != 0, True)
+        check("and says what a name may be", "letters, digits" in (r.stdout + r.stderr), True)
+        check("nothing was written above the config directory",
+              os.path.exists(os.path.join(tmp, "CLOBBERED.json")), False)
+
+
 def test_a_context_level_that_is_not_a_level_never_reaches_a_prompt():
     """A hand-edited `"shared_context": "sideways"` used to rank as the safest value and be handed to
     the model as itself, in the line "how much they already know of this: sideways"."""

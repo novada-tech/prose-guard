@@ -36,6 +36,7 @@ look at instead.
 """
 import fnmatch
 import glob
+import itertools
 import json
 import os
 import subprocess
@@ -67,6 +68,20 @@ def user_dir():
     return os.path.join(config_dir(), "audiences")
 
 
+def usable_name(name):
+    """The name if it can become a filename, else None. The one gate between a name and a path.
+
+    Every write goes through `path_for`, `path_for` goes through here, and `load` drops a file whose
+    name does not survive it — so nothing downstream has to wonder where a name came from.
+
+    Refused on the whole name, and `basename` taken afterwards rather than instead: taking the
+    basename first turns `../../CLOBBERED` into the perfectly good name `CLOBBERED`, which writes
+    somewhere harmless under a name nobody typed. Two ways to be wrong, and only one of them is loud.
+    """
+    text = str(name or "")
+    return os.path.basename(text) if SAFE_NAME.fullmatch(text) else None
+
+
 class Audience:
     def __init__(self, data, path, builtin, shared=False):
         self.path = path
@@ -74,7 +89,10 @@ class Audience:
         # Shared means it came from a directory a team keeps, so it is not yours to delete: it goes
         # away when someone removes it from that repository.
         self.shared = shared
-        self.name = data.get("name") or os.path.basename(path)[:-5]
+        # The file's own name wins over the name inside it, if the inside one could not be a filename.
+        # A hostile file must not even be listed under a name that traverses, because everything a
+        # person then types that name at writes somewhere.
+        self.name = usable_name(data.get("name")) or usable_name(os.path.basename(path)[:-5]) or ""
         self.who = data.get("who") or ""
         self.matches_on = data.get("matches") or {}
         self.vocabulary = {str(k).upper(): int(v) for k, v in (data.get("vocabulary") or {}).items()}
@@ -160,6 +178,8 @@ def load():
             if not data:
                 continue
             a = Audience(data, path, builtin, shared)
+            if not a.name:
+                continue                      # neither its name nor its filename could be a filename
             found[a.name] = a
     return found
 
@@ -221,6 +241,13 @@ def _key(name):
     return re.sub(r"[^a-z]", "", name.lower())
 
 
+def _might_be(x, y):
+    """Whether two names from different sources might be one person. A prefix match on at least four
+    letters: shorter than that, initials collide with everybody."""
+    kx, ky = _key(x), _key(y)
+    return min(len(kx), len(ky)) >= 4 and (kx.startswith(ky) or ky.startswith(kx))
+
+
 def possible_overlap():
     """People who MIGHT be in two audiences at once. A hint for a person, never a fact.
 
@@ -235,35 +262,44 @@ def possible_overlap():
     """
     named = [a for a in ALL.values() if a.members]
     out = []
-    for i, a in enumerate(named):
-        for b in named[i + 1:]:
-            hits = []
-            for x in a.members:
-                kx = _key(x)
-                if len(kx) < 4:
-                    continue
-                for y in b.members:
-                    ky = _key(y)
-                    if len(ky) >= 4 and (kx.startswith(ky) or ky.startswith(kx)):
-                        hits.append((x, y))
-                        break
-            out.append((a.name, b.name, hits, len(a.members), len(b.members)))
+    for a, b in itertools.combinations(named, 2):
+        # One hit per left-hand name: two people on the right whose names both prefix-match would be
+        # one guess reported twice.
+        hits = [(x, y) for x in a.members
+                if (y := next((y for y in b.members if _might_be(x, y)), None))]
+        out.append((a.name, b.name, hits, len(a.members), len(b.members)))
     return out
 
 
 
 # ------------------------------------------------------------------------ writing
-def path_for(name):
-    return os.path.join(user_dir(), name + ".json")
+def path_for(name, directory=None):
+    """Where an audience file goes. The only place a name turns into a path.
+
+    Refuses rather than sanitising quietly, because a name that is not a usable name means the file it
+    came from is not what it says it is. `save` writes the dict it read, keys it knows nothing about
+    included, so an unchecked name here wrote attacker-chosen JSON to an attacker-chosen path with
+    `.json` appended — `../../.claude/settings` being the one that then gets executed.
+    """
+    safe = usable_name(name)
+    if not safe:
+        raise ValueError(f"{name!r} is not a usable audience name: a letter or digit first, then "
+                         f"letters, digits, dot, dash or underscore, up to 64 characters")
+    return os.path.join(directory or user_dir(), safe + ".json")
 
 
-def save(name, data):
-    os.makedirs(user_dir(), exist_ok=True)
-    path = path_for(name)
+def _write(path, data):
+    """One writer, so every audience file on disk has the same shape whoever wrote it — the file a
+    `share` puts in a team repository has to be readable by `load` on someone else's machine."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as fh:
         json.dump(data, fh, indent=1, sort_keys=False)
         fh.write("\n")
     return path
+
+
+def save(name, data):
+    return _write(path_for(name), data)
 
 
 def remove(name):
@@ -517,7 +553,10 @@ def _cli():
         return
 
     if a.cmd == "accept":
-        where = accept(a.name, a.term)
+        try:
+            where = accept(a.name, a.term)
+        except (KeyError, ValueError) as exc:
+            raise SystemExit(str(exc).strip("'"))
         print(f"{a.term.upper()} was already known to {a.name}; nothing to change" if where is None
               else f"updated {where}")
         return
