@@ -389,6 +389,31 @@ Calibrating it means tuning the bar until the human-edited version passes and th
 not. That needs more pairs than the one in `measure/fixtures/gold`, and from more than one author —
 tuning five prompts against a single pair would fit the pair rather than the bar.
 
+## Managing destinations
+
+The same verbs as audiences, on the same three layers:
+
+```
+python3 lib/destinations.py list                      # every one, and which layer it came from
+python3 lib/destinations.py show "commit message"
+python3 lib/destinations.py off "gitlab cli"          # stop checking one here, whatever layer it is from
+python3 lib/destinations.py on "gitlab cli"
+python3 lib/destinations.py rm "my wiki"              # delete one of your own
+python3 lib/destinations.py share --to DIR --only "our chat"
+```
+
+Yours is read first, then any directory your team shares, then the shipped set, and the first match wins.
+So local and shared coexist: a team shares the chat tool everyone posts to, and the document one person
+writes invoices in stays on that person's machine. `--only` exists for exactly that split.
+
+`rm` works on your own. A shipped destination is inside the plugin and is replaced on update, so there is
+nothing to delete — `off` records the name in your own file instead and it stops being read, whichever layer
+it came from. A shared one is retired for everybody by removing it from the directory it comes from.
+
+`list` marks an entry as shadowed when a name appears in more than one layer. That is the layering working
+— your copy overrides the team's — but it also means their improvements to it stop reaching you, and `share`
+says so when you have just created that situation.
+
 ## Managing audiences
 
 ```

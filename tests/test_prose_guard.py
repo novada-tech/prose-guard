@@ -534,6 +534,80 @@ def test_the_mechanical_errors_are_found_without_a_model():
     check("costing no model call", mechanics.COSTS_A_CALL, False)
 
 
+def test_destinations_are_managed_the_way_audiences_are():
+    """Audiences had list, show, rm, accept, share and match. Destinations had nothing.
+
+    Everything about them was hand-editing a JSON file, which is the state audiences were deliberately
+    moved out of — a typo there stops a destination matching with nothing to show for it.
+    """
+    import destinations as D
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as team:
+        os.environ["PROSE_GUARD_HOME"] = home
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"shared": [team]}, fh)
+        with open(os.path.join(team, "destinations.json"), "w") as fh:
+            json.dump({"destinations": [{"name": "team chat", "tool": ["chat_post"],
+                                         "text_fields": ["message"]}]}, fh)
+        with open(os.path.join(home, "destinations.json"), "w") as fh:
+            json.dump({"destinations": [{"name": "my wiki", "tool": ["wiki_write"],
+                                         "text_fields": ["content"]}]}, fh)
+        _, D = fresh(home)
+
+        # Three layers, and which one a destination came from is visible rather than inferred.
+        origins = {d["name"]: d["_origin"] for d in D.DESTINATIONS}
+        check("your own is yours", origins.get("my wiki"), "yours")
+        check("the team's is shared", origins.get("team chat"), "shared")
+        check("and the shipped ones are built in", origins.get("commit message"), "built in")
+        check("show finds one by name", (D.find("team chat") or {}).get("_origin"), "shared")
+
+        # A shipped destination cannot be deleted — the file is inside the plugin and is replaced on
+        # update — so it is switched off instead, in your own file, whichever layer it came from.
+        try:
+            D.remove("commit message")
+            check("a shipped destination is not yours to delete", "no error", "PermissionError")
+        except PermissionError:
+            pass
+        # Switching off a name that does not exist is a typo, and silently writing it would leave someone
+        # believing they had turned something off.
+        try:
+            D.switch("comit message", on=False)
+            check("a misspelt name is refused", "no error", "KeyError")
+        except KeyError:
+            pass
+        D.switch("commit message", on=False)
+        _, D = fresh(home)
+        check("switching one off stops it being read",
+              [d["name"] for d in D.DESTINATIONS if d["name"] == "commit message"], [])
+        long = ("The exporter line went because nothing on a laptop reads that variable. Plans had "
+                "started failing in any shell older than an hour. Access uses the credential now.")
+        check("so a commit is no longer claimed",
+              D.match("Bash", {"command": 'git commit -m "' + long + '"'}), None)
+        D.switch("commit message", on=True)
+        _, D = fresh(home)
+        check("and switching it on brings it back",
+              (D.match("Bash", {"command": 'git commit -m "' + long + '"'}) or {}).get("name"),
+              "commit message")
+
+        # One of yours can be shared while another stays local, which is the case that matters: a team
+        # shares its chat tool and nobody shares the document they write invoices in.
+        with open(os.path.join(home, "destinations.json"), "w") as fh:
+            json.dump({"destinations": [{"name": "my wiki", "tool": ["wiki_write"],
+                                         "text_fields": ["content"]},
+                                        {"name": "our chat", "tool": ["ours_post"],
+                                         "text_fields": ["message"]}]}, fh)
+        _, D = fresh(home)
+        with tempfile.TemporaryDirectory() as elsewhere:
+            message = D.share(elsewhere, only="our chat")
+            check("only the named one travels", "our chat" in message, True)
+            landed = json.load(open(os.path.join(elsewhere, "destinations.json")))
+            check("and nothing else does", [x["name"] for x in landed["destinations"]], ["our chat"])
+            check("the local-only one is still yours",
+                  (D.find("my wiki") or {}).get("_origin"), "yours")
+            # The shipped set is already everywhere; copying it would put a stale duplicate in front.
+            check("no shipped destination is copied",
+                  any(x["name"] == "commit message" for x in landed["destinations"]), False)
+
+
 def test_destinations_can_be_shared_like_audiences():
     """A destination is worth more shared than an audience.
 

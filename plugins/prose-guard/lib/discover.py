@@ -125,38 +125,8 @@ def covered():
 
 
 def share(directory):
-    """Copy the destinations from this machine into a directory a team keeps.
-
-    Worth more shared than an audience is. An audience describes one group of readers and is measured
-    from their writing; a destination records which tool sends prose and which field carries it, and that
-    is the same fact for everyone who uses that tool. Working it out means an agent listing the tools it
-    can see and a person confirming them, and nobody should do that twice.
-
-    Only what this machine added: the shipped set is already everywhere, and copying it would put a stale
-    duplicate in front of the maintained one.
-    """
-    mine = destinations._read(os.path.join(destinations.config_dir(), "destinations.json"))
-    rows = list(mine.get("destinations") or [])
-    if not rows:
-        return ("Nothing to share: no destinations have been added on this machine. The shipped ones "
-                "are already everywhere. Run /prose-guard:setup to work out what is missing.")
-    os.makedirs(directory, exist_ok=True)
-    target = os.path.join(directory, "destinations.json")
-    existing = destinations._read(target)
-    have = {json.dumps(x, sort_keys=True) for x in (existing.get("destinations") or [])}
-    added = [x for x in rows if json.dumps(x, sort_keys=True) not in have]
-    merged = dict(existing)
-    merged["destinations"] = list(existing.get("destinations") or []) + added
-    merged.setdefault("_meta", {})["what"] = (
-        "Destinations this team has worked out. Read after your own file and before the shipped set, so "
-        "your own destinations.json still wins locally.")
-    with open(target, "w") as fh:
-        json.dump(merged, fh, indent=1)
-        fh.write("\n")
-    names = ", ".join(x.get("name", "?") for x in added) or "nothing new"
-    return (f"{len(added)} added to {target}: {names}\n"
-            f"Nothing is shared until you commit it. Then anyone whose config lists that directory has "
-            f"them, with no setup conversation of their own.")
+    """Kept as the name /prose-guard:setup uses. destinations.py owns the implementation."""
+    return destinations.share(directory)
 
 
 def main():

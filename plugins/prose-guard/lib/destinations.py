@@ -47,17 +47,25 @@ def load():
     carries it, and that fact is the same for everyone using that tool. One person working it out with
     /prose-guard:setup is the whole team's answer.
     """
-    layers = [_read(os.path.join(config_dir(), "destinations.json"))]
-    layers += [_read(os.path.join(directory, "destinations.json")) for directory in paths.shared()]
-    layers.append(_read(SHIPPED))
+    layers = [("yours", _read(os.path.join(config_dir(), "destinations.json")))]
+    layers += [("shared", _read(os.path.join(directory, "destinations.json")))
+               for directory in paths.shared()]
+    layers.append(("built in", _read(SHIPPED)))
+    # Names switched off in YOUR file, whatever layer they came from. There is no deleting a shipped
+    # destination — the file is inside the plugin and is replaced on update — so this is how you stop one.
+    off = {str(n).lower() for n in (layers[0][1].get("off") or [])}
     found, owners = [], set()
-    for layer in layers:
-        found += list(layer.get("destinations") or [])
+    for origin, layer in layers:
+        for entry in layer.get("destinations") or []:
+            if str(entry.get("name", "")).lower() in off:
+                continue
+            found.append(dict(entry, _origin=origin))
         owners |= {str(o).lower() for o in (layer.get("public_owners") or [])}
     return found, owners
 
 
 DESTINATIONS, PUBLIC_OWNERS = load()
+SWITCHED_OFF = [str(n) for n in (_read(os.path.join(config_dir(), "destinations.json")).get("off") or [])]
 
 
 def _repo_at(path):
@@ -540,3 +548,188 @@ def record_candidate(tool, tool_input):
                 + f". This is the only time it will be mentioned.")
     _save_candidates(data)
     return note
+
+
+# ---------------------------------------------------------------------------- managing them
+def _user_path():
+    return os.path.join(config_dir(), "destinations.json")
+
+
+def _user_file():
+    return _read(_user_path()) or {}
+
+
+def _save_user(data):
+    os.makedirs(config_dir(), exist_ok=True)
+    with open(_user_path(), "w") as fh:
+        json.dump(data, fh, indent=1)
+        fh.write("\n")
+    return _user_path()
+
+
+def find(name):
+    """The destination of that name, and which layer it came from."""
+    for entry in DESTINATIONS:
+        if str(entry.get("name", "")).lower() == name.lower():
+            return entry
+    return None
+
+
+def remove(name):
+    """Delete one of your own. A shipped or shared one is switched off instead — see `off`."""
+    data = _user_file()
+    rows = list(data.get("destinations") or [])
+    keep = [r for r in rows if str(r.get("name", "")).lower() != name.lower()]
+    if len(keep) == len(rows):
+        entry = find(name)
+        if entry is None:
+            raise KeyError(name)
+        raise PermissionError(
+            f"{name} is {entry['_origin']}, so it is not yours to delete. `off {name}` stops it being "
+            f"checked on this machine; a shared one is retired for everybody by removing it from the "
+            f"directory it comes from.")
+    data["destinations"] = keep
+    return _save_user(data)
+
+
+def switch(name, on):
+    """Stop, or resume, checking a destination on this machine, whichever layer it came from."""
+    data = _user_file()
+    off = [str(n) for n in (data.get("off") or [])]
+    lowered = [n.lower() for n in off]
+    if on:
+        if name.lower() not in lowered:
+            return None
+        data["off"] = [n for n in off if n.lower() != name.lower()]
+    else:
+        if find(name) is None:
+            raise KeyError(name)
+        if name.lower() in lowered:
+            return None
+        data["off"] = off + [name]
+    return _save_user(data)
+
+
+def share(directory, only=None):
+    """Copy destinations from this machine into a directory a team keeps.
+
+    Only ever your own: the shipped set is already everywhere, and copying it would put a stale duplicate
+    in front of the maintained one. `only` names one, for the common case where some of what you have
+    worked out is the team's business and some is not.
+    """
+    rows = [r for r in (_user_file().get("destinations") or [])
+            if only is None or str(r.get("name", "")).lower() == only.lower()]
+    if not rows:
+        return ("nothing to share: " + (f"you have no destination called {only}" if only else
+                "no destinations have been added on this machine. The shipped ones are already "
+                "everywhere; /prose-guard:setup works out what is missing."))
+    os.makedirs(directory, exist_ok=True)
+    target = os.path.join(directory, "destinations.json")
+    existing = _read(target) or {}
+    have = {json.dumps(x, sort_keys=True) for x in (existing.get("destinations") or [])}
+    fresh = [{k: v for k, v in r.items() if k != "_origin"} for r in rows]
+    added = [x for x in fresh if json.dumps(x, sort_keys=True) not in have]
+    merged = dict(existing)
+    merged["destinations"] = list(existing.get("destinations") or []) + added
+    merged.setdefault("_meta", {})["what"] = (
+        "Destinations this team has worked out. Read after your own file and before the shipped set, so "
+        "your own destinations.json still wins locally.")
+    with open(target, "w") as fh:
+        json.dump(merged, fh, indent=1)
+        fh.write("\n")
+    names = ", ".join(x.get("name", "?") for x in added) or "nothing new"
+    return (f"{len(added)} added to {target}: {names}\n"
+            f"Nothing is shared until you commit it. Then anyone whose config lists that directory has "
+            f"them, with no setup conversation of their own.\n"
+            f"Your own copy still wins locally, so improvements the team makes to it will not reach you. "
+            f"`rm` the local one once it is committed, or keep it if yours is deliberately different.")
+
+
+def _how(entry):
+    if entry.get("bash"):
+        return "a command: " + entry["bash"][:44]
+    if entry.get("file"):
+        return "a file matching " + entry["file"][:38]
+    tools = entry.get("tool") or []
+    return f"{len(tools)} tool(s): " + ", ".join(tools[:2]) + (" …" if len(tools) > 2 else "")
+
+
+def _cli():
+    import argparse
+    ap = argparse.ArgumentParser(description="Inspect and manage destinations — what counts as sending.")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("list", help="every destination, where it came from, and how it is recognised")
+    p = sub.add_parser("show", help="one destination in full")
+    p.add_argument("name")
+    p = sub.add_parser("rm", help="delete one of your own")
+    p.add_argument("name")
+    p = sub.add_parser("off", help="stop checking one on this machine, whichever layer it came from")
+    p.add_argument("name")
+    p = sub.add_parser("on", help="resume checking one you switched off")
+    p.add_argument("name")
+    p = sub.add_parser("share", help="copy your own into a directory your team keeps")
+    p.add_argument("--to", required=True, metavar="DIR")
+    p.add_argument("--only", metavar="NAME", help="just this one, rather than everything you added")
+    a = ap.parse_args()
+
+    if a.cmd == "list":
+        # First match wins, so a name in two layers means the earlier one decides and the later one is
+        # dead. That is the point of the layering — you can override the team's copy — but it also means
+        # your copy stops you receiving their improvements to it, and silence about that is unhelpful.
+        seen = set()
+        for entry in DESTINATIONS:
+            lowered = str(entry.get("name", "")).lower()
+            entry["_shadowed"] = lowered in seen
+            seen.add(lowered)
+        for entry in DESTINATIONS:
+            caps = " ".join(filter(None, [
+                f"effort<={entry['max_effort']}" if entry.get("max_effort") else "",
+                f"severity<={entry['max_severity']}" if entry.get("max_severity") else ""]))
+            mark = "  (shadowed by yours)" if entry.get("_shadowed") else ""
+            print(f"{entry['name']:44s} {entry['_origin']:9s} {_how(entry):50s} {caps}{mark}")
+        for name in SWITCHED_OFF:
+            print(f"{name:44s} off        not checked on this machine")
+        print(f"\nyours:  {_user_path()}")
+        for directory in paths.shared():
+            print(f"shared: {os.path.join(directory, 'destinations.json')}")
+        print(f"shipped: {SHIPPED}")
+        return
+
+    if a.cmd == "share":
+        print(share(a.to, a.only))
+        return
+
+    if a.cmd in ("off", "on"):
+        try:
+            where = switch(a.name, a.cmd == "on")
+        except KeyError:
+            raise SystemExit(f"no destination called {a.name!r}. Try: list")
+        if where is None:
+            print(f"{a.name} was already {'on' if a.cmd == 'on' else 'off'}; nothing to change")
+        else:
+            print(f"{a.name} is now {'checked' if a.cmd == 'on' else 'not checked'} -> {where}")
+        return
+
+    if a.cmd == "rm":
+        try:
+            print("deleted from", remove(a.name))
+        except KeyError:
+            raise SystemExit(f"no destination called {a.name!r}. Try: list")
+        except PermissionError as exc:
+            raise SystemExit(str(exc))
+        return
+
+    entry = find(a.name)
+    if entry is None:
+        raise SystemExit(f"no destination called {a.name!r}. Try: list")
+    print(f"name       {entry['name']}")
+    print(f"origin     {entry['_origin']}")
+    print(f"recognised {_how(entry)}")
+    for key in ("tool", "bash", "file", "text_fields", "text_arg", "identifiers", "max_effort",
+                "max_severity", "require_tracked", "note", "caveat"):
+        if entry.get(key) is not None:
+            print(f"{key:10} {json.dumps(entry[key]) if not isinstance(entry[key], str) else entry[key]}")
+
+
+if __name__ == "__main__":
+    _cli()
