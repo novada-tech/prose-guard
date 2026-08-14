@@ -1888,8 +1888,13 @@ def test_rule_installer():
         rules = os.path.join(tmp, ".claude", "rules")
         os.makedirs(rules, exist_ok=True)
         mine = open(os.path.join(PLUGIN, "rule", "engineer-communication.md")).read()
+        # The last paragraph that has something IN it. `rsplit` at face value took the empty string after
+        # the file's trailing blank line, and `str.replace("")` inserts between every character — so the
+        # near-duplicate was not near anything and the duplicate check had nothing to find. This test
+        # passed only while the rule file happened to end in a one-word line, which was a typo.
+        paragraphs = [p for p in mine.split("\n\n") if p.strip()]
         with open(os.path.join(rules, "house-communication.md"), "w") as fh:
-            fh.write(mine.replace(mine.rsplit("\n\n", 1)[-1], "A different closing paragraph.\n"))
+            fh.write(mine.replace(paragraphs[-1], "A different closing paragraph."))
         out = run("--install")
         check("a near-identical rule already loading is refused", out.startswith("duplicate"), True)
         check("and it names the file so it can be judged", "house-communication.md" in out, True)
