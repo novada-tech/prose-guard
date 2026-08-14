@@ -120,6 +120,10 @@ def pooled(check, text, ctx, passes=None, dry_runs=DRY_RUNS):
         return [], [], 1
     if not check.COSTS_A_CALL:
         return [first], [first], 0            # deterministic: it says the same thing every time
+    if not getattr(check, "POOLS", True):
+        # A check that returns one combined verdict has nothing to pick between, so asking again restates
+        # it. See checks/judgement.py for the measurement.
+        return [first], [first], 1
     ceiling = passes or ceiling_for(text)
     seen = {_points_at(text, first): [1, first]}
     order = [_points_at(text, first)]

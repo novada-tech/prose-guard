@@ -330,6 +330,14 @@ What that costs, measured per document over every check:
 The badly written document spends most and the well edited one least, at a similar length. A check that
 passes on its first run costs one call, so the extra calls are paid only where something was found.
 
+`medium` is exempt, and asking that question is what caught it: adding pooling had quietly turned the level
+documented as "one advisory call" into three. Pooling pays where a check picks one item from many candidates
+of one narrow concern, because two runs then pick differently and the difference is coverage. `medium` is one
+combined verdict over every concern at once, so it has nothing to pick between — measured, three runs cost
+three calls and 16 seconds against one call and 4, and found the same single item. So the ladder is: `low`
+costs no call, `medium` costs one, and `high` separates the concerns and works each until its runs stop
+finding anything, which is what makes the separation worth its calls.
+
 The hook and a deliberate run call the same function on the same text, so they cannot drift apart: one bar
 per effort level, whichever way the text is going out. The hook adds a budget of 20 calls for one message,
 because a check that may run twenty times makes "one call per check" false — measured on a badly written

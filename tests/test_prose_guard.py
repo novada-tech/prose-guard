@@ -1569,6 +1569,42 @@ def test_a_check_runs_more_than_once_and_the_runs_are_pooled():
     check("and is firm on its own", len(firm), 1)
 
 
+def test_the_combined_verdict_is_asked_once():
+    """`medium` is one call, and pooling silently made it three.
+
+    Pooling pays where a check picks one item from many candidates of one narrow concern: two runs pick
+    differently and the difference is coverage. The `medium` check is one combined verdict over every
+    concern at once, so it has nothing to pick between — measured, three runs cost three calls and 16
+    seconds against one call and 4, and found the same single item. So it is exempt, and the level ladder
+    stays honest: no call, one call, then work until the runs stop finding anything.
+    """
+    import checks
+    from checks import judgement
+    check("the combined verdict opts out", getattr(judgement, "POOLS", True), False)
+    check("while a separate concern does not",
+          all(getattr(p, "POOLS", True) for p in checks.sequence.phases()), True)
+
+    class Combined:
+        NAME = "combined"
+        COSTS_A_CALL = True
+        POOLS = False
+
+        def __init__(self):
+            self.asked = 0
+
+        def run(self, text, ctx):
+            self.asked += 1
+            return checks.Finding("advise", f'Consider: "{"word " * 4}" is unclear')
+
+    text = " ".join(f"Sentence number {n} sits here on its own." for n in range(40))
+    one = Combined()
+    found, firm, spent = checks.pooled(one, text, None)
+    check("it is asked once whatever the ceiling", one.asked, 1)
+    check("and charged as one call", spent, 1)
+    check("its finding still counts", len(found), 1)
+    check("and is firm, since there is nothing to compare it against", len(firm), 1)
+
+
 def test_how_hard_a_check_works_follows_the_text():
     """A fixed number of runs was wrong in both directions.
 

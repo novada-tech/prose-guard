@@ -11,6 +11,15 @@ from . import ask as _ask
 
 NAME = "judgement"
 COSTS_A_CALL = True
+# Running this repeatedly buys nothing, and that is measured rather than assumed: three runs cost three
+# calls and 16 seconds against one call and 4, and found the same single item both times.
+#
+# The reason is what this check IS. Pooling pays where a check picks one item from many candidates of one
+# narrow concern, because two runs then pick differently and the difference is coverage. This is one
+# combined verdict over every concern at once, so it has nothing to pick between — repeated runs restate
+# the same broad objection. `high` is the level that separates the concerns, and pooling is what makes
+# that separation worth its calls.
+POOLS = False
 
 PROMPT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "judgement_prompt.md")
 

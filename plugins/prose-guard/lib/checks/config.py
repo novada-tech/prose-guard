@@ -2,7 +2,8 @@
 
     disabled  nothing runs. The default, and what you get before you choose.
     low       the deterministic term check only. No model call.
-    medium    plus one advisory judgement call over the remaining concerns.
+    medium    plus one advisory judgement call over the remaining concerns. Still one call: repeating a
+              combined verdict was measured at three calls for the same single finding.
     high      four gating checks instead of that one, each re-verified after any edit.
 
 Measured against an unguarded control in the same run, five paired sessions per level, medians,
