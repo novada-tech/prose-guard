@@ -10,7 +10,7 @@ of them, and then only what BOTH know is safe to leave unexplained.
     vocabulary  {TERM: how many distinct people used it}
     inherits    built-in baselines, e.g. "engineers"
     members     who they are, from the learn step. Local only, never published.
-    assumptions shared_context and reach, where the destination cannot say
+    assumptions shared_context, where the destination cannot say
 
 Routing is on `matches` alone, deterministically. Prose is a bad router: a mistake there happens
 before any check runs and so corrupts all of them. When nothing matches, the audience is
@@ -21,7 +21,12 @@ Combining several in-scope audiences is one operation per dimension, not one ope
 
     vocabulary      intersection  - only what everyone knows is safe
     shared_context  minimum       - assume the least-informed reader
-    reach           maximum       - the widest reader decides whether internal links resolve
+
+There was a third dimension, `reach`, meant to say whether readers outside the company can see this.
+Nothing ever read it: no prompt named it and no check asked for it, so two audiences differing only
+in `reach` produced identical prompts. Public reach reaches a check through
+`destinations.situation()`, which reads the destination's owner and is live. The audience dimension
+is gone rather than left looking load-bearing.
 
 There is deliberately no subset elimination. Dropping an audience whose members are contained in
 another looks like a free simplification and is not sound: measured breadth within the larger group
@@ -31,6 +36,7 @@ look at instead.
 """
 import fnmatch
 import glob
+import itertools
 import json
 import os
 import subprocess
@@ -47,7 +53,11 @@ BUILTIN_DIR = os.path.join(_HERE, "..", "data", "audiences")
 MIN_AUTHORS = 4
 
 CONTEXT_ORDER = ("low", "medium", "high")
-REACH_ORDER = ("internal", "public")
+
+# What a name may be, because a name becomes a filename. Not only typed by a person: it comes out of
+# the audience file itself, and an audience file can arrive in a repository somebody pulled, so
+# `../../.claude/settings` is a name a file can claim.
+SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 def config_dir():
@@ -58,6 +68,20 @@ def user_dir():
     return os.path.join(config_dir(), "audiences")
 
 
+def usable_name(name):
+    """The name if it can become a filename, else None. The one gate between a name and a path.
+
+    Every write goes through `path_for`, `path_for` goes through here, and `load` drops a file whose
+    name does not survive it — so nothing downstream has to wonder where a name came from.
+
+    Refused on the whole name, and `basename` taken afterwards rather than instead: taking the
+    basename first turns `../../CLOBBERED` into the perfectly good name `CLOBBERED`, which writes
+    somewhere harmless under a name nobody typed. Two ways to be wrong, and only one of them is loud.
+    """
+    text = str(name or "")
+    return os.path.basename(text) if SAFE_NAME.fullmatch(text) else None
+
+
 class Audience:
     def __init__(self, data, path, builtin, shared=False):
         self.path = path
@@ -65,7 +89,10 @@ class Audience:
         # Shared means it came from a directory a team keeps, so it is not yours to delete: it goes
         # away when someone removes it from that repository.
         self.shared = shared
-        self.name = data.get("name") or os.path.basename(path)[:-5]
+        # The file's own name wins over the name inside it, if the inside one could not be a filename.
+        # A hostile file must not even be listed under a name that traverses, because everything a
+        # person then types that name at writes somewhere.
+        self.name = usable_name(data.get("name")) or usable_name(os.path.basename(path)[:-5]) or ""
         self.who = data.get("who") or ""
         self.matches_on = data.get("matches") or {}
         self.vocabulary = {str(k).upper(): int(v) for k, v in (data.get("vocabulary") or {}).items()}
@@ -82,6 +109,12 @@ class Audience:
         self.inherits = list(data.get("inherits") or [])
         self.members = list(data.get("members") or [])
         self.assumptions = data.get("assumptions") or {}
+        # One place a level becomes a level. Anything that is not one ranks as the least-informed
+        # reader, which is the safe end — and, more to the point, is no longer handed to the model as
+        # itself: `"shared_context": "sideways"` in a hand-edited file used to reach a prompt verbatim,
+        # as "how much they already know of this: sideways". `show` still prints the file's own words.
+        level = self.assumptions.get("shared_context")
+        self.shared_context = level if level in CONTEXT_ORDER else CONTEXT_ORDER[0]
         self.meta = data.get("_meta") or {}
 
     # ---------------------------------------------------------------- matching
@@ -116,6 +149,20 @@ class Audience:
     def origin(self):
         return "built in" if self.builtin else ("shared" if self.shared else "yours")
 
+    @property
+    def rescan_note(self):
+        """Why this audience cannot tell an overloaded abbreviation apart, or "" if it can.
+
+        Two different reasons, and telling someone to rescan a file they did not measure is worse than
+        saying nothing: a shared audience arrives without expansions on purpose, because each one is a
+        phrase copied out of somebody's private writing.
+        """
+        if not (self.stale and self.matches_on):
+            return ""
+        if self.shared:
+            return "no expansions: a shared audience travels without them"
+        return "rescan: no expansions recorded"
+
     def __repr__(self):
         return f"<Audience {self.name} {len(self.vocabulary)} terms, {self.origin}>"
 
@@ -145,6 +192,8 @@ def load():
             if not data:
                 continue
             a = Audience(data, path, builtin, shared)
+            if not a.name:
+                continue                      # neither its name nor its filename could be a filename
             found[a.name] = a
     return found
 
@@ -164,12 +213,10 @@ class Resolved:
         source = audiences or ([ALL[unresolved_default]] if unresolved_default in ALL else [])
         sets = [a.known(BASELINES) for a in source]
         self.known = set.intersection(*sets) if sets else set()
-        self.shared_context = min((a.assumptions.get("shared_context", "low") for a in source),
-                                  key=lambda v: CONTEXT_ORDER.index(v)
-                                  if v in CONTEXT_ORDER else 0) if source else "low"
-        self.reach = max((a.assumptions.get("reach", "internal") for a in source),
-                         key=lambda v: REACH_ORDER.index(v)
-                         if v in REACH_ORDER else 0) if source else "internal"
+        # The least-informed reader in scope. Every value is already one of CONTEXT_ORDER, because
+        # Audience clamped it on the way in, so this is a ranking and nothing else.
+        self.shared_context = min((a.shared_context for a in source),
+                                  key=CONTEXT_ORDER.index) if source else CONTEXT_ORDER[0]
 
     @property
     def names(self):
@@ -208,6 +255,13 @@ def _key(name):
     return re.sub(r"[^a-z]", "", name.lower())
 
 
+def _might_be(x, y):
+    """Whether two names from different sources might be one person. A prefix match on at least four
+    letters: shorter than that, initials collide with everybody."""
+    kx, ky = _key(x), _key(y)
+    return min(len(kx), len(ky)) >= 4 and (kx.startswith(ky) or ky.startswith(kx))
+
+
 def possible_overlap():
     """People who MIGHT be in two audiences at once. A hint for a person, never a fact.
 
@@ -222,35 +276,44 @@ def possible_overlap():
     """
     named = [a for a in ALL.values() if a.members]
     out = []
-    for i, a in enumerate(named):
-        for b in named[i + 1:]:
-            hits = []
-            for x in a.members:
-                kx = _key(x)
-                if len(kx) < 4:
-                    continue
-                for y in b.members:
-                    ky = _key(y)
-                    if len(ky) >= 4 and (kx.startswith(ky) or ky.startswith(kx)):
-                        hits.append((x, y))
-                        break
-            out.append((a.name, b.name, hits, len(a.members), len(b.members)))
+    for a, b in itertools.combinations(named, 2):
+        # One hit per left-hand name: two people on the right whose names both prefix-match would be
+        # one guess reported twice.
+        hits = [(x, y) for x in a.members
+                if (y := next((y for y in b.members if _might_be(x, y)), None))]
+        out.append((a.name, b.name, hits, len(a.members), len(b.members)))
     return out
 
 
 
 # ------------------------------------------------------------------------ writing
-def path_for(name):
-    return os.path.join(user_dir(), name + ".json")
+def path_for(name, directory=None):
+    """Where an audience file goes. The only place a name turns into a path.
+
+    Refuses rather than sanitising quietly, because a name that is not a usable name means the file it
+    came from is not what it says it is. `save` writes the dict it read, keys it knows nothing about
+    included, so an unchecked name here wrote attacker-chosen JSON to an attacker-chosen path with
+    `.json` appended — `../../.claude/settings` being the one that then gets executed.
+    """
+    safe = usable_name(name)
+    if not safe:
+        raise ValueError(f"{name!r} is not a usable audience name: a letter or digit first, then "
+                         f"letters, digits, dot, dash or underscore, up to 64 characters")
+    return os.path.join(directory or user_dir(), safe + ".json")
 
 
-def save(name, data):
-    os.makedirs(user_dir(), exist_ok=True)
-    path = path_for(name)
+def _write(path, data):
+    """One writer, so every audience file on disk has the same shape whoever wrote it — the file a
+    `share` puts in a team repository has to be readable by `load` on someone else's machine."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as fh:
         json.dump(data, fh, indent=1, sort_keys=False)
         fh.write("\n")
     return path
+
+
+def save(name, data):
+    return _write(path_for(name), data)
 
 
 def remove(name):
@@ -338,17 +401,21 @@ def route(name, dimension, values, drop=False):
 # measured over 94 people deserves more trust than one measured over 5, and neither answer requires a
 # name.
 def visibility(directory):
-    """Whether the repository holding a directory is public, if that can be established.
+    """Whether the repository holding a directory is public: True, False, or None for cannot tell.
 
     Best effort and clearly labelled as such. Whether names may be shared depends entirely on who can
     read the repository, and a URL does not carry that — a private repository and a public one look
     identical written down.
+
+    Only `False` is a permission to publish names. `None` — no repository yet, no `gh`, `gh` not
+    logged in, a remote GitHub cannot describe — is how a first-time user arrives, and it used to be
+    falsy enough to publish them.
     """
     try:
         top = subprocess.run(["git", "-C", directory, "rev-parse", "--show-toplevel"],
                              capture_output=True, text=True, timeout=10)
         if top.returncode != 0:
-            return None, "not a git repository, so nothing is shared by committing it"
+            return None, "that directory is not in a git repository, so nobody can say who will read it"
         seen = subprocess.run(["gh", "repo", "view", "--json", "visibility,nameWithOwner"],
                               capture_output=True, text=True, timeout=20,
                               cwd=top.stdout.strip())
@@ -380,13 +447,14 @@ def share(name, directory, with_names=False):
     people = list(data.get("members") or [])
     if not with_names:
         data.pop("members", None)
+    # Expansions never travel. Each one is a phrase copied verbatim out of writing the team did in
+    # private — "BSP: Big Secret Project" — so it is where an unreleased project name or a client name
+    # appears in full, and a share can land in a public repository. The receiving side is told what it
+    # is missing rather than left to assume nothing here is ambiguous: `rescan_note` says so, and
+    # dropping the key rather than writing an empty one is what makes it say so.
+    data.pop("expansions", None)
     data.setdefault("_meta", {})["measured_over_people"] = len(people)
-    os.makedirs(directory, exist_ok=True)
-    target = os.path.join(directory, name + ".json")
-    with open(target, "w") as fh:
-        json.dump(data, fh, indent=1, sort_keys=False)
-        fh.write("\n")
-    return target, len(people)
+    return _write(path_for(name, directory), data), len(people)
 
 
 def _cli():
@@ -420,23 +488,25 @@ def _cli():
 
     if a.cmd == "share":
         public, where = visibility(a.to)
-        if a.with_names and public:
+        # Proved private, or the names stay here. Anything else — public, no repository, no `gh`, `gh`
+        # not logged in, a host `gh` cannot describe — is a question nobody answered, and a list of
+        # colleagues' names is not the thing to guess about.
+        if a.with_names and public is not False:
             raise SystemExit(
-                f"{where}. --with-names would publish {len(ALL[a.name].members)} colleagues' names "
-                f"to anyone. Share it without them, or point --to at a directory in a repository only "
-                f"your team can read.")
+                f"--with-names refused: {where}. Names travel only where GitHub says the repository is "
+                f"private. Share it without them — the count travels either way and is the provenance "
+                f"a colleague needs — or point --to at a directory in a private repository your team "
+                f"already clones.")
         try:
             target, people = share(a.name, a.to, with_names=a.with_names)
         except (KeyError, PermissionError, ValueError) as exc:
             raise SystemExit(str(exc).strip("'"))
         print(f"{a.name} -> {target}")
         print(f"  measured over {people} people, and the file says so")
-        if a.with_names and public is False:
-            print(f"  their names are included. {where[0].upper() + where[1:]}, so that is who reads "
-                  f"them.")
-        elif a.with_names:
-            print(f"  their names are included, and {where} — so check who can read it before you "
-                  f"push.")
+        print(f"  written-out forms are not included: each is a phrase from private writing, so an "
+              f"abbreviation this audience uses for two things is not told apart by whoever pulls it")
+        if a.with_names:
+            print(f"  their names are included, and {where} — so that is who reads them.")
         elif people:
             print(f"  their names are not, so `overlap` will not work for whoever pulls this. "
                   f"--with-names includes them.")
@@ -470,7 +540,7 @@ def _cli():
             where = ", ".join(f"{k}={len(v)}" for k, v in aud.matches_on.items()) or "inherit only"
             print(f"{name:24s} {kind:9s} {aud.origin:9s} {known:4d} terms  "
                   f"{len(aud.members):3d} people  {where}"
-                  + ("   [rescan: no expansions recorded]" if aud.stale and aud.matches_on else ""))
+                  + (f"   [{aud.rescan_note}]" if aud.rescan_note else ""))
         print(f"\nyours:  {user_dir()}")
         for directory in paths.shared():
             print(f"shared: {directory}")
@@ -504,7 +574,10 @@ def _cli():
         return
 
     if a.cmd == "accept":
-        where = accept(a.name, a.term)
+        try:
+            where = accept(a.name, a.term)
+        except (KeyError, ValueError) as exc:
+            raise SystemExit(str(exc).strip("'"))
         print(f"{a.term.upper()} was already known to {a.name}; nothing to change" if where is None
               else f"updated {where}")
         return
@@ -526,9 +599,10 @@ def _cli():
                 print(f"ambiguous  {term}: " + ", ".join(f"{long} ({n})"
                                                          for long, n in sorted(seen.items(),
                                                                                key=lambda kv: -kv[1])))
-    elif aud.stale and aud.matches_on:
-        print("rescan     this file records no expansions, so an abbreviation used here for two things "
-              "cannot be told apart. Re-run /prose-guard:audiences to measure them.")
+    elif aud.rescan_note:
+        print(f"rescan     {aud.rescan_note}, so an abbreviation used here for two things cannot be "
+              f"told apart."
+              + ("" if aud.shared else " Re-run /prose-guard:audiences to measure them."))
     known = sorted(t for t, n in aud.vocabulary.items() if n >= MIN_AUTHORS)
     below = sorted(t for t, n in aud.vocabulary.items() if n < MIN_AUTHORS)
     print(f"knows      {len(known)} measured + {len(aud.known(BASELINES)) - len(known)} inherited")

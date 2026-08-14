@@ -28,12 +28,50 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audiences  # noqa: E402
 import jargon  # noqa: E402
+import paths  # noqa: E402
 
 BOT = re.compile(r"(\[bot\]|-bot$|dependabot|renovate|github-actions)", re.I)
+# A credential written into a command rather than passed through a variable. Redacted before a command
+# is printed, because the warning naming a failing command is how someone finds out their credential
+# was refused — and stderr here is an agent's transcript.
+SECRET = re.compile(r"(?i)(bearer|token|key|secret|password)\s*[:= ]\s*\S+")
 
 
 def short(cmd):
+    """A command, cut to one line and with any inline credential taken out.
+
+    Redacted before it is cut, not after: cutting first left the first characters of a token in the
+    message, which is enough to identify it and not enough to be useful.
+    """
+    cmd = SECRET.sub(lambda m: f"{m.group(1)} <redacted>", cmd)
     return cmd if len(cmd) <= 60 else cmd[:57] + "..."
+
+
+def _row(line):
+    """One {"author": ..., "text": ...} line as (author, text, ts), or None if it is not usable.
+
+    One parser, because a source read from a file and the same source piped through a command are the
+    same lines and must be filtered the same way — bots dropped by name, an authorless line dropped.
+    """
+    try:
+        row = json.loads(line.strip() or "{}")
+    except ValueError:
+        return None
+    who = str(row.get("author") or "").strip()
+    if not who or BOT.search(who):
+        return None
+    return who, str(row.get("text") or ""), row.get("ts")
+
+
+def under_home(path):
+    """Where a file the scan writes goes. A relative path lands in the config home, not here.
+
+    Both files a scan writes carry every measured person's name — `--out` the member list, `--keep` the
+    messages themselves. `candidates.json` relative to the working directory put them in whichever
+    repository the scan was run from, which is where an agent runs things, and one `git add -A` away
+    from being published. An absolute path is taken as meant.
+    """
+    return path if os.path.isabs(path) else paths.at(path)
 
 
 def from_git(repo="."):
@@ -100,18 +138,13 @@ def from_command(commands):
         # takes tens of minutes, and nothing could be reported — no count, no rate, no way to stop —
         # until it had finished. Someone asked how long theirs would take and there was no answer.
         for line in proc.stdout:
-            line = line.strip()
-            if not line:
+            if not line.strip():
                 continue
             printed += 1
-            try:
-                row = json.loads(line)
-            except ValueError:
-                continue
-            who = str(row.get("author") or "").strip()
-            if who and not BOT.search(who):
+            row = _row(line)
+            if row:
                 used += 1
-                yield who, str(row.get("text") or ""), row.get("ts")
+                yield row
         proc.stdout.close()
         code = proc.wait()
         err = (proc.stderr.read() or "").strip()
@@ -128,42 +161,22 @@ def from_command(commands):
                   file=sys.stderr)
         elif used < printed:
             print(f"  note: `{short(cmd)}` gave {used} usable of {printed} line(s)", file=sys.stderr)
-        # A source that authenticates and then has no data access exits 0 and prints an error object,
-        # which looks from here exactly like a channel with nothing in it. Saying what arrived is the
-        # difference between finding that out now and measuring an empty corpus.
-        if used == 0:
-            detail = (f"printed {printed} line(s), none of them "
-                      f"{{\"author\": ..., \"text\": ...}}" if printed else "printed nothing")
-            print(f"  warning: `{cmd[:60]}` {detail}. A rejected credential looks like this.",
-                  file=sys.stderr)
-        elif used < printed:
-            print(f"  note: `{cmd[:60]}` gave {used} usable of {printed} line(s)", file=sys.stderr)
 
 
-def from_jsonl(paths):
+def from_jsonl(files):
     """Anything you can export as {"author": ..., "text": ...} per line — chat history, a wiki."""
-    for path in paths:
+    for path in files:
         try:
             with open(path, errors="replace") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        row = json.loads(line)
-                    except ValueError:
-                        continue
-                    who = str(row.get("author") or "").strip()
-                    if who and not BOT.search(who):
-                        yield who, str(row.get("text") or ""), row.get("ts")
+                yield from filter(None, (_row(line) for line in fh))
         except OSError:
             continue
 
 
-def from_text(paths):
+def from_text(files):
     """Plain prose with no author available, so it counts as one voice — which stops it reaching the
     shared-knowledge threshold on its own."""
-    for path in paths:
+    for path in files:
         try:
             with open(path, errors="replace") as fh:
                 yield f"file:{os.path.basename(path)}", fh.read(), None
@@ -295,8 +308,13 @@ def cmd_scan(a):
             yield from s
 
     cut = audiences.MIN_AUTHORS
+    out_path = under_home(a.out or "candidates.json")
+    keep_path = under_home(a.keep) if a.keep else None
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    if keep_path:
+        os.makedirs(os.path.dirname(os.path.abspath(keep_path)), exist_ok=True)
     authors, uses, docs, people, newest, expansions = tally(
-        chained(), cut=cut, limit=a.max_documents, keep=a.keep,
+        chained(), cut=cut, limit=a.max_documents, keep=keep_path,
         report=(None if a.quiet else lambda line: print(line, file=sys.stderr, flush=True)))
     inherited = audiences.BASELINES.get(a.inherits or "engineers", set())
     rows = {t: {"authors": len(w), "uses": uses[t]} for t, w in authors.items()
@@ -317,7 +335,7 @@ def cmd_scan(a):
            # this audience uses for two things.
            "expansions": _folded(expansions),
            "known": known, "borderline": borderline, "needs_explaining": rest, "counts": rows}
-    with open(a.out, "w") as fh:
+    with open(out_path, "w") as fh:
         json.dump(out, fh, indent=1)
         fh.write("\n")
     if not docs:
@@ -338,9 +356,11 @@ def cmd_scan(a):
               f"\nonly add terms.")
     if newest is not None:
         print(f"\nnewest document read: {newest}")
-    if a.keep:
-        print(f"documents kept in {a.keep} — pass it as --jsonl to add to them without re-reading")
-    print(f"\nwritten to {a.out}")
+    if keep_path:
+        print(f"documents kept in {keep_path} — pass it as --jsonl to add to them without re-reading")
+    print(f"\nwritten to {out_path}")
+    print("  it lists every person measured, so it is not in your working tree unless you asked for "
+          "that")
 
 
 def _losses(name, fresh):
@@ -398,6 +418,10 @@ def _folded(expansions):
 
 
 def cmd_create(a):
+    if not audiences.usable_name(a.name):
+        raise SystemExit(f"{a.name!r} cannot be an audience name: it becomes a filename, so it starts "
+                         f"with a letter or digit and holds only letters, digits, dot, dash and "
+                         f"underscore, up to 64 characters")
     with open(a.candidates) as fh:
         cand = json.load(fh)
     counts = cand.get("counts") or {}
@@ -425,7 +449,7 @@ def cmd_create(a):
             "inherits": [cand.get("_meta", {}).get("inherits") or "engineers"],
             "members": cand.get("members") or [],
             "vocabulary": vocab,
-            "assumptions": {"shared_context": a.shared_context, "reach": a.reach},
+            "assumptions": {"shared_context": a.shared_context},
             "_meta": {"learned_from": cand.get("_meta", {}),
                       "accepted_by_hand": [t.upper() for t in a.also_known]}}
     routing, other = _losses(a.name, data)
@@ -460,14 +484,20 @@ def main():
                         "the audience holds back more than it should rather than less")
     s.add_argument("--keep", metavar="FILE",
                    help="write the usable documents here as they arrive, so a read that dies part "
-                        "way through leaves them on disk. Pass it back as --jsonl to add to them")
+                        "way through leaves them on disk. Pass it back as --jsonl to add to them. A "
+                        "relative path is resolved under your prose-guard config directory")
     s.add_argument("--quiet", action="store_true", help="no progress while it runs")
     s.add_argument("--command", action="append", default=[], metavar="SHELL",
                    help='any command emitting those lines on stdout — a chat export, a wiki dump, '
                         'an mbox. Keeps the text out of an agent\'s context. See docs/sources.md')
     s.add_argument("--text", nargs="+", default=[], metavar="FILE")
     s.add_argument("--inherits", help="baseline to subtract and inherit (default engineers)")
-    s.add_argument("--out", default="candidates.json")
+    # Not the working directory. The candidate list holds every measured person's name and every term
+    # they used, and a scan is usually run from the repository being worked in.
+    s.add_argument("--out", metavar="FILE",
+                   help="where the candidate list goes (default: candidates.json in your prose-guard "
+                        "config directory). A relative path is resolved there too, because this file "
+                        "names every person measured")
 
     c = sub.add_parser("create", help="write an audience from a candidates file")
     c.add_argument("name")
@@ -488,7 +518,6 @@ def main():
     c.add_argument("--also-known", nargs="*", default=[])
     c.add_argument("--not-known", nargs="*", default=[])
     c.add_argument("--shared-context", choices=audiences.CONTEXT_ORDER, default="low")
-    c.add_argument("--reach", choices=audiences.REACH_ORDER, default="internal")
 
     a = ap.parse_args()
     (cmd_scan if a.cmd == "scan" else cmd_create)(a)

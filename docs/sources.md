@@ -16,13 +16,19 @@ within one run — the count is of distinct authors, so logins, display names an
 long as one person is not two of them.
 
 ```
-python3 lib/learn.py scan --command './export-chat.sh general' --out candidates.json
-python3 lib/learn.py create platform-team candidates.json \
+python3 lib/learn.py scan --command './export-chat.sh general'
+python3 lib/learn.py create platform-team ~/.config/prose-guard/candidates.json \
     --who 'Engineers who run our Kubernetes. They read incident threads cold.' \
     --match-channel C054ZDE533R
 ```
 
 Bot authors are dropped by name. Two sources can be combined in one scan, and the counts merge.
+
+The scan prints where it wrote the candidate list, and by default that is `candidates.json` in your
+prose-guard config directory rather than the directory you are standing in. The file names every
+person whose writing was counted, and a scan is usually run from inside a repository — where
+`git add -A` would commit it. `--out` and `--keep` take an absolute path if you want it elsewhere; a
+relative one is resolved under the config directory too.
 
 ## Why a command and not a source per product
 
@@ -64,23 +70,31 @@ wait, follow the cursor to the end, and fail loudly rather than quietly returnin
 those four things and knows nothing about any particular service — you give it the paths to the fields.
 
 ```
+export SLACK_AUTH="Authorization: Bearer $SLACK_TOKEN"
 python3 lib/fetch.py --url 'https://slack.com/api/conversations.history?channel=C123&limit=200' \
-    --header "Authorization: Bearer $SLACK_TOKEN" \
+    --header-env SLACK_AUTH \
     --ok ok --error error --items messages --author user --text text --ts ts \
     --cursor-out response_metadata.next_cursor --cursor-in cursor
 ```
 
+**Name the variable, do not paste the value.** `--header-env` takes the NAME of an environment
+variable holding the whole header line; `--header "Authorization: Bearer $SLACK_TOKEN"` would have the
+shell expand the token before the process starts, and `ps` shows one process's arguments to every
+other process running as you — an agent, an `npm` postinstall, a colleague on a shared box. The token
+was read out of a process table that way while this was being reviewed. `--header` is still the flag
+for headers that are not secret.
+
 That prints the contract on stdout, so it goes straight into a scan:
 
 ```
-python3 lib/learn.py scan --command './read-chat.sh' --keep /tmp/corpus.jsonl --out /tmp/candidates.json
+python3 lib/learn.py scan --command './read-chat.sh' --keep corpus.jsonl
 ```
 
 `--ok` is the one flag worth explaining. Some services answer `200` with a refusal in the body, which
 otherwise reads as an empty page — name the field that has to be truthy and a refusal becomes a failure.
 It honours `Retry-After` rather than guessing, retries a body that stops short of its own
 `Content-Length`, and exits `2` with "this corpus is incomplete" if it hits `--max-pages` with more to
-read. It does not authenticate: pass a header, and keep the credential in your shell or keychain.
+read. It does not authenticate: pass `--header-env`, and keep the credential in your shell or keychain.
 
 If your source is not a JSON array plus a cursor, write your own command. The recipes below are all a
 few lines of shell.
@@ -99,12 +113,16 @@ Each of these emits the contract above. They are starting points, not supported 
 # with the `channels:history` scope, and the bot invited to the channel.
 # A `xoxe.xoxp-` token from the Slack CLI is an app-configuration token: it authenticates and then
 # returns `missing_scope` on any data call.
-curl -s "https://slack.com/api/conversations.history?channel=$1&limit=1000" \
-     -H "Authorization: Bearer $SLACK_TOKEN" \
+printf 'header = "Authorization: Bearer %s"\n' "$SLACK_TOKEN" \
+  | curl -s -K - "https://slack.com/api/conversations.history?channel=$1&limit=1000" \
   | jq -c 'if .ok then .messages[] | select(.subtype == null)
                        | {author: .user, text: .text}
            else "slack: " + .error | halt_error(1) end'
 ```
+
+`-K -` reads the header from curl's stdin rather than from its arguments, and `printf` is a shell
+builtin, so no process on the machine has the token in its argument list. `curl -H "Authorization:
+Bearer $SLACK_TOKEN"` puts it in one that `ps` prints.
 
 `.user` is a user id, which is stable and is what the destination reports, so no name lookup is needed
 for counting. The `if .ok` is the point of that `jq`: without it a rejected token prints one error
