@@ -78,8 +78,14 @@ def run(text, ctx):
     if before and bad:
         inherited = [t for t in bad if jargon.uses(before, t)]
         bad = [t for t in bad if t not in inherited]
-    ambiguous = _ambiguous(said, considered, ctx)
     if not bad:
+        # A check reports one thing, and an overloaded abbreviation is the thing to report only when
+        # there is nothing more actionable. Where a term was never explained at all, that is the fix to
+        # ask for: it is concrete, it is what holds the message back, and adding "and by the way ADC
+        # means two things to these readers" next to it competes with it for the one edit the reader
+        # will make. So the note is worked out here, where it is used, rather than worked out for every
+        # message and thrown away for most of them.
+        ambiguous = _ambiguous(said, considered, ctx)
         return Finding(ADVISE, ambiguous) if ambiguous else None
     fix = ("Explain each where it first appears, by anchoring it to something this reader already "
            "works with")
