@@ -1538,19 +1538,19 @@ def test_a_check_runs_more_than_once_and_the_runs_are_pooled():
 
     # Nothing on the first run costs one call and nothing else: a clean check must not pay for pooling.
     quiet = Stub([None, first, first])
-    found, firm = checks.pooled(quiet, text, None, 3)
+    found, firm, _ = checks.pooled(quiet, text, None, 3)
     check("a check that passes is asked once", len(quiet.replies), 2)
     check("and reports nothing", found, [])
 
     # Two runs pointing at one sentence: one item, and it is firm.
-    found, firm = checks.pooled(Stub([first, reworded, elsewhere]), text, None, 3)
+    found, firm, _ = checks.pooled(Stub([first, reworded, elsewhere]), text, None, 3)
     check("a repeat is one item", len(found), 2)
     check("the repeat is what can be relied on", len(firm), 1)
     check("and it says how often", "[2 of 3 runs]" in firm[0].message, True)
 
     # Three runs finding three different things: three items, none firm. On a document with real defects
     # each of those is a different real defect, which is why they are reported rather than filtered.
-    found, firm = checks.pooled(Stub([first, elsewhere, about("One idea here and nothing else")]),
+    found, firm, _ = checks.pooled(Stub([first, elsewhere, about("One idea here and nothing else")]),
                                 text, None, 3)
     check("every distinct item is kept", len(found), 3)
     check("with none of them firm", firm, [])
@@ -1564,26 +1564,69 @@ def test_a_check_runs_more_than_once_and_the_runs_are_pooled():
     class Cheap(Stub):
         COSTS_A_CALL = False
     cheap = Cheap([first, first])
-    found, firm = checks.pooled(cheap, text, None, 3)
+    found, firm, _ = checks.pooled(cheap, text, None, 3)
     check("a deterministic check runs once", len(cheap.replies), 1)
     check("and is firm on its own", len(firm), 1)
 
 
-def test_how_many_passes_comes_from_the_length():
-    """Nobody should have to pass a flag to make a long document get the same bar as a short one.
+def test_how_hard_a_check_works_follows_the_text():
+    """A fixed number of runs was wrong in both directions.
 
-    One item for 100 words and one for 1,000 holds the long one to a lower bar. The number of runs scales
-    with length, in one place, so the hook and a deliberate run cannot drift apart — and never fewer than
-    two, because one run cannot tell a reliable finding from a near-tie.
+    It stopped a document with ten real defects after the same number of runs as a clean one, and it held a
+    2,000-word document to the same effort as a 400-word one. So the count is not fixed: a check keeps
+    running while its runs keep surfacing something new, and stops when a run adds nothing. The ceiling is
+    linear in length, because a longer document has more places to be wrong.
     """
     import checks
-    # Measured: three pooled runs of a 295-word document found six items where one pass found two, so
-    # a document that size wants three or four, not two.
-    for words, expected in ((30, 2), (140, 2), (300, 4), (450, 5), (2000, 5)):
-        check(f"{words} words", checks.passes_for(" ".join(["word"] * words)), expected)
-    check("never fewer than two", checks.passes_for(""), checks.FEWEST_PASSES)
-    check("and bounded, because a long document is not a licence to spend",
-          checks.passes_for(" ".join(["word"] * 100000)), checks.MOST_PASSES)
+    for words, expected in ((30, 6), (140, 6), (300, 6), (800, 9), (2000, 21)):
+        check(f"ceiling at {words} words", checks.ceiling_for(" ".join(["word"] * words)), expected)
+    # The base is on the ceiling, not on the runs: a short message capped at two could never be observed to
+    # run dry, so length decided everything and quality decided nothing.
+    check("a short message still has room to keep going",
+          checks.ceiling_for("a short one"), checks.BASE_CEILING)
+    # A bound, not a target: one pathological file must not spend a session.
+    check("and bounded", checks.ceiling_for(" ".join(["word"] * 100000)), checks.MOST_RUNS)
+
+    text = " ".join(f"Sentence number {n} sits here on its own." for n in range(40))
+
+    class Stub:
+        NAME = "stub"
+        COSTS_A_CALL = True
+
+        def __init__(self, replies):
+            self.replies = list(replies)
+            self.asked = 0
+
+        def run(self, text, ctx):
+            self.asked += 1
+            return self.replies.pop(0) if self.replies else None
+
+    def about(n):
+        return checks.Finding("advise", f'Consider: "Sentence number {n} sits here" is unclear')
+
+    # Still yielding: every run adds something, so it keeps going to the ceiling.
+    keeps = Stub([about(n) for n in range(30)])
+    found, _, spent = checks.pooled(keeps, text, None)
+    ceiling = checks.ceiling_for(text)
+    check("a document that keeps yielding is asked up to the ceiling", keeps.asked, ceiling)
+    check("and reports what it spent, because the caller keeps a budget", spent, ceiling)
+    check("and everything it found is reported", len(found), ceiling)
+
+    # Running dry, with the ceiling passed explicitly so this tests the stop rule and not the arithmetic.
+    # One run that adds nothing is tolerated — a run repeating itself does not prove the well is dry, and
+    # stopping at the first repeat would lose the findings that come after it. Two in a row stops it.
+    dries = Stub([about(1), about(1), about(2), None, None, about(9)])
+    found, firm, _ = checks.pooled(dries, text, None, 10)
+    check("one dry run is tolerated, two stops it", dries.asked, 5)
+    check("the repeat is one item, not two", len(found), 2)
+    check("the repeated one is firm", len(firm), 1)
+    check("and what came after the dry run was still collected",
+          any("Sentence number 2" in f.message for f in found), True)
+
+    # Clean on the first run costs exactly one call, whatever the ceiling.
+    quiet = Stub([None, about(1), about(2)])
+    check("a clean check is asked once", checks.pooled(quiet, text, None)[:2], ([], []))
+    check("and pays for one call", quiet.asked, 1)
 
 
 def test_an_abbreviation_can_mean_two_things():

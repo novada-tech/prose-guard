@@ -152,10 +152,10 @@ def main():
     if a.who:
         print(f'reader described as:  "{a.who}"  (read by the model-based checks, not by terms)')
     passes = a.passes or passes_for(text)
-    print(f"{passes} runs of each check, from the length of the text")
+    print(f"up to {passes} runs of each check, stopping when a run adds nothing")
     problems, loose = 0, 0
     for check in for_effort(a.effort):
-        found, firm = pooled(check, text, ctx, passes)
+        found, firm, _ = pooled(check, text, ctx, passes)
         if not found:
             print(f"  {check.NAME:10s} ok")
             continue

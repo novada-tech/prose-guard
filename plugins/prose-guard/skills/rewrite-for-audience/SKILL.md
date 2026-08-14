@@ -38,9 +38,11 @@ command cannot be skipped by accident.
 
 Run it again on the rewrite. The check is on the current wording, not on the draft you started from.
 
-Each check runs more than once, and how many times comes from the length of the text — two runs for a
-short message, up to five for a long document, with no flag to pass. It is the same number the hook uses on
-the same text, so a deliberate run and a message going out are held to one bar.
+Each check runs more than once, and how many times is decided by the text rather than by a flag. A check
+keeps running while its runs keep finding something new and stops when a run adds nothing, under a ceiling
+that grows with length — six up to 600 words, 21 at 2,000. So a document with real problems is not cut off
+at the same point as a clean one, and a clean check still costs one call. The hook uses the same rule on the
+same text, so a deliberate run and a message going out are held to one bar.
 
 The runs matter because a check returns exactly one item however it is asked — measured on a
 295-word document with about ten defects, asking for up to five items produced one item a run in every

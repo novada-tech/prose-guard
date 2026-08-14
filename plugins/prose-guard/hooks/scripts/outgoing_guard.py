@@ -32,11 +32,11 @@ import audiences  # noqa: E402
 import paths  # noqa: E402
 import destinations  # noqa: E402
 import checks as checks_module  # noqa: E402
-from checks import BLOCK, EFFORT, IN_ORDER as CHECKS, pooled  # noqa: E402
+from checks import BLOCK, EFFORT, IN_ORDER as CHECKS, ceiling_for, pooled  # noqa: E402
 
 MAX_PER_CHECK = 2      # one complaint, then one more if the fix did not land
 MAX_DENIALS = 6        # a ceiling across all of them, so one message cannot eat a session
-MAX_CALLS = 12         # and a ceiling on calls, since a re-verified check can be asked again
+MAX_CALLS = 20         # calls one message may cost, across every check and every run of one
 MAX_UNREADABLE = 2     # times a session is asked to make its text visible before it is let through
 
 
@@ -251,12 +251,15 @@ def main():
         if check.COSTS_A_CALL and state["calls"] >= MAX_CALLS:
             state["passed"][check.NAME] = digest
             continue
-        if check.COSTS_A_CALL:
-            state["calls"] += 1
         try:
             # The same pooling a deliberate run uses, so both apply one bar: passes scale with the
             # length of the text, and an item more than one run pointed at is what can be blocked on.
-            found, firm = pooled(check, text, ctx)
+            # The budget is in calls, and one call per check stopped being true when a check gained the
+            # right to run until it stops finding things. What is left of the session's budget is the
+            # ceiling for this check, so a long document cannot spend a session on its first paragraph.
+            left = max(1, MAX_CALLS - state["calls"])
+            found, firm, spent = pooled(check, text, ctx, min(ceiling_for(text), left))
+            state["calls"] += spent
         except Exception:
             found, firm = [], []             # a broken check is a silent check, never a blocker
         state["passed"][check.NAME] = digest

@@ -306,20 +306,35 @@ the long one is held to a lower bar for the same number of passes. And each pass
 is an agent turn spent reading a finding and editing — dearer than the check's own call.
 
 What varies between runs is WHICH item, and that is the fix. Each run picks one item from those above the
-bar, so N runs sample N items — and N comes from the length of the text, with no flag to pass:
+bar, so runs sample items — and how many runs is decided by the text, not by a flag.
 
-| words | runs of each check |
-|---|---|
-| up to 100 | 2 |
-| 300 | 4 |
-| 450 and up | 5 |
+**A check keeps running while its runs keep finding something new, and stops when a run adds nothing.** One
+run that adds nothing is tolerated, because a run repeating itself does not prove the well is dry and
+stopping at the first repeat loses whatever came after it. Two in a row stops it. So a document with ten
+real defects is not cut off at the same point as a clean one — which a fixed number of runs did.
 
-Never fewer than two, because one run cannot tell a reliable finding from a near-tie. Never more than
-five. The hook and a deliberate run call the same function on the same text, so they cannot drift apart:
-one bar per effort level, whichever way the text is being checked. A check that passes on its first run
-costs one call, so the extra calls are paid only where something was found.
+The ceiling is linear in length above a base of six, because a longer document has more places to be wrong:
+6 runs up to 600 words, 9 at 800, 21 at 2,000, and 25 as a hard bound so one pathological file cannot spend
+a session. The base is on the ceiling and not on the runs — a 44-word message capped at two runs could
+never be observed to run dry, so length decided everything and quality decided nothing.
 
-N calls, one round trip. On that same document, one pass found two findings and three pooled runs found
+What that costs, measured per document over every check:
+
+| document | words | calls | items found |
+|---|---|---|---|
+| badly written | 295 | 14 | 5 |
+| well edited | 371 | 8 | 2 |
+| agent-written | 68 | 11 | 3 |
+| human-edited | 44 | 10 | 3 |
+
+The badly written document spends most and the well edited one least, at a similar length. A check that
+passes on its first run costs one call, so the extra calls are paid only where something was found.
+
+The hook and a deliberate run call the same function on the same text, so they cannot drift apart: one bar
+per effort level, whichever way the text is going out. The hook adds a budget of 20 calls for one message,
+because a check that may run twenty times makes "one call per check" false — measured on a badly written
+1,475-word document at `high`, one denial cost 16 calls and 147 seconds. `medium` is one judgement check
+rather than five, and is the level the measurements support. On that same document, one pass found two findings and three pooled runs found
 six across four checks, including two checks that were silent in the single pass. Every item says how
 often it came up.
 
@@ -328,8 +343,9 @@ precision: one item, confirmed by reproducing. A rewrite pass wants coverage, so
 document with real defects "seen once in three runs" means the check sampled a different real defect that
 run, not that the item is noise. Confirmation would throw those away.
 
-Splitting the document was the other candidate and it is refuted above: it finds no more and costs nine
-times the calls.
+Splitting the document was the other candidate for scaling and it stays refuted: measured, it finds no more
+than the whole document does and costs nine times the calls, because a smaller piece lowers the bar for
+what counts as its worst sentence rather than sharpening the aim.
 
 ## When is a text finished
 
