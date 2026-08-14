@@ -47,11 +47,13 @@ DOUBLED = re.compile(r"\b(\w+)[ \t]+\1\b")
 # than article errors. All-caps is excluded because the rule is about pronunciation and not spelling —
 # "an FpML" is correct, and so is "a UPI".
 NEEDS_AN = re.compile(r"\ba ([aeiou][a-z]{2,})\b")
+# No h in that class, so the rule says nothing about a word beginning with one. Deliberate: "an hour",
+# "an heir" and "an honest answer" are correct, and so are "an historic" and "an herb" for plenty of
+# writers, which is a judgement about pronunciation this rule cannot make. A SILENT_H exclusion list
+# used to sit here for a case that could never reach it.
 NEEDS_A = re.compile(r"\ban ([bcdfgjklmnpqrstvwxyz][a-z]{2,})\b")
 # Vowel letter, consonant sound.
 SOUNDS_LIKE_YOU = ("one", "uni", "una", "use", "usu", "uti", "eu", "ubi", "ufo", "ewe")
-# Consonant letter, vowel sound.
-SILENT_H = ("hon", "hour", "heir")
 # A word that cannot follow an article at all means the text is broken somewhere else, and there is
 # nothing useful to say about the article.
 FUNCTION_WORDS = ("and", "the", "in", "on", "of", "to", "for", "with", "through", "or", "is", "are",
@@ -60,13 +62,23 @@ FUNCTION_WORDS = ("and", "the", "in", "on", "of", "to", "for", "with", "through"
 DOUBLED_ON_PURPOSE = ("that", "had", "long")
 
 
+# What a strip leaves behind. Not a space: DOUBLED matches two identical words separated by spaces and
+# tabs, so stripping a span between them made them adjacent and invented a doubled word. That held back
+# two reviewers' own issue posts — "in `2`, `3` and `4` and deliberately absent", and three channel
+# names in backticks with "versus" abbreviated between them — and a held turn is the most expensive
+# thing this tool does. Not a placeholder word either, because two spans in a row would double that
+# word instead. GAP has no word characters in it and both rules below need one on each side of it, so a
+# strip can now only ever remove a finding, never invent one.
+GAP = " -- "
+
+
 def prose(text):
     """The text minus what is not prose. A doubled identifier in code is not a typo."""
-    text = re.sub(r"```.*?```", " ", text, flags=re.S)
-    text = re.sub(r"`[^`]*`", " ", text)
-    text = re.sub(r"^\s{4,}.*$", " ", text, flags=re.M)        # indented blocks
-    text = re.sub(r"^\s*\|.*$", " ", text, flags=re.M)         # table rows repeat headings
-    text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r"```.*?```", GAP, text, flags=re.S)
+    text = re.sub(r"`[^`]*`", GAP, text)
+    text = re.sub(r"^\s{4,}.*$", GAP, text, flags=re.M)        # indented blocks
+    text = re.sub(r"^\s*\|.*$", GAP, text, flags=re.M)         # table rows repeat headings
+    text = re.sub(r"https?://\S+", GAP, text)
     return text
 
 
@@ -80,7 +92,7 @@ def scan(text):
         if m.group(1) not in FUNCTION_WORDS and not m.group(1).startswith(SOUNDS_LIKE_YOU):
             out.append(f'"{m.group(0)}" wants "an"')
     for m in NEEDS_A.finditer(body):
-        if m.group(1) not in FUNCTION_WORDS and not m.group(1).startswith(SILENT_H):
+        if m.group(1) not in FUNCTION_WORDS:
             out.append(f'"{m.group(0)}" wants "a"')
     return out
 

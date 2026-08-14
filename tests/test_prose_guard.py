@@ -204,10 +204,19 @@ def test_a_stripped_suffix_must_leave_a_word_behind():
     # ads outright while macOS's web2 does not, so asserting on the real dictionary tests the platform
     # rather than the floor — and passed on one of them.
     words = jargon.WORDS
-    jargon.WORDS = {"am", "aw", "pr", "id", "ad", "fail", "coin", "use", "run", "pod", "job"}
+    jargon.WORDS = {"am", "aw", "pr", "id", "ad", "fail", "coin", "use", "run", "pod", "job",
+                    "deny", "apply", "carry", "pry", "guy"}
     try:
         for term in ("FAILS", "COINED", "USES", "USED", "RUNS", "PODS", "JOBS"):
             check(f"{term} is an inflected word, not an acronym", jargon.is_acronym(term), False)
+        # English turns a final y into i before -ed and -es, and a word list holds the base form only.
+        # The guard held back a commit message that wrote DENIED in capitals for emphasis: it strips to
+        # "deni", which is in no dictionary, so the word read as an acronym nobody had explained.
+        for term in ("DENIED", "DENIES", "APPLIED", "APPLIES", "CARRIED", "PRIED"):
+            check(f"{term} is an inflected word too", jargon.is_acronym(term), False)
+        # ...and only before -ed and -es, which are the suffixes that change the spelling. Putting the
+        # y back after any suffix reduced GUID to "guy" and retired a real acronym.
+        check("GUID is not an inflection of guy", jargon.is_acronym("GUID"), True)
         # Each of these reduces to a two-letter word in that list. That is the whole failure.
         for term in ("AMD", "AWS", "PRD", "IDS", "ADS"):
             check(f"{term} is an acronym whatever it ends in", jargon.is_acronym(term), True)
@@ -2215,6 +2224,120 @@ def test_a_scan_leaves_no_names_in_the_working_tree():
         check("both paths are printed, so nobody has to guess",
               os.path.join(home, "candidates.json") in r.stdout
               and os.path.join(home, "corpus.jsonl") in r.stdout, True)
+def test_stripping_code_out_of_prose_does_not_invent_a_doubled_word():
+    """Both of these sentences are correct, and both were held back.
+
+    `prose()` used to replace what it strips with a single space, and DOUBLED matches two identical
+    words separated by spaces and tabs — so a stripped inline span left the words either side adjacent
+    and the rule fired on them. It blocked two reviewers' own issue posts, on text that had nothing to
+    do with the check. A held turn is the most expensive thing this tool does (`checks/config.py`), so
+    a false block costs more than any finding it could have made.
+
+    The third case is why the gap is not a placeholder *word*: two spans in a row would then leave that
+    word doubled, trading one invented typo for another.
+    """
+    from checks import mechanics
+    for text in ("The share threshold is exercised in `2`, `3` and `4` and deliberately absent.",
+                 "The three channels (`systemMessage` vs `additionalContext` vs "
+                 "`permissionDecisionReason`) are each used deliberately.",
+                 "Run `git log` `--oneline` to see it.",
+                 "The fence ```one``` and ```two``` and the rest of the paragraph.",
+                 "Compare https://example.com/a and https://example.com/b and decide."):
+        check(f"not a doubled word: {text[:34]}", mechanics.scan(text), [])
+    # and a real one either side of a stripped span is still found
+    check("a doubled word next to code is still a typo",
+          bool(mechanics.scan("we we should run `git log`")), True)
+    check("and one after it", bool(mechanics.scan("run `git log` and and then stop")), True)
+
+
+def test_pairs_reads_backwards_from_the_parenthesis():
+    """Adversarial shapes for the expansion finder, which now anchors on the parenthesis.
+
+    Scanning for the phrase first tried a 120-character run at every offset in the text — 914 ms on
+    100,000 words. Anchoring on the parenthesis and reading backwards costs 3.7 ms for the same
+    output. These cases are the ones where "the same output" is easiest to get wrong.
+    """
+    import jargon
+    check("an ordinary pair", jargon.pairs("Application Default Credentials (ADC) failed"),
+          {"ADC": "Application Default Credentials"})
+    check("and the other way round", jargon.pairs("ADC (Application Default Credentials) failed"),
+          {"ADC": "Application Default Credentials"})
+    check("a parenthesis at offset 0 has nothing before it", jargon.pairs("(ADC) failed"), {})
+    check("nor does one with a single character before it", jargon.pairs("x (ADC)"), {})
+    check("an unclosed parenthesis is not a pair",
+          jargon.pairs("Application Default Credentials (ADC failed"), {})
+    check("the phrase stops at the nearest parenthesis",
+          jargon.pairs("Application Default Credentials (see Access (ADC) below)"), {})
+    check("two pairs in a row are both found",
+          jargon.pairs("Application Default Credentials (ADC) and Trade Reporting Rules (TRR)"),
+          {"ADC": "Application Default Credentials", "TRR": "Trade Reporting Rules"})
+    # 80 characters inside the brackets, which is where a parenthesis stops being an expansion and
+    # starts being a sentence. This is the bound the whole of an 'SF (Long Form)' pair has to fit in.
+    check("a bracket holding 93 characters is not an expansion",
+          jargon.pairs("ADC (Application Default Credentials as the mechanism machine "
+                       "authentication uses on this platform)"), {})
+    check("a run too long to reach across is not a pair",
+          jargon.pairs("Application Default Credentials " + "z" * 200 + " (ADC)"), {})
+    # The look-back is exactly 120 characters of phrase, whatever whitespace sits against the bracket.
+    # An off-by-one either way moves one of these two.
+    check("a phrase 120 characters long is still in reach",
+          bool(jargon.pairs("Alpha " + "z" * 100 + " Baker Charlie (ABC)")), True)
+    check("and 121 characters is not", jargon.pairs("Alpha " + "z" * 101 + " Baker Charlie (ABC)"), {})
+    check("whitespace against the bracket does not count towards it",
+          bool(jargon.pairs("Alpha " + "z" * 100 + " Baker Charlie" + " " * 40 + "(ABC)")), True)
+
+
+def test_the_a_an_rule_says_nothing_about_words_beginning_with_h():
+    """`an hour` is left alone because `h` is not in the rule's consonant class at all.
+
+    A three-word SILENT_H list sat beside the rule for a case that could never reach it, and the
+    assertion that looked like its test passed for an unrelated reason. Widening the class to catch
+    "an historic" is the alternative, and it is not taken: every rule in this module is there on a
+    measurement over 3,000 real messages, and "an historic", "an herb" and "an hotel" are all
+    defensible English, so the rule would fire on correct prose.
+    """
+    from checks import mechanics
+    for correct in ("an hour later", "an heir apparent", "an honest answer", "an historic decision",
+                    "an hotel room", "a hotel room", "a historic decision"):
+        check(f"left alone: {correct}", mechanics.scan(correct), [])
+
+
+def test_the_share_that_stops_a_block_is_one_third():
+    """The two calibrated numbers in `checks/terms.py`, pinned at their boundaries.
+
+    27 lines of comment justify `MAX_SHARE_TO_BLOCK = 1/3` (the 90th percentile of the share seen when
+    a message IS scored against the audience it was written for) and `ALWAYS_ACTIONABLE = 2`. Any
+    threshold between 0.077 and 1.0 used to pass this suite, and five separate mutations to those two
+    lines survived: 1/3 to 0.9, 1/3 to 0.05, 2 to 5, and both comparisons loosened to >=.
+    """
+    from checks import ADVISE, BLOCK
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "team", matches={"channels": ["C1"]},
+                       vocabulary={f"T{i}": 9 for i in range(20)})
+        A, _ = fresh(home)
+        import importlib
+
+        import checks.terms
+        importlib.reload(checks.terms)
+        terms = checks.terms
+
+        resolved = Ctx(A.resolve({"channel": "C1"}))
+
+        def verdict(known, unknown):
+            said = " ".join(f"T{i}" for i in range(known)) + " " + " ".join(unknown)
+            return terms.run(f"Touching {said} today." + PAD, resolved)
+
+        # Exactly a third is not above a third, so it is still a block. This is the boundary the
+        # threshold names, and the case that fails if the comparison is loosened to >=.
+        f = verdict(6, ("ZZQ", "WQX", "YYT"))
+        check("3 unknown of 9 is exactly a third, and blocks", f.severity, BLOCK)
+        # Just above it, the reading is that the audience is wrong rather than the message.
+        f = verdict(5, ("ZZQ", "WQX", "YYT"))
+        check("3 of 8 is above a third, and only advises", f.severity, ADVISE)
+        check("and says so with the numbers", "3 of the 8 terms" in f.message, True)
+        # ...except where a share is meaningless. Two unknown terms are actionable at any share.
+        f = verdict(1, ("ZZQ", "WQX"))
+        check("2 unknown of 3 blocks whatever the share", f.severity, BLOCK)
 
 
 def teardown_function(_fn):
