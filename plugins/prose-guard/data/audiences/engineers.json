@@ -233,7 +233,6 @@
   "ZSH": 99
  },
  "assumptions": {
-  "shared_context": "low",
-  "reach": "internal"
+  "shared_context": "low"
  }
 }

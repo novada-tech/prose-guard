@@ -28,19 +28,14 @@ Every check is now validated in both directions: it catches planted defects **an
 prose. `measure/measure_check.py` is the harness, and `--reps 2` also reports how often a check disagrees
 with itself, which bounds how much of any difference is real.
 
-At `claude-sonnet-5`, medium effort, 13 positives and 5 negatives:
+The scores live in one place, [CONTRIBUTING.md](../CONTRIBUTING.md), because that is where somebody who
+has just changed a prompt is told to re-run the harness and paste the new ones. They were also here, from
+an earlier run, and by the time anyone noticed the two tables four of five shared rows disagreed and this
+copy was missing the `address` check entirely — so the reader could not tell which was current.
 
-| check | catches the defect | passes real prose | disagrees with itself |
-|---|---|---|---|
-| terms | 2/2 | 10/10 | 0% |
-| relevance | 6/6 | 10/10 | 0% |
-| structure | 6/6 | 9/10 | 12% |
-| sentence | 6/6 | 8/10 | 0% |
-| reference | 5/6 | 10/10 | 12% |
-
-`structure` and `reference` are the weak ones: `structure` false-alarms and `reference` misses an
-invented name in one run of two. Both are advisory, which is the right severity for a check at that
-reliability.
+What the numbers say, and this has held across every run: the checks that report on the *shape* of a
+paragraph are the weak ones, they are the ones that disagree with themselves most, and they are advisory.
+That is the right severity for a check at that reliability, and it is why only the arithmetic one blocks.
 
 ## Freezing a passed check loses nothing measurable
 
@@ -83,7 +78,13 @@ A green test run proves nothing on its own. Each of these mutations breaks at le
 how the cases are known to be load-bearing:
 
 - union instead of intersection when two audiences are in scope
-- maximum instead of minimum for shared context, and minimum instead of maximum for reach
+- maximum instead of minimum for shared context
+- a git subcommand that writes allowed to run behind a substitution
+- a substitution resolved from text a command carries rather than from the command itself
+- an audience name allowed to be a path
+- `--with-names` treating "could not tell whether this repository is public" as private
+- a checked message allowed to write its own verdict past the delimiter
+- a code strip leaving the words either side of it adjacent
 - subset elimination reintroduced
 - an unresolved audience allowed to hold a message back
 - the share threshold removed

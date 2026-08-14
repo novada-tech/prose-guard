@@ -16,4 +16,3 @@ Cut whatever they will not act on. Backstory they lived through, identifiers nob
 
 Before writing for a specific medium, read whatever conventions your team keeps for it: how long a review comment runs, how a chat message is laid out, what a commit message opens with. They carry what this rule does not.
 
-edited

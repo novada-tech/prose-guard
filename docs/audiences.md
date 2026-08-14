@@ -90,8 +90,14 @@ commit that says why.
 ## What a shared audience does not carry
 
 Nothing about your machine. Routing identifiers, the measured vocabulary, the prose description of the
-people, what it inherits, and the assumptions. A colleague who pulls it gets the same verdicts you get,
-because those are the whole input.
+people, what it inherits, and the assumptions.
+
+Expansions do not travel either, and that one is a deliberate loss. An expansion is a phrase copied
+verbatim out of private writing — which is exactly where an unreleased project or a client appears in
+full — and a shared audience can end up in a public repository. A colleague who pulls it therefore gets
+the same verdicts you get on whether a term is known, and cannot tell two meanings of the same
+abbreviation apart. `show` says which of the two reasons applies, so nobody is sent to re-scan a corpus
+they never had.
 
 The corpus it was measured from is not included either — it was never in the audience file. If you want
 someone else to be able to re-measure rather than trust the result, share the export command, which is
