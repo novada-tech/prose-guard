@@ -78,6 +78,25 @@ _SUFFIXES = ("s", "es", "ed", "ing", "d")
 # "am" and AWS to "aw" — both in the dictionary — so neither was ever reported, and adding any
 # two-letter abbreviation to the word list silently retired a whole family of acronyms with it.
 _SHORTEST_STEM = 3
+# English turns a final y into i before these two suffixes, and a word list carries the base form only,
+# so stripping the suffix is not enough on its own: "denied" reduces to "deni", which is in no
+# dictionary, so DENIED read as an acronym and the check held back a commit message that wrote it in
+# capitals for emphasis. RELIED, APPLIES, COPIES, IDENTIFIED, QUERIED and VERIFIED went the same way on
+# this machine, while TRIED, CARRIED, SIMPLIFIED and STUDIED escaped only because web2 lists those four
+# outright — which words a machine reports was luck, and on a machine with no system dictionary it is
+# all of them. Only these two suffixes: putting the y back after any of the five instead reduced GUID
+# to "guy" and retired a real acronym.
+_Y_BEFORE = ("ed", "es")
+
+
+def _base_forms(low):
+    """The base forms this word could be an inflection of, for the word list to be asked about."""
+    for sfx in _SUFFIXES:
+        if low.endswith(sfx) and len(low) - len(sfx) >= _SHORTEST_STEM:
+            stem = low[: -len(sfx)]
+            yield stem
+            if sfx in _Y_BEFORE and stem.endswith("i"):
+                yield stem[:-1] + "y"
 
 
 def is_acronym(token):
@@ -87,10 +106,7 @@ def is_acronym(token):
     words and were being reported as jargon nobody had explained.
     """
     low = token.lower()
-    if low in WORDS:
-        return False
-    return not any(low.endswith(sfx) and len(low) - len(sfx) >= _SHORTEST_STEM
-                   and low[: -len(sfx)] in WORDS for sfx in _SUFFIXES)
+    return low not in WORDS and not any(base in WORDS for base in _base_forms(low))
 
 
 def prose(text):

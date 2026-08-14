@@ -204,10 +204,19 @@ def test_a_stripped_suffix_must_leave_a_word_behind():
     # ads outright while macOS's web2 does not, so asserting on the real dictionary tests the platform
     # rather than the floor — and passed on one of them.
     words = jargon.WORDS
-    jargon.WORDS = {"am", "aw", "pr", "id", "ad", "fail", "coin", "use", "run", "pod", "job"}
+    jargon.WORDS = {"am", "aw", "pr", "id", "ad", "fail", "coin", "use", "run", "pod", "job",
+                    "deny", "apply", "carry", "pry", "guy"}
     try:
         for term in ("FAILS", "COINED", "USES", "USED", "RUNS", "PODS", "JOBS"):
             check(f"{term} is an inflected word, not an acronym", jargon.is_acronym(term), False)
+        # English turns a final y into i before -ed and -es, and a word list holds the base form only.
+        # The guard held back a commit message that wrote DENIED in capitals for emphasis: it strips to
+        # "deni", which is in no dictionary, so the word read as an acronym nobody had explained.
+        for term in ("DENIED", "DENIES", "APPLIED", "APPLIES", "CARRIED", "PRIED"):
+            check(f"{term} is an inflected word too", jargon.is_acronym(term), False)
+        # ...and only before -ed and -es, which are the suffixes that change the spelling. Putting the
+        # y back after any suffix reduced GUID to "guy" and retired a real acronym.
+        check("GUID is not an inflection of guy", jargon.is_acronym("GUID"), True)
         # Each of these reduces to a two-letter word in that list. That is the whole failure.
         for term in ("AMD", "AWS", "PRD", "IDS", "ADS"):
             check(f"{term} is an acronym whatever it ends in", jargon.is_acronym(term), True)
