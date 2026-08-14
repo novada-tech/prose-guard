@@ -88,11 +88,7 @@ def skipped(tool_input):
 
 
 def default_audience():
-    try:
-        with open(paths.at("config.json")) as fh:
-            return json.load(fh).get("unresolved_audience") or "engineers"
-    except Exception:
-        return "engineers"
+    return paths.config().get("unresolved_audience") or "engineers"
 
 
 def state_dir():

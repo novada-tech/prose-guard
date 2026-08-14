@@ -25,6 +25,39 @@ def at(*parts):
     return os.path.join(home(), *parts)
 
 
+def config():
+    """Your choices: the effort level, the directories a team shares, the audience to assume when
+    nothing matches. One file, read one way, so no two callers can disagree about its shape.
+
+    There were four readers of this file and each had its own opinion about a missing file and about a
+    payload that is not an object. Three swallowed everything; the fourth, share_dir.py, read the key
+    outside its own try and put an AttributeError in front of anyone whose config.json had been
+    hand-edited to `[1, 2]`. Anything that is not a JSON object is no configuration at all, and that is
+    decided here so a caller cannot be the one that forgot.
+    """
+    try:
+        with open(at("config.json")) as fh:
+            got = json.load(fh)
+    except Exception:
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def update_config(**values):
+    """Merge keys into config.json and leave the rest of it alone. Returns where it was written.
+
+    The one writer, for the same reason there is one reader: `indent=` and the trailing newline are
+    what makes the file diffable, and a second writer is where that stops being true.
+    """
+    ensure()
+    data = config()
+    data.update(values)
+    with open(at("config.json"), "w") as fh:
+        json.dump(data, fh, indent=1)
+        fh.write("\n")
+    return at("config.json")
+
+
 def shared():
     """Directories a team keeps audiences in, read in addition to your own.
 
@@ -35,11 +68,7 @@ def shared():
     Configured as `"shared": [...]` in config.json. Paths may use ~ and $VARS, so the same config line
     works on machines that keep their checkouts in different places.
     """
-    try:
-        with open(at("config.json")) as fh:
-            raw = json.load(fh).get("shared") or []
-    except Exception:
-        return []
+    raw = config().get("shared") or []
     out = []
     for entry in raw if isinstance(raw, list) else [raw]:
         expanded = os.path.expanduser(os.path.expandvars(str(entry)))

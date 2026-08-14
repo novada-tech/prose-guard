@@ -962,7 +962,7 @@ def test_one_config_location():
         os.environ["PROSE_GUARD_HOME"] = tmp
         importlib.reload(paths)
         importlib.reload(config)
-        check("config lands under the one home", config.CONFIG_PATH,
+        check("config lands under the one home", config.save("low"),
               os.path.join(tmp, "config.json"))
         del os.environ["PROSE_GUARD_HOME"]
         importlib.reload(paths)
@@ -2343,6 +2343,77 @@ def test_the_share_that_stops_a_block_is_one_third():
         # ...except where a share is meaningless. Two unknown terms are actionable at any share.
         f = verdict(1, ("ZZQ", "WQX"))
         check("2 unknown of 3 blocks whatever the share", f.severity, BLOCK)
+
+
+def test_a_config_json_of_the_wrong_shape_is_no_configuration():
+    """Valid JSON that is not an object must not reach attribute access, and that is decided once.
+
+    Four readers of config.json each returned a default on a PARSE error only. Three then swallowed the
+    AttributeError as well; share_dir.py read the key outside its own try and put a traceback in front
+    of anybody whose config.json had been hand-edited to `[1, 2]`.
+    """
+    import importlib
+
+    import paths
+    from checks import config as effort
+    with tempfile.TemporaryDirectory() as home:
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            fh.write("[1, 2]\n")
+        was = os.environ.get("PROSE_GUARD_HOME")
+        os.environ["PROSE_GUARD_HOME"] = home
+        try:
+            check("a list is read as no configuration at all", paths.config(), {})
+            check("so no shared directory comes out of it", paths.shared(), [])
+            check("and no effort level does either", effort._from_file(), "")
+            # The reader a person meets face to face, rather than through the hook.
+            r = subprocess.run([sys.executable, os.path.join(LIB, "share_dir.py")],
+                               capture_output=True, text=True,
+                               env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=120)
+            check("share_dir.py says what is configured instead of raising", r.returncode, 0)
+            check("and says none is", "no shared directories" in r.stdout, True)
+            # End to end, because two of these readers run at import time.
+            payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": "shape",
+                       "cwd": home,
+                       "tool_input": {"channel_id": "C1", "message": "GKE broke again." + PAD}}
+            r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
+                               text=True, env=env(home, os.path.join(home, "state")), timeout=300)
+            check("the hook survives it", r.returncode, 0)
+            check("without a traceback", "Traceback" in r.stderr, False)
+        finally:
+            os.environ.pop("PROSE_GUARD_HOME", None)
+            if was is not None:
+                os.environ["PROSE_GUARD_HOME"] = was
+            importlib.reload(paths)
+            importlib.reload(effort)
+
+
+def test_writing_the_level_keeps_the_rest_of_the_file():
+    """One writer, and it resolves the path when it writes rather than when it was imported.
+
+    There were two writers, each re-reading to merge, with their own `indent=` and their own idea about
+    the trailing newline — in a file the docstring says you can diff and edit by hand. The path used to
+    be a module constant, so a PROSE_GUARD_HOME set after import was ignored, which is the situation
+    every skill's shell is in.
+    """
+    import paths
+    from checks import config as effort
+    with tempfile.TemporaryDirectory() as home:
+        was = os.environ.get("PROSE_GUARD_HOME")
+        os.environ["PROSE_GUARD_HOME"] = home        # after the import, as a skill's shell does it
+        try:
+            paths.update_config(unresolved_audience="platform-team")
+            written = effort.save("medium")
+            check("the level lands in the home set after import", written,
+                  os.path.join(home, "config.json"))
+            raw = open(written).read()
+            check("the level is written", json.loads(raw).get("effort"), "medium")
+            check("the other keys survive it",
+                  json.loads(raw).get("unresolved_audience"), "platform-team")
+            check("and the file is left newline-terminated", raw.endswith("}\n"), True)
+        finally:
+            os.environ.pop("PROSE_GUARD_HOME", None)
+            if was is not None:
+                os.environ["PROSE_GUARD_HOME"] = was
 
 
 def teardown_function(_fn):

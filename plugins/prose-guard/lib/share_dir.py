@@ -26,24 +26,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import paths  # noqa: E402
 
 
-def read():
-    try:
-        with open(paths.at("config.json")) as fh:
-            config = json.load(fh)
-    except Exception:
-        config = {}
-    listed = config.get("shared") or []
-    return config, list(listed if isinstance(listed, list) else [listed])
+def listed():
+    """The directories as they are written in config.json, `$VARS` and all.
 
-
-def write(config, listed):
-    config["shared"] = listed
-    paths.ensure()
-    target = paths.at("config.json")
-    with open(target, "w") as fh:
-        json.dump(config, fh, indent=1)
-        fh.write("\n")
-    return target
+    paths.shared() is the other half: it expands them and drops the ones that are not there, which is
+    what a reader of audiences wants. This half has to show a line that is wrong, because that is the
+    line somebody is looking at when they run this.
+    """
+    raw = paths.config().get("shared") or []
+    return list(raw if isinstance(raw, list) else [raw])
 
 
 def main():
@@ -52,30 +43,30 @@ def main():
     ap.add_argument("--add", metavar="DIR")
     ap.add_argument("--remove", metavar="DIR")
     a = ap.parse_args()
-    config, listed = read()
+    configured = listed()
 
     if a.add:
-        if a.add in listed:
+        if a.add in configured:
             print(f"already reading {a.add}")
         else:
-            listed.append(a.add)
-            print(f"added {a.add} -> {write(config, listed)}")
+            configured.append(a.add)
+            print(f"added {a.add} -> {paths.update_config(shared=configured)}")
             # A directory that does not exist yet is not an error: a colleague may be adding the line
             # before the checkout lands. It is skipped until it appears, and saying so beats silence.
             if not os.path.isdir(os.path.expanduser(os.path.expandvars(a.add))):
                 print("  it does not exist yet, so nothing is read from it until it does")
     elif a.remove:
-        if a.remove not in listed:
+        if a.remove not in configured:
             raise SystemExit(f"not configured: {a.remove}")
-        listed.remove(a.remove)
-        print(f"removed {a.remove} -> {write(config, listed)}")
+        configured.remove(a.remove)
+        print(f"removed {a.remove} -> {paths.update_config(shared=configured)}")
         print("  the audiences it held are gone from this machine. The files are untouched.")
 
     print()
-    if not listed:
+    if not configured:
         print("no shared directories. Only your own audiences and the built-in baselines are read.")
         return 0
-    for entry in listed:
+    for entry in configured:
         real = os.path.expanduser(os.path.expandvars(entry))
         if not os.path.isdir(real):
             print(f"  {entry}\n      {real}  —  not present on this machine")

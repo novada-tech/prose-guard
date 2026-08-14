@@ -24,7 +24,6 @@ what would show up on harder material, and because a deliberate one-off run can 
 
 Precedence: the environment, then plugin config, then the file, then disabled.
 """
-import json
 import os
 import sys
 
@@ -34,19 +33,8 @@ import paths  # noqa: E402
 LEVELS = ("disabled", "low", "medium", "high")
 
 
-def config_dir():
-    return paths.home()
-
-
-CONFIG_PATH = paths.at("config.json")
-
-
 def _from_file():
-    try:
-        with open(CONFIG_PATH) as fh:
-            return str(json.load(fh).get("effort") or "").lower()
-    except Exception:
-        return ""
+    return str(paths.config().get("effort") or "").lower()
 
 
 def effort():
@@ -80,20 +68,9 @@ def save(level):
     """Write the choice. Raises rather than failing quietly, so a setup step can report it."""
     if level not in LEVELS:
         raise ValueError(f"{level!r} is not one of {', '.join(LEVELS)}")
-    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    existing = {}
-    try:
-        with open(CONFIG_PATH) as fh:
-            existing = json.load(fh)
-    except Exception:
-        pass
-    existing["effort"] = level
-    with open(CONFIG_PATH, "w") as fh:
-        json.dump(existing, fh, indent=1)
-        fh.write("\n")
-    return CONFIG_PATH
+    return paths.update_config(effort=level)
 
 
 if __name__ == "__main__":
     print(f"effort: {effort()}")
-    print(f"config: {CONFIG_PATH}")
+    print(f"config: {paths.at('config.json')}")
