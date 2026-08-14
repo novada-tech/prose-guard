@@ -534,6 +534,59 @@ def test_the_mechanical_errors_are_found_without_a_model():
     check("costing no model call", mechanics.COSTS_A_CALL, False)
 
 
+def test_several_runs_pool_into_one_report():
+    """A check returns one item however it is asked, so coverage comes from runs rather than from a list.
+
+    Measured on a 295-word document with about ten known defects: asked for up to five items, every check
+    returned one, the same as asking for one. What varies between runs is which item, so three runs pooled
+    give three items for three calls and one round trip — against three passes costing three round trips,
+    and a turn spent reading a finding and editing is dearer than the check's own call.
+
+    Pooling and confirming want opposite things, which is why they are separate modes. The hook blocks, so
+    it confirms and shows one item. A rewrite pass pools, because on a document with real defects an item
+    seen once is a different real defect rather than noise.
+    """
+    import check_prose
+    text = ("One idea here and nothing else. A second sentence about the resolver and what it does. "
+            "A third one entirely, which is also here.")
+
+    class Stub:
+        NAME = "stub"
+        COSTS_A_CALL = True
+
+        def __init__(self, replies):
+            self.replies = list(replies)
+
+        def run(self, text, ctx):
+            return self.replies.pop(0) if self.replies else None
+
+    def about(span):
+        return checks.Finding("advise", f'Consider: "{span}" is unclear')
+
+    import checks
+    first = about("A second sentence about the resolver")
+    same = about("second sentence about the resolver and what")
+    other = about("A third one entirely")
+
+    # Three runs finding three different real things: all three are reported.
+    pooled = check_prose.pooled(Stub([first, other, about("One idea here and nothing else")]),
+                                text, None, 3, [])
+    check("every distinct item is kept", pooled.message.count("Consider:"), 3)
+    check("and each says how often it came up", pooled.message.count("once in 3 runs"), 3)
+
+    # Two runs pointing at one sentence and one elsewhere: two items, and the repeat is marked.
+    pooled = check_prose.pooled(Stub([first, same, other]), text, None, 3, [])
+    check("a repeat is one item, not two", pooled.message.count("Consider:"), 2)
+    check("and is marked as reproduced", "seen in 2 of 3 runs" in pooled.message, True)
+
+    check("nothing found is nothing reported",
+          check_prose.pooled(Stub([]), text, None, 3, []), None)
+    # One pass is the hook's mode and must not pay for runs it did not ask for.
+    single = Stub([first, other])
+    check_prose.pooled(single, text, None, 1, [])
+    check("one pass runs the check once", len(single.replies), 1)
+
+
 def test_a_finding_has_to_be_raised_twice():
     """A check that cannot reproduce its own complaint is generating nits, and chasing nits has no end.
 

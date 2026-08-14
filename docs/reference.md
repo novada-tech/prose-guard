@@ -265,6 +265,39 @@ Three of five well-built fixtures produce a finding on a single run of all five 
 two of those three report nothing to change, and the third reproduces — which is the point: what survives
 is worth reading.
 
+## One finding at a time, and what to do about it
+
+A check returns exactly one item, and that is not a contract that can be widened. Asked for up to five
+items on a 295-word document with about ten known defects, every check returned one — the same as asking
+for one:
+
+```
+python3 measure/measure_batching.py --reps 3
+```
+
+So the objection holds: a 100-word document and a 1,000-word one both get one item per check per pass, and
+the long one is held to a lower bar for the same number of passes. And each pass costs a round trip, which
+is an agent turn spent reading a finding and editing — dearer than the check's own call.
+
+What varies between runs is WHICH item, and that is the fix. Each run picks one item from those above the
+bar, so N runs sample N items:
+
+```
+python3 lib/check_prose.py <file> --for <audience> --passes 3
+```
+
+N calls, one round trip. On that same document, one pass found two findings and three pooled runs found
+six across four checks, including two checks that were silent in the single pass. Every item says how
+often it came up.
+
+Which mode is right depends on the caller, and they want opposite things. The hook blocks, so it needs
+precision: one item, confirmed by reproducing. A rewrite pass wants coverage, so it pools — and on a
+document with real defects "seen once in three runs" means the check sampled a different real defect that
+run, not that the item is noise. Confirmation would throw those away.
+
+Splitting the document was the other candidate and it is refuted above: it finds no more and costs nine
+times the calls.
+
 ## When is a text finished
 
 There is no honest answer yet, and this is the gap in the design rather than in the documentation.
@@ -277,19 +310,23 @@ That runs every comparative check over three real documents: a message an agent
 wrote, the same content after a senior engineer rewrote it that day, and a long document already taken
 through six rounds of this tool. Confirmed findings per pass, three passes each:
 
-| document | words | confirmed per pass | raised once only |
-|---|---|---|---|
-| agent-written | 68 | 2.0 | 1.3 |
-| human-edited | 44 | 1.3 | 0.0 |
-| heavily edited | 371 | 0.7 | 0.3 |
+| document | words | checks with something to say, per pass |
+|---|---|---|
+| agent-written | 68 | 2.2 — `[2, 1, 4, 2, 2]` |
+| human-edited | 44 | 1.2 — `[1, 2, 1, 1, 1]` |
+| heavily edited | 371 | 0.2 — `[0, 0, 0, 0, 1]` |
 
-The order is right, so the count measures relative quality. But the human-edited version never scored
-zero. A colleague's own writing, for his own readers, still draws one or two confirmed findings a pass —
-so "nothing confirmed" is not a signal that a text is finished, because good prose does not reach it.
+Five passes each. Three passes gave 2.0, 1.3 and 0.7, and a single pass in isolation once put the
+human-edited version above the agent-written one — the spread is about ±1, so one pass is not a
+measurement.
 
-Two consequences, both worth knowing before trusting the output. The stopping rule is that the count
-stops falling, not that it reaches zero. And a reader who disagrees with a confirmed finding is allowed
-to be right: the bar is demonstrably above what a good writer produces.
+At five passes each the numbers are 2.2, 1.2 and 0.2. The order holds, so the count measures relative
+quality, and zero IS reachable — the document taken through six rounds scored zero in four passes of five.
+
+What zero is not is the bar a good first draft clears. A senior engineer's own rewrite scored one finding
+a pass and never zero, so a text sitting at one is not unfinished; it is where a good writer's work lands.
+The stopping rule is that the count has stopped falling, and a reader who disagrees with what is left is
+allowed to be right.
 
 Calibrating it means tuning the bar until the human-edited version passes and the agent-written one does
 not. That needs more pairs than the one in `measure/fixtures/gold`, and from more than one author —

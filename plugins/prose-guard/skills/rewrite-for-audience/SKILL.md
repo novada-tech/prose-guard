@@ -8,7 +8,7 @@ description: Rewrite a specific piece of text so a named audience can act on it 
 ## Run the checks first, before you read any further
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/lib/check_prose.py" <file> --for <audience>
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/check_prose.py" <file> --for <audience> --passes 3
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/check_prose.py" <file> --who "who reads this, in your own words"
 ```
 
@@ -38,12 +38,21 @@ command cannot be skipped by accident.
 
 Run it again on the rewrite. The check is on the current wording, not on the draft you started from.
 
-Then stop. Every finding is put back to the same check and kept only if it objects to the same sentence,
-so what you are shown reproduces — but findings printed under "raised once and not reproduced" are nits,
-and they are endless. Measured: on one document already through six rounds, ten runs produced nine
-findings and not one of them twice. Two passes is normally the whole job. If a third pass is still
-finding things you agree with, the text has a real problem; if it is finding different things each time,
-it is finished.
+`--passes 3` is there because a check returns exactly one item however it is asked — measured on a
+295-word document with about ten defects, asking for up to five items produced one item a run in every
+condition. What varies between runs is WHICH item, so three runs pooled give three items for three calls
+and one round trip. On that document one pass found two findings and three pooled runs found six across
+four checks, including two checks that were silent in the single pass.
+
+Each item says how often it came up. Seen more than once means a reader can rely on it. Seen once, on a
+document with real defects, means the check sampled a different real defect that run — not that the item
+is noise. Fix everything you agree with in one edit rather than one per finding.
+
+Then stop. Run it again on the rewrite, and stop when the number of checks with something to say has
+stopped falling. It does reach zero: measured over five passes each, a message an agent wrote scored 2.2
+checks a pass, the same content after a senior engineer rewrote it scored 1.2, and a document already
+through six rounds scored 0.2. So one finding a pass is roughly what a good writer's own draft scores, and
+disagreeing with what is left is allowed.
 
 ## What you hand back
 
