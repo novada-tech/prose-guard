@@ -265,6 +265,36 @@ Three of five well-built fixtures produce a finding on a single run of all five 
 two of those three report nothing to change, and the third reproduces — which is the point: what survives
 is worth reading.
 
+## When is a text finished
+
+There is no honest answer yet, and this is the gap in the design rather than in the documentation.
+
+```
+python3 measure/measure_stopping.py --reps 3
+```
+
+That runs every comparative check over three real documents: a message an agent
+wrote, the same content after a senior engineer rewrote it that day, and a long document already taken
+through six rounds of this tool. Confirmed findings per pass, three passes each:
+
+| document | words | confirmed per pass | raised once only |
+|---|---|---|---|
+| agent-written | 68 | 2.0 | 1.3 |
+| human-edited | 44 | 1.3 | 0.0 |
+| heavily edited | 371 | 0.7 | 0.3 |
+
+The order is right, so the count measures relative quality. But the human-edited version never scored
+zero. A colleague's own writing, for his own readers, still draws one or two confirmed findings a pass —
+so "nothing confirmed" is not a signal that a text is finished, because good prose does not reach it.
+
+Two consequences, both worth knowing before trusting the output. The stopping rule is that the count
+stops falling, not that it reaches zero. And a reader who disagrees with a confirmed finding is allowed
+to be right: the bar is demonstrably above what a good writer produces.
+
+Calibrating it means tuning the bar until the human-edited version passes and the agent-written one does
+not. That needs more pairs than the one in `measure/fixtures/gold`, and from more than one author —
+tuning five prompts against a single pair would fit the pair rather than the bar.
+
 ## Managing audiences
 
 ```

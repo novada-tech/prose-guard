@@ -1,0 +1,1 @@
+With this PR you will be told to run gcloud auth login only when you actually need it, instead of on every new shell. Where you already have an ADC login token, it uses that instead, and that token has no 16 hour limit.
