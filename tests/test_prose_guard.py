@@ -1987,6 +1987,44 @@ def test_the_a_an_rule_says_nothing_about_words_beginning_with_h():
         check(f"left alone: {correct}", mechanics.scan(correct), [])
 
 
+def test_the_share_that_stops_a_block_is_one_third():
+    """The two calibrated numbers in `checks/terms.py`, pinned at their boundaries.
+
+    27 lines of comment justify `MAX_SHARE_TO_BLOCK = 1/3` (the 90th percentile of the share seen when
+    a message IS scored against the audience it was written for) and `ALWAYS_ACTIONABLE = 2`. Any
+    threshold between 0.077 and 1.0 used to pass this suite, and five separate mutations to those two
+    lines survived: 1/3 to 0.9, 1/3 to 0.05, 2 to 5, and both comparisons loosened to >=.
+    """
+    from checks import ADVISE, BLOCK
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "team", matches={"channels": ["C1"]},
+                       vocabulary={f"T{i}": 9 for i in range(20)})
+        A, _ = fresh(home)
+        import importlib
+
+        import checks.terms
+        importlib.reload(checks.terms)
+        terms = checks.terms
+
+        resolved = Ctx(A.resolve({"channel": "C1"}))
+
+        def verdict(known, unknown):
+            said = " ".join(f"T{i}" for i in range(known)) + " " + " ".join(unknown)
+            return terms.run(f"Touching {said} today." + PAD, resolved)
+
+        # Exactly a third is not above a third, so it is still a block. This is the boundary the
+        # threshold names, and the case that fails if the comparison is loosened to >=.
+        f = verdict(6, ("ZZQ", "WQX", "YYT"))
+        check("3 unknown of 9 is exactly a third, and blocks", f.severity, BLOCK)
+        # Just above it, the reading is that the audience is wrong rather than the message.
+        f = verdict(5, ("ZZQ", "WQX", "YYT"))
+        check("3 of 8 is above a third, and only advises", f.severity, ADVISE)
+        check("and says so with the numbers", "3 of the 8 terms" in f.message, True)
+        # ...except where a share is meaningless. Two unknown terms are actionable at any share.
+        f = verdict(1, ("ZZQ", "WQX"))
+        check("2 unknown of 3 blocks whatever the share", f.severity, BLOCK)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
