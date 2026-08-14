@@ -77,7 +77,7 @@ def _shipped_words():
 # consults them, and nothing reaches it until a destination has matched and text has been extracted —
 # so every tool call the guard ignores was reading a 2.5 MB file and building three sets from it before
 # main() had looked at stdin. Measured on an ignored Read: 77.3 ms and 59.4 MB of peak RSS as shipped,
-# 24.7 ms and 21.3 MB read on first use. Python calls __getattr__ only for a name the module does not
+# 23.6 ms and 21.3 MB read on first use. Python calls __getattr__ only for a name the module does not
 # already have, so the second read is a plain dictionary lookup, and a caller that assigns its own set
 # (the tests do, to test the floor on its own) keeps it. Two sets rather than one, because the floor has
 # to be usable alone: SHIPPED_WORDS is what a machine with no system dictionary is left with.
@@ -177,12 +177,14 @@ def _best_long(short, candidate):
 def pairs(text):
     """(short, long) pairs written as 'Long Form (SF)' or 'SF (Long Form)'.
 
-    Anchored on the parenthesis, and the phrase read backwards from it. Written the other way round —
+    Anchored on the bracket, and the phrase read backwards from it. Written the other way round —
     `([^()]{2,120}?)\\s*\\(([^()]{2,80}?)\\)` — the leading run was tried at every offset in the text
     and expanded to its full 120 characters before failing at almost all of them, which is ~120
-    character comparisons per input character. Linear, but the constant cost 914 ms on 100,000 words
-    and 96% of a term check; anchored, the same text takes 3.7 ms for identical output, and learn.py
-    over 20,000 documents drops from 17.4 s to 0.4 s.
+    character comparisons per input character. Linear, but the constant cost 960 ms on 100,000 words of
+    this repository's own documentation, where the anchored version takes 0.72 ms for identical output.
+    Issue #8 measured it as 96% of a term check, and as the whole of learn.py's 17 seconds over a
+    20,000-document corpus. On text carrying a parenthetical pair every ten words — denser than any real
+    document — anchored is still the faster of the two, 32.7 ms against 38.4 ms, so no input loses.
     """
     out = {}
     hunt = 0                    # where the last pair ended: finditer never overlapped its matches
