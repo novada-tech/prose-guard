@@ -215,6 +215,17 @@ def scan(text, is_known):
     """(unexplained, considered). `considered` is every acronym-shaped term the reader had to
     handle, known or not — the denominator for asking whether the audience model is wrong.
     """
+    unexplained, considered, _ = examine(text, is_known)
+    return unexplained, considered
+
+
+def examine(text, is_known):
+    """scan(), and also what each term was written out as here.
+
+    Two callers want the expansions: the scan itself, to decide what counts as explained, and
+    checks/terms.py, to notice a term written out two different ways. It used to recompute them, which
+    was the whole of the second `pairs()` call in a term check.
+    """
     body = prose(text)
     written = pairs(body)
     # A term the audience is known to use IS a term the reader had to handle, whatever the local
@@ -226,7 +237,7 @@ def scan(text, is_known):
     unexplained = sorted(t for t in considered
                          if not is_known(t) and t not in written
                          and not expanded_in_prose(t, body))
-    return unexplained, considered
+    return unexplained, considered, written
 
 
 def main():

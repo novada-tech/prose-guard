@@ -32,7 +32,7 @@ MAX_SHARE_TO_BLOCK = 1 / 3
 ALWAYS_ACTIONABLE = 2
 
 
-def _ambiguous(text, considered, ctx):
+def _ambiguous(said, considered, ctx):
     """Terms this audience has written out two different ways, or written out differently here.
 
     An abbreviation is not one term. LF is the Linux Foundation in one corpus and a line feed in another,
@@ -42,11 +42,13 @@ def _ambiguous(text, considered, ctx):
 
     Deterministic and narrow on purpose. Which sense a message means, where it never says, is not
     decidable here and is not guessed at.
+
+    `said` is what the scan already worked out each term was written out as here. Recomputing it cost a
+    second pass over the whole document, which cProfile put at 0.180s of a 0.186s term check.
     """
     meanings = getattr(ctx.audience, "meanings", None)
     if meanings is None:
         return ""
-    said = jargon.pairs(jargon.prose(text))
     notes = []
     for term in considered:
         known = meanings(term)
@@ -68,7 +70,7 @@ def _ambiguous(text, considered, ctx):
 
 def run(text, ctx):
     from . import ADVISE, BLOCK, Finding
-    bad, considered = jargon.scan(text, ctx.audience.is_known)
+    bad, considered, said = jargon.examine(text, ctx.audience.is_known)
     # Terms the previous version already used are not terms this text introduces. Rewriting a
     # published commit message to remove a client's name should not require also explaining the
     # original author's shorthand, and demanding it produces a block nobody can clear.
@@ -76,7 +78,7 @@ def run(text, ctx):
     if before and bad:
         inherited = [t for t in bad if jargon.uses(before, t)]
         bad = [t for t in bad if t not in inherited]
-    ambiguous = _ambiguous(text, considered, ctx)
+    ambiguous = _ambiguous(said, considered, ctx)
     if not bad:
         return Finding(ADVISE, ambiguous) if ambiguous else None
     fix = ("Explain each where it first appears, by anchoring it to something this reader already "
