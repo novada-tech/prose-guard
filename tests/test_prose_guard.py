@@ -2191,6 +2191,32 @@ def test_a_credential_written_into_a_command_is_not_printed_back():
         check(f"redacted: {written[:9]!r}", token[:12] in learn.short("x " + written), False)
 
 
+def test_a_scan_leaves_no_names_in_the_working_tree():
+    """`--out` defaulted to a relative `candidates.json`, and that file lists every person measured.
+
+    A scan is run from the repository being worked in, which is where an agent runs things, so the
+    default put a list of colleagues in a working tree one `git add -A` away from being published.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        home, work = os.path.join(tmp, "home"), os.path.join(tmp, "work")
+        os.makedirs(work)
+        doc = os.path.join(tmp, "doc.txt")
+        with open(doc, "w") as fh:
+            fh.write("The BSP rollout needs the ADC path checked before the ISDA deadline.")
+        env = {**os.environ, "PROSE_GUARD_HOME": home}
+        r = subprocess.run([sys.executable, os.path.join(LIB, "learn.py"), "scan", "--text", doc,
+                            "--quiet", "--keep", "corpus.jsonl"], capture_output=True, text=True,
+                           timeout=120, cwd=work, env=env)
+        check("the scan ran", (r.returncode, r.stderr[-200:]), (0, ""))
+        check("and wrote nothing where it was run", os.listdir(work), [])
+        check("the candidate list is under the config home",
+              os.path.isfile(os.path.join(home, "candidates.json")), True)
+        check("and so is the corpus", os.path.isfile(os.path.join(home, "corpus.jsonl")), True)
+        check("both paths are printed, so nobody has to guess",
+              os.path.join(home, "candidates.json") in r.stdout
+              and os.path.join(home, "corpus.jsonl") in r.stdout, True)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 

@@ -16,13 +16,19 @@ within one run — the count is of distinct authors, so logins, display names an
 long as one person is not two of them.
 
 ```
-python3 lib/learn.py scan --command './export-chat.sh general' --out candidates.json
-python3 lib/learn.py create platform-team candidates.json \
+python3 lib/learn.py scan --command './export-chat.sh general'
+python3 lib/learn.py create platform-team ~/.config/prose-guard/candidates.json \
     --who 'Engineers who run our Kubernetes. They read incident threads cold.' \
     --match-channel C054ZDE533R
 ```
 
 Bot authors are dropped by name. Two sources can be combined in one scan, and the counts merge.
+
+The scan prints where it wrote the candidate list, and by default that is `candidates.json` in your
+prose-guard config directory rather than the directory you are standing in. The file names every
+person whose writing was counted, and a scan is usually run from inside a repository — where
+`git add -A` would commit it. `--out` and `--keep` take an absolute path if you want it elsewhere; a
+relative one is resolved under the config directory too.
 
 ## Why a command and not a source per product
 

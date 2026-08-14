@@ -308,8 +308,13 @@ def cmd_scan(a):
             yield from s
 
     cut = audiences.MIN_AUTHORS
+    out_path = under_home(a.out or "candidates.json")
+    keep_path = under_home(a.keep) if a.keep else None
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    if keep_path:
+        os.makedirs(os.path.dirname(os.path.abspath(keep_path)), exist_ok=True)
     authors, uses, docs, people, newest, expansions = tally(
-        chained(), cut=cut, limit=a.max_documents, keep=a.keep,
+        chained(), cut=cut, limit=a.max_documents, keep=keep_path,
         report=(None if a.quiet else lambda line: print(line, file=sys.stderr, flush=True)))
     inherited = audiences.BASELINES.get(a.inherits or "engineers", set())
     rows = {t: {"authors": len(w), "uses": uses[t]} for t, w in authors.items()
@@ -330,7 +335,7 @@ def cmd_scan(a):
            # this audience uses for two things.
            "expansions": _folded(expansions),
            "known": known, "borderline": borderline, "needs_explaining": rest, "counts": rows}
-    with open(a.out, "w") as fh:
+    with open(out_path, "w") as fh:
         json.dump(out, fh, indent=1)
         fh.write("\n")
     if not docs:
@@ -351,9 +356,11 @@ def cmd_scan(a):
               f"\nonly add terms.")
     if newest is not None:
         print(f"\nnewest document read: {newest}")
-    if a.keep:
-        print(f"documents kept in {a.keep} — pass it as --jsonl to add to them without re-reading")
-    print(f"\nwritten to {a.out}")
+    if keep_path:
+        print(f"documents kept in {keep_path} — pass it as --jsonl to add to them without re-reading")
+    print(f"\nwritten to {out_path}")
+    print("  it lists every person measured, so it is not in your working tree unless you asked for "
+          "that")
 
 
 def _losses(name, fresh):
@@ -477,14 +484,20 @@ def main():
                         "the audience holds back more than it should rather than less")
     s.add_argument("--keep", metavar="FILE",
                    help="write the usable documents here as they arrive, so a read that dies part "
-                        "way through leaves them on disk. Pass it back as --jsonl to add to them")
+                        "way through leaves them on disk. Pass it back as --jsonl to add to them. A "
+                        "relative path is resolved under your prose-guard config directory")
     s.add_argument("--quiet", action="store_true", help="no progress while it runs")
     s.add_argument("--command", action="append", default=[], metavar="SHELL",
                    help='any command emitting those lines on stdout — a chat export, a wiki dump, '
                         'an mbox. Keeps the text out of an agent\'s context. See docs/sources.md')
     s.add_argument("--text", nargs="+", default=[], metavar="FILE")
     s.add_argument("--inherits", help="baseline to subtract and inherit (default engineers)")
-    s.add_argument("--out", default="candidates.json")
+    # Not the working directory. The candidate list holds every measured person's name and every term
+    # they used, and a scan is usually run from the repository being worked in.
+    s.add_argument("--out", metavar="FILE",
+                   help="where the candidate list goes (default: candidates.json in your prose-guard "
+                        "config directory). A relative path is resolved there too, because this file "
+                        "names every person measured")
 
     c = sub.add_parser("create", help="write an audience from a candidates file")
     c.add_argument("name")
