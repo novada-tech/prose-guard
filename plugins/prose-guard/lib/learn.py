@@ -28,12 +28,50 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audiences  # noqa: E402
 import jargon  # noqa: E402
+import paths  # noqa: E402
 
 BOT = re.compile(r"(\[bot\]|-bot$|dependabot|renovate|github-actions)", re.I)
+# A credential written into a command rather than passed through a variable. Redacted before a command
+# is printed, because the warning naming a failing command is how someone finds out their credential
+# was refused — and stderr here is an agent's transcript.
+SECRET = re.compile(r"(?i)(bearer|token|key|secret|password)\s*[:= ]\s*\S+")
 
 
 def short(cmd):
+    """A command, cut to one line and with any inline credential taken out.
+
+    Redacted before it is cut, not after: cutting first left the first characters of a token in the
+    message, which is enough to identify it and not enough to be useful.
+    """
+    cmd = SECRET.sub(lambda m: f"{m.group(1)} <redacted>", cmd)
     return cmd if len(cmd) <= 60 else cmd[:57] + "..."
+
+
+def _row(line):
+    """One {"author": ..., "text": ...} line as (author, text, ts), or None if it is not usable.
+
+    One parser, because a source read from a file and the same source piped through a command are the
+    same lines and must be filtered the same way — bots dropped by name, an authorless line dropped.
+    """
+    try:
+        row = json.loads(line.strip() or "{}")
+    except ValueError:
+        return None
+    who = str(row.get("author") or "").strip()
+    if not who or BOT.search(who):
+        return None
+    return who, str(row.get("text") or ""), row.get("ts")
+
+
+def under_home(path):
+    """Where a file the scan writes goes. A relative path lands in the config home, not here.
+
+    Both files a scan writes carry every measured person's name — `--out` the member list, `--keep` the
+    messages themselves. `candidates.json` relative to the working directory put them in whichever
+    repository the scan was run from, which is where an agent runs things, and one `git add -A` away
+    from being published. An absolute path is taken as meant.
+    """
+    return path if os.path.isabs(path) else paths.at(path)
 
 
 def from_git(repo="."):
@@ -100,18 +138,13 @@ def from_command(commands):
         # takes tens of minutes, and nothing could be reported — no count, no rate, no way to stop —
         # until it had finished. Someone asked how long theirs would take and there was no answer.
         for line in proc.stdout:
-            line = line.strip()
-            if not line:
+            if not line.strip():
                 continue
             printed += 1
-            try:
-                row = json.loads(line)
-            except ValueError:
-                continue
-            who = str(row.get("author") or "").strip()
-            if who and not BOT.search(who):
+            row = _row(line)
+            if row:
                 used += 1
-                yield who, str(row.get("text") or ""), row.get("ts")
+                yield row
         proc.stdout.close()
         code = proc.wait()
         err = (proc.stderr.read() or "").strip()
@@ -128,42 +161,22 @@ def from_command(commands):
                   file=sys.stderr)
         elif used < printed:
             print(f"  note: `{short(cmd)}` gave {used} usable of {printed} line(s)", file=sys.stderr)
-        # A source that authenticates and then has no data access exits 0 and prints an error object,
-        # which looks from here exactly like a channel with nothing in it. Saying what arrived is the
-        # difference between finding that out now and measuring an empty corpus.
-        if used == 0:
-            detail = (f"printed {printed} line(s), none of them "
-                      f"{{\"author\": ..., \"text\": ...}}" if printed else "printed nothing")
-            print(f"  warning: `{cmd[:60]}` {detail}. A rejected credential looks like this.",
-                  file=sys.stderr)
-        elif used < printed:
-            print(f"  note: `{cmd[:60]}` gave {used} usable of {printed} line(s)", file=sys.stderr)
 
 
-def from_jsonl(paths):
+def from_jsonl(files):
     """Anything you can export as {"author": ..., "text": ...} per line — chat history, a wiki."""
-    for path in paths:
+    for path in files:
         try:
             with open(path, errors="replace") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        row = json.loads(line)
-                    except ValueError:
-                        continue
-                    who = str(row.get("author") or "").strip()
-                    if who and not BOT.search(who):
-                        yield who, str(row.get("text") or ""), row.get("ts")
+                yield from filter(None, (_row(line) for line in fh))
         except OSError:
             continue
 
 
-def from_text(paths):
+def from_text(files):
     """Plain prose with no author available, so it counts as one voice — which stops it reaching the
     shared-knowledge threshold on its own."""
-    for path in paths:
+    for path in files:
         try:
             with open(path, errors="replace") as fh:
                 yield f"file:{os.path.basename(path)}", fh.read(), None

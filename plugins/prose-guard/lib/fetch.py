@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Read a cursor-paginated JSON API and print the document contract, without losing half of it.
 
+    export SLACK_AUTH="Authorization: Bearer $SLACK_TOKEN"
     python3 lib/fetch.py --url 'https://slack.com/api/conversations.history?channel=C123&limit=200' \\
-        --header "Authorization: Bearer $SLACK_TOKEN" \\
+        --header-env SLACK_AUTH \\
         --ok ok --error error --items messages --author user --text text --ts ts \\
         --cursor-out response_metadata.next_cursor --cursor-in cursor
 
@@ -19,10 +20,16 @@ any of them, and docs/sources.md has hand-written recipes.
 
 What it does NOT do, on purpose: authenticate. Pass a header. A tool that collects credentials is a
 tool that stores them, and the token belongs in your shell, your keychain or your CI secret store.
+
+Name the variable, do not paste the value: `--header-env` reads the header out of the environment,
+which no other process can read. `--header "Authorization: Bearer $TOKEN"` was expanded by the shell
+before this process started, so the token was in this process's argv, and `ps` shows argv to anything
+running as the same user. `--header` is still there for headers that are not secret.
 """
 import argparse
 import http.client
 import json
+import os
 import random
 import sys
 import time
@@ -44,6 +51,32 @@ def dig(obj, path):
         else:
             return None
     return obj
+
+
+def headers_for(literal, from_env):
+    """The request headers, from arguments and from the environment.
+
+    Two ways in because they are not equivalent. A header read from the environment never appears in
+    this process's argv, and argv is world-readable through `ps` to anything running as the same user —
+    which includes every other tool an agent starts. So the credential goes in a variable, and only
+    its NAME is ever printed here, error messages included.
+    """
+    pairs = []
+    for name in from_env:
+        raw = os.environ.get(name)
+        if not raw:
+            raise SystemExit(f"fetch: ${name} is not set, so --header-env {name} has nothing to send. "
+                             f"Set it to a whole header line: "
+                             f"export {name}='Authorization: Bearer <your token>'")
+        pairs.append((f"${name}", raw))
+    pairs += [(repr(value), value) for value in literal]
+    out = {}
+    for source, raw in pairs:
+        if ":" not in raw:
+            raise SystemExit(f"fetch: {source} wants 'Name: value'")
+        name, value = raw.split(":", 1)
+        out[name.strip()] = value.strip()
+    return out
 
 
 def with_cursor(url, param, cursor):
@@ -93,7 +126,11 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--url", required=True, help="first page, query string and all")
     ap.add_argument("--header", action="append", default=[], metavar="K: V",
-                    help="repeatable. Where the credential goes")
+                    help="repeatable. For headers that are not secret: an argument is visible in `ps` "
+                         "to anything running as you")
+    ap.add_argument("--header-env", action="append", default=[], metavar="ENVVAR",
+                    help="repeatable. Where the credential goes: the name of an environment variable "
+                         "holding a whole 'Name: value' header, so the value stays out of argv")
     ap.add_argument("--items", required=True, metavar="PATH",
                     help="dotted path to the array of documents, e.g. messages or value")
     ap.add_argument("--author", required=True, metavar="PATH",
@@ -115,12 +152,7 @@ def main():
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args()
 
-    headers = {}
-    for raw in a.header:
-        if ":" not in raw:
-            raise SystemExit(f"fetch: --header wants 'Name: value', got {raw!r}")
-        name, value = raw.split(":", 1)
-        headers[name.strip()] = value.strip()
+    headers = headers_for(a.header, a.header_env)
 
     def note(line):
         if not a.quiet:

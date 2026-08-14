@@ -2168,6 +2168,29 @@ def test_a_context_level_that_is_not_a_level_never_reaches_a_prompt():
               "sideways" in ask.context_text(Ctx(r)), False)
 
 
+def test_a_credential_written_into_a_command_is_not_printed_back():
+    """A warning naming a failing command is how someone learns their credential was refused, so the
+    command is printed — with anything that looks like a credential taken out first, because stderr
+    here is an agent's transcript. And once, not twice: the block was duplicated, and a refused
+    credential reported twice reads as two separate failures."""
+    import contextlib
+    import io
+
+    import learn
+    token = "xoxb-NOT-REAL-9999999999-PLACEHOLDER"
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        rows = list(learn.from_command([f"echo not-json # Authorization: Bearer {token}"]))
+    said = buf.getvalue()
+    check("nothing usable came out", rows, [])
+    check("no part of the token is printed", token[:12] in said, False)
+    check("it says a credential may be why", "rejected credential" in said, True)
+    check("once", said.count("warning:"), 1)
+    for written in (f"Bearer {token}", f"token={token}", f"SECRET: {token}",
+                    f"--password {token}"):
+        check(f"redacted: {written[:9]!r}", token[:12] in learn.short("x " + written), False)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
