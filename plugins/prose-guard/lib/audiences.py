@@ -149,6 +149,20 @@ class Audience:
     def origin(self):
         return "built in" if self.builtin else ("shared" if self.shared else "yours")
 
+    @property
+    def rescan_note(self):
+        """Why this audience cannot tell an overloaded abbreviation apart, or "" if it can.
+
+        Two different reasons, and telling someone to rescan a file they did not measure is worse than
+        saying nothing: a shared audience arrives without expansions on purpose, because each one is a
+        phrase copied out of somebody's private writing.
+        """
+        if not (self.stale and self.matches_on):
+            return ""
+        if self.shared:
+            return "no expansions: a shared audience travels without them"
+        return "rescan: no expansions recorded"
+
     def __repr__(self):
         return f"<Audience {self.name} {len(self.vocabulary)} terms, {self.origin}>"
 
@@ -387,17 +401,21 @@ def route(name, dimension, values, drop=False):
 # measured over 94 people deserves more trust than one measured over 5, and neither answer requires a
 # name.
 def visibility(directory):
-    """Whether the repository holding a directory is public, if that can be established.
+    """Whether the repository holding a directory is public: True, False, or None for cannot tell.
 
     Best effort and clearly labelled as such. Whether names may be shared depends entirely on who can
     read the repository, and a URL does not carry that — a private repository and a public one look
     identical written down.
+
+    Only `False` is a permission to publish names. `None` — no repository yet, no `gh`, `gh` not
+    logged in, a remote GitHub cannot describe — is how a first-time user arrives, and it used to be
+    falsy enough to publish them.
     """
     try:
         top = subprocess.run(["git", "-C", directory, "rev-parse", "--show-toplevel"],
                              capture_output=True, text=True, timeout=10)
         if top.returncode != 0:
-            return None, "not a git repository, so nothing is shared by committing it"
+            return None, "that directory is not in a git repository, so nobody can say who will read it"
         seen = subprocess.run(["gh", "repo", "view", "--json", "visibility,nameWithOwner"],
                               capture_output=True, text=True, timeout=20,
                               cwd=top.stdout.strip())
@@ -429,13 +447,14 @@ def share(name, directory, with_names=False):
     people = list(data.get("members") or [])
     if not with_names:
         data.pop("members", None)
+    # Expansions never travel. Each one is a phrase copied verbatim out of writing the team did in
+    # private — "BSP: Big Secret Project" — so it is where an unreleased project name or a client name
+    # appears in full, and a share can land in a public repository. The receiving side is told what it
+    # is missing rather than left to assume nothing here is ambiguous: `rescan_note` says so, and
+    # dropping the key rather than writing an empty one is what makes it say so.
+    data.pop("expansions", None)
     data.setdefault("_meta", {})["measured_over_people"] = len(people)
-    os.makedirs(directory, exist_ok=True)
-    target = os.path.join(directory, name + ".json")
-    with open(target, "w") as fh:
-        json.dump(data, fh, indent=1, sort_keys=False)
-        fh.write("\n")
-    return target, len(people)
+    return _write(path_for(name, directory), data), len(people)
 
 
 def _cli():
@@ -469,23 +488,25 @@ def _cli():
 
     if a.cmd == "share":
         public, where = visibility(a.to)
-        if a.with_names and public:
+        # Proved private, or the names stay here. Anything else — public, no repository, no `gh`, `gh`
+        # not logged in, a host `gh` cannot describe — is a question nobody answered, and a list of
+        # colleagues' names is not the thing to guess about.
+        if a.with_names and public is not False:
             raise SystemExit(
-                f"{where}. --with-names would publish {len(ALL[a.name].members)} colleagues' names "
-                f"to anyone. Share it without them, or point --to at a directory in a repository only "
-                f"your team can read.")
+                f"--with-names refused: {where}. Names travel only where GitHub says the repository is "
+                f"private. Share it without them — the count travels either way and is the provenance "
+                f"a colleague needs — or point --to at a directory in a private repository your team "
+                f"already clones.")
         try:
             target, people = share(a.name, a.to, with_names=a.with_names)
         except (KeyError, PermissionError, ValueError) as exc:
             raise SystemExit(str(exc).strip("'"))
         print(f"{a.name} -> {target}")
         print(f"  measured over {people} people, and the file says so")
-        if a.with_names and public is False:
-            print(f"  their names are included. {where[0].upper() + where[1:]}, so that is who reads "
-                  f"them.")
-        elif a.with_names:
-            print(f"  their names are included, and {where} — so check who can read it before you "
-                  f"push.")
+        print(f"  written-out forms are not included: each is a phrase from private writing, so an "
+              f"abbreviation this audience uses for two things is not told apart by whoever pulls it")
+        if a.with_names:
+            print(f"  their names are included, and {where} — so that is who reads them.")
         elif people:
             print(f"  their names are not, so `overlap` will not work for whoever pulls this. "
                   f"--with-names includes them.")
@@ -519,7 +540,7 @@ def _cli():
             where = ", ".join(f"{k}={len(v)}" for k, v in aud.matches_on.items()) or "inherit only"
             print(f"{name:24s} {kind:9s} {aud.origin:9s} {known:4d} terms  "
                   f"{len(aud.members):3d} people  {where}"
-                  + ("   [rescan: no expansions recorded]" if aud.stale and aud.matches_on else ""))
+                  + (f"   [{aud.rescan_note}]" if aud.rescan_note else ""))
         print(f"\nyours:  {user_dir()}")
         for directory in paths.shared():
             print(f"shared: {directory}")
@@ -578,9 +599,10 @@ def _cli():
                 print(f"ambiguous  {term}: " + ", ".join(f"{long} ({n})"
                                                          for long, n in sorted(seen.items(),
                                                                                key=lambda kv: -kv[1])))
-    elif aud.stale and aud.matches_on:
-        print("rescan     this file records no expansions, so an abbreviation used here for two things "
-              "cannot be told apart. Re-run /prose-guard:audiences to measure them.")
+    elif aud.rescan_note:
+        print(f"rescan     {aud.rescan_note}, so an abbreviation used here for two things cannot be "
+              f"told apart."
+              + ("" if aud.shared else " Re-run /prose-guard:audiences to measure them."))
     known = sorted(t for t, n in aud.vocabulary.items() if n >= MIN_AUTHORS)
     below = sorted(t for t, n in aud.vocabulary.items() if n < MIN_AUTHORS)
     print(f"knows      {len(known)} measured + {len(aud.known(BASELINES)) - len(known)} inherited")

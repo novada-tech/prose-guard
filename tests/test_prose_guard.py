@@ -2084,6 +2084,75 @@ def test_learn_refuses_an_audience_name_that_is_a_path():
               os.path.exists(os.path.join(tmp, "CLOBBERED.json")), False)
 
 
+def test_names_travel_only_where_the_repository_is_proved_private():
+    """`--with-names` used to publish names in every situation where nothing could be established.
+
+    No repository yet, no `gh`, `gh` not logged in, a remote GitHub cannot describe: `visibility()`
+    answers None for all four, None is falsy, and the gate was `if a.with_names and public`. Those are
+    the ways a first-time user arrives. Only a definite private answer is a permission now.
+    """
+    script = os.path.join(LIB, "audiences.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        home = os.path.join(tmp, "home")
+        write_audience(home, "platform", matches={"channels": ["C7"]}, members=["ann", "bob"],
+                       vocabulary={"BSP": 9}, expansions={})
+        cases = {
+            "no repository": (f'if [ "$1" = "-C" ]; then exit 1; fi\n', None),
+            "no gh on PATH": (f'echo "{tmp}"\n', None),
+            "gh not logged in": (f'echo "{tmp}"\n', 'echo "not logged in" >&2; exit 1\n'),
+            "the repository is public": (f'echo "{tmp}"\n',
+                                        'echo \'{"visibility": "PUBLIC", '
+                                        '"nameWithOwner": "acme/public"}\'\n'),
+        }
+        for label, (git_body, gh_body) in cases.items():
+            stub, team = os.path.join(tmp, "bin-" + label.replace(" ", "-")), os.path.join(tmp, label)
+            _stub(stub, "git", git_body)
+            if gh_body:
+                _stub(stub, "gh", gh_body)
+            r = subprocess.run([sys.executable, script, "share", "platform", "--to", team,
+                                "--with-names"], capture_output=True, text=True, timeout=60,
+                               env={**os.environ, "PROSE_GUARD_HOME": home, "PATH": stub})
+            check(f"refused when {label}", r.returncode != 0, True)
+            check(f"and says so when {label}", "--with-names refused" in r.stderr, True)
+            check(f"nothing was written when {label}", os.path.isdir(team), False)
+
+        stub, team = os.path.join(tmp, "bin-private"), os.path.join(tmp, "private")
+        _stub(stub, "git", f'echo "{tmp}"\n')
+        _stub(stub, "gh", 'echo \'{"visibility": "PRIVATE", "nameWithOwner": "acme/infra"}\'\n')
+        r = subprocess.run([sys.executable, script, "share", "platform", "--to", team,
+                            "--with-names"], capture_output=True, text=True, timeout=60,
+                           env={**os.environ, "PROSE_GUARD_HOME": home, "PATH": stub})
+        check("a private repository is where names may go", r.returncode, 0)
+        check("and they are there",
+              json.load(open(os.path.join(team, "platform.json")))["members"], ["ann", "bob"])
+
+
+def test_a_share_carries_no_phrase_from_private_writing():
+    """Expansions do not travel. Each is a verbatim phrase lifted out of writing the team did in
+    private, so it is where an unreleased project name or a client name appears in full — and a share
+    can land in a public repository. Whoever pulls it is told what is missing rather than left to
+    read an absent expansion as "nothing here is ambiguous"."""
+    import audiences
+    with tempfile.TemporaryDirectory() as tmp:
+        home, team = os.path.join(tmp, "home"), os.path.join(tmp, "team")
+        write_audience(home, "platform", matches={"channels": ["C7"]}, members=["ann"],
+                       vocabulary={"BSP": 9}, expansions={"BSP": {"Big Secret Project": 3}})
+        A, _ = fresh(home)
+        target, _ = A.share("platform", team)
+        landed = json.load(open(target))
+        check("the phrase does not travel", "expansions" in landed, False)
+        check("the term still does", landed["vocabulary"]["BSP"], 9)
+        check("and no phrase is anywhere in the file",
+              "Big Secret Project" in open(target).read(), False)
+
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"shared": [team]}, fh)
+        os.remove(os.path.join(home, "audiences", "platform.json"))
+        A, _ = fresh(home)
+        check("whoever pulls it is told, and not told to rescan what they did not measure",
+              A.ALL["platform"].rescan_note, "no expansions: a shared audience travels without them")
+
+
 def test_a_context_level_that_is_not_a_level_never_reaches_a_prompt():
     """A hand-edited `"shared_context": "sideways"` used to rank as the safest value and be handed to
     the model as itself, in the line "how much they already know of this: sideways"."""
