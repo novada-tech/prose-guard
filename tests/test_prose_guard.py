@@ -1972,6 +1972,21 @@ def test_pairs_reads_backwards_from_the_parenthesis():
           bool(jargon.pairs("Alpha " + "z" * 100 + " Baker Charlie" + " " * 40 + "(ABC)")), True)
 
 
+def test_the_a_an_rule_says_nothing_about_words_beginning_with_h():
+    """`an hour` is left alone because `h` is not in the rule's consonant class at all.
+
+    A three-word SILENT_H list sat beside the rule for a case that could never reach it, and the
+    assertion that looked like its test passed for an unrelated reason. Widening the class to catch
+    "an historic" is the alternative, and it is not taken: every rule in this module is there on a
+    measurement over 3,000 real messages, and "an historic", "an herb" and "an hotel" are all
+    defensible English, so the rule would fire on correct prose.
+    """
+    from checks import mechanics
+    for correct in ("an hour later", "an heir apparent", "an honest answer", "an historic decision",
+                    "an hotel room", "a hotel room", "a historic decision"):
+        check(f"left alone: {correct}", mechanics.scan(correct), [])
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
