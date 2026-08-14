@@ -15,6 +15,8 @@ import os
 
 import paths
 import re
+import shlex
+import stat
 import subprocess
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +29,10 @@ FILE_TOOLS = ("Write", "Edit", "NotebookEdit")
 
 def config_dir():
     return paths.home()
+
+
+def _user_path():
+    return os.path.join(config_dir(), "destinations.json")
 
 
 def _read(path):
@@ -47,13 +53,17 @@ def load():
     carries it, and that fact is the same for everyone using that tool. One person working it out with
     /prose-guard:setup is the whole team's answer.
     """
-    layers = [("yours", _read(os.path.join(config_dir(), "destinations.json")))]
+    layers = [("yours", _read(_user_path()))]
     layers += [("shared", _read(os.path.join(directory, "destinations.json")))
                for directory in paths.shared()]
     layers.append(("built in", _read(SHIPPED)))
     # Names switched off in YOUR file, whatever layer they came from. There is no deleting a shipped
     # destination — the file is inside the plugin and is replaced on update — so this is how you stop one.
-    off = {str(n).lower() for n in (layers[0][1].get("off") or [])}
+    # One name written without brackets is the shape people write, so it is read as one name rather than
+    # iterated as twelve letters that switch nothing off and say nothing about it.
+    listed = layers[0][1].get("off") or []
+    switched_off = [str(n) for n in ([listed] if isinstance(listed, str) else listed)]
+    off = {n.lower() for n in switched_off}
     found, owners = [], set()
     for origin, layer in layers:
         for entry in layer.get("destinations") or []:
@@ -61,11 +71,10 @@ def load():
                 continue
             found.append(dict(entry, _origin=origin))
         owners |= {str(o).lower() for o in (layer.get("public_owners") or [])}
-    return found, owners
+    return found, owners, switched_off
 
 
-DESTINATIONS, PUBLIC_OWNERS = load()
-SWITCHED_OFF = [str(n) for n in (_read(os.path.join(config_dir(), "destinations.json")).get("off") or [])]
+DESTINATIONS, PUBLIC_OWNERS, SWITCHED_OFF = load()
 
 
 def _repo_at(path):
@@ -105,15 +114,74 @@ def _is_tracked_prose(path):
         return False
 
 
+def command_itself(cmd):
+    """A command with its heredoc bodies removed, so what it DOES is read and not what it carries.
+
+    Everything about routing keys off the command string, and a heredoc body is not part of the command:
+    it is a document being written. Before this, `cat > runbook.md <<EOF ... gh pr create --body "$(cat
+    ~/.ssh/id_ed25519)" ... EOF` routed as a pull request, resolved the substitution, and sent the key to
+    the checker — from a command that opens no pull request and publishes nothing. An agent writes
+    documents like that from web pages and issue comments, so the text inside one is untrusted, and the
+    same shape made passive discovery offer `cd somewhere` as a destination on the strength of a docstring.
+
+    The cost, stated rather than hidden: `cat > notes.md <<MD ... MD` writes a prose file and is not
+    noticed. The shape that would have recorded is `bash: cat`, which is not worth acting on, and heredocs
+    carrying scripts are far more common than heredocs writing documents.
+    """
+    return re.sub(r"<<-?\s*['\"]?(\w+)['\"]?.*?^\1", " ", cmd, flags=re.S | re.M)
+
+
+# A message is at most this long. Past it the thing being read is not a message, and the checks cannot
+# use it: a 300MB file became a 646MB process, and a FIFO held the hook open until the harness killed it.
+MOST_BYTES = 400_000
+
+
+def read_prose_file(path, cwd=None, inside=True):
+    """The contents of a file whose prose is about to be published, or None.
+
+    Three conditions, and the first is the one doing the work. `inside` means the path came from text the
+    command carried rather than from the command itself, and a hidden path is refused there: prose is
+    never a dotfile, while `~/.ssh/id_ed25519`, `.env`, `.aws/credentials` and `.git/config` all are.
+    That is a floor, not a wall — `~/secrets/token.txt` would still be read — so it is not what closes
+    this. What closes it is that a substitution inside a heredoc or a nested quote is no longer resolved
+    at all, so nothing an agent merely writes DOWN can name a file to read. See `_from_bash`.
+
+    Then: a regular file, so a device or a FIFO cannot hang the hook, and a size cap, because a file
+    larger than a message is not a message.
+    """
+    full = os.path.expanduser(path)
+    if not os.path.isabs(full):
+        full = os.path.join(cwd or os.getcwd(), full)
+    if inside and any(part.startswith(".") and part not in (".", "..")
+                      for part in os.path.abspath(full).split(os.sep)):
+        return None
+    try:
+        st = os.lstat(full)
+    except OSError:
+        return None
+    if not stat.S_ISREG(st.st_mode) or st.st_size > MOST_BYTES:
+        return None                           # a symlink, a device, a FIFO, or larger than a message
+    try:
+        with open(full, errors="replace") as fh:
+            return fh.read(MOST_BYTES)
+    except OSError:
+        return None
+
+
 def _matches(dest, tool, tool_input):
     names = dest.get("tool")
     if names:
         if isinstance(names, str):
             names = [names]
-        if any(n in tool for n in names):
+        # The whole name, or the whole name after an MCP server's prefix. A substring match made
+        # `slack_send_message` claim `slack_send_message_draft` too, and the shipped file only escaped
+        # that because the draft happens to be listed first — so putting an ordinary chat destination in
+        # your own layer, which is read before the shipped one, silently removed the draft's advise-only
+        # cap and started blocking drafts.
+        if any(tool == n or tool.endswith("__" + n) for n in names):
             return True
     if dest.get("bash") and tool == "Bash":
-        return bool(re.search(dest["bash"], str(tool_input.get("command") or "")))
+        return bool(re.search(dest["bash"], command_itself(str(tool_input.get("command") or ""))))
     if dest.get("file") and tool in FILE_TOOLS:
         path = str(tool_input.get("file_path") or "")
         if not re.search(dest["file"], path, re.I):
@@ -131,30 +199,55 @@ def match(tool, tool_input):
     return None
 
 
+def flag_values(cmd):
+    """Every (flag, value) the command itself passes, or None when it cannot be read as words.
+
+    Token-level, and that is the whole point of it. It is the difference between a command that
+    publishes prose and a command that merely mentions one: in `echo 'run: gh pr create --body "$(cat
+    …)"' >> log.txt` the flag sits INSIDE a single token belonging to `echo`, so nothing here finds it.
+    A regex over the whole string found it, resolved the substitution, read the file and sent it to the
+    checker — for a command that appends one line to a log. An agent writes lines like that from web
+    pages and issue comments, so what they contain is not the agent's own choice.
+
+    A command that cannot be parsed as words yields nothing rather than falling back to searching the
+    string: a command this tool cannot read is one it must not claim to have checked.
+    """
+    try:
+        words = shlex.split(command_itself(cmd))
+    except ValueError:
+        return
+    for i, word in enumerate(words):
+        if not word.startswith("-"):
+            continue
+        if "=" in word:
+            yield tuple(word.split("=", 1))
+        elif i + 1 < len(words):
+            yield word, words[i + 1]
+
+
 def _from_bash(dest, cmd, cwd=None):
+    passed = list(flag_values(cmd))
     for flag in dest.get("text_arg") or ():
+        values = [v for f, v in passed if f == flag]
+        if not values:
+            continue
         # A flag ending in -file, or the short -F, names a file whose contents are the prose. That
-        # is how a long body is really passed, so it is read rather than matched.
+        # is how a long body is really passed, so it is read rather than matched. The path came from the
+        # command's own argument, so a hidden one is the caller's choice.
         if flag.endswith("-file") or flag in ("-F", "--file"):
-            m = re.search(re.escape(flag) + r"[= ]\s*['\"]?([^\s'\"]+)", cmd)
-            if m:
-                try:
-                    with open(os.path.expanduser(m.group(1))) as fh:
-                        return fh.read()
-                except OSError:
-                    continue
+            for value in values:
+                got = read_prose_file(value, cwd, inside=False)
+                if got is not None:
+                    return got
             continue
         # Several -m flags concatenate into one message, which is how a subject and body are given.
-        parts = re.findall(re.escape(flag) + r"[= ]\s*(?:\"((?:[^\"\\]|\\.)*)\"|'([^']*)')", cmd)
-        joined = "\n\n".join(a or b for a, b in parts if (a or b))
-        if joined:
-            joined = joined.replace('\\"', '"')
-            # The prose may be behind a substitution rather than in the command. Where it can be had
-            # without risking a side effect, have it: nobody should have to restructure a command to
-            # get their writing checked.
-            if joined.strip().startswith("$"):
-                return resolve(joined, cwd)
-            return joined
+        joined = "\n\n".join(values)
+        # The prose may be behind a substitution rather than in the command. Where it can be had
+        # without risking a side effect, have it: nobody should have to restructure a command to
+        # get their writing checked.
+        if joined.strip().startswith("$"):
+            return resolve(joined, cwd)
+        return joined
     return None
 
 
@@ -230,15 +323,65 @@ def identifiers(dest, tool, tool_input, cwd=None):
 #
 # Reading a file needs no execution at all. Running a command does, and the hook cannot know whether the
 # one it is looking at is read-only: `$(curl -X POST ...)` would fire twice. So execution is limited to
-# a whitelist of git subcommands that report — and even that is not enough on its own, because
-# `git log --output=FILE` writes a file, so a flag that can write is refused. Chaining is prevented by
-# something stronger than a check: the command is run as a list of arguments, with no shell, so `;` and
-# `&&` reach git as arguments and git rejects them. CHAINS is redundancy for anything that later runs
-# this through a shell — removing it changes no behaviour today, which a test cannot show.
+# git, and to argument lists where EVERY argument is recognised.
+#
+# Recognising only the subcommand was not enough, and the way it failed is the reason this is now a
+# per-subcommand table. `tag` and `notes` were on the old list of subcommands that report. `git tag -d`
+# deletes a tag, `git tag NAME` creates one, and `git notes add -f -m` overwrites a note — and all three
+# ran on tool calls the hook went on to DENY, so the repository changed before anybody was asked to
+# approve anything, and the message the person read said nothing had been checked.
+#
+# No form of diff is allowed, and that is what keeps a repository's own configuration from naming a
+# command to run: `diff.external` reaches `git log -p --ext-diff`, and `textconv` reaches `cat-file
+# --textconv`. Neither is reachable if a patch is never asked for. `diff.external` and the pager are
+# emptied on the way in as well, so this holds even if a later flag makes it that far.
+#
+# Chaining is prevented by something stronger than a check: the command is run as a list of arguments,
+# with no shell, so `;` and `&&` reach git as arguments and git rejects them. CHAINS is redundancy for
+# anything that later runs this through a shell — removing it changes no behaviour today, which a test
+# cannot show.
 READS_A_FILE = re.compile(r"""^\$\(\s*(?:cat|<)\s+['"]?([^'"\s)]+)['"]?\s*\)$""")
-REPORTS = ("log", "show", "cat-file", "describe", "rev-parse", "rev-list", "tag", "notes")
-CAN_WRITE = ("--output", "-o ", "--output-directory")
+# Subcommand -> the flags whose presence still leaves the invocation a report. A flag that is not listed
+# for the subcommand in hand refuses the whole substitution, which is the only version of this that
+# survives a future git release adding a flag nobody here has read about.
+REPORTS = {"log": ("--format", "--pretty", "--date", "-n", "--max-count", "--skip", "--reverse",
+                   "--no-merges", "--first-parent"),
+           "show": ("--format", "--pretty", "--date", "-s", "--no-patch"),
+           "cat-file": ("-p",),
+           "describe": ("--tags", "--always", "--long", "--abbrev"),
+           "rev-parse": ("--short", "--abbrev-ref", "--verify"),
+           "rev-list": ("-n", "--max-count", "--count", "--reverse", "--no-merges", "--first-parent")}
 CHAINS = (";", "&&", "||", "|", "`", "$(", ">", "<")
+# Emptied for the one invocation, so no repository can name a command through them.
+NO_CONFIGURED_COMMANDS = ("--no-pager", "-c", "diff.external=", "-c", "core.pager=cat")
+_FLAG = re.compile(r"^(--?[A-Za-z][-\w]*)(=.*)?$", re.S)
+# A revision, a count, or a path: `HEAD~2`, `main..HEAD`, `v1.0`, `5`, `docs/x.md`. Never a flag.
+_PLAIN = re.compile(r"^[A-Za-z0-9][\w./^~@{}+-]*$")
+
+
+def _only_reports(words):
+    """Whether every argument of a git invocation is one this tool recognises as reporting."""
+    allowed = REPORTS.get(words[1])
+    if allowed is None:
+        return False
+    for word in words[2:]:
+        if re.fullmatch(r"-\d+", word) or word == "--":
+            continue                          # `git log -1`, and the end-of-flags separator
+        flag = _FLAG.match(word)
+        if flag:
+            if flag.group(1) not in allowed:
+                return False
+        elif not _PLAIN.match(word):
+            return False
+    return True
+
+
+# One tool call resolves a given substitution once. The old shape ran it twice — `extract` resolved it,
+# and `unreadable` resolved it again to decide whether the gap was worth mentioning — which doubled every
+# side effect the whitelist was there to prevent. Making a second call free is smaller than coordinating
+# two call sites, and it holds for a third caller nobody has written yet. The process lives for one tool
+# call, so the cache cannot go stale.
+_RESOLVED = {}
 
 
 def resolve(value, cwd=None):
@@ -247,27 +390,33 @@ def resolve(value, cwd=None):
     Returns None when it cannot, which is the honest answer for `${SUMMARY}` — the hook is a separate
     process and never sees the caller's shell variables — and for any command it declines to run.
     """
-    value = value.strip()
+    key = (value.strip(), cwd or os.getcwd())
+    if key not in _RESOLVED:
+        _RESOLVED[key] = _resolve(*key)
+    return _RESOLVED[key]
+
+
+def _resolve(value, cwd):
     m = READS_A_FILE.match(value)
     if m:
-        path = m.group(1)
-        if not os.path.isabs(path) and cwd:
-            path = os.path.join(cwd, path)
-        try:
-            with open(os.path.expanduser(path), errors="replace") as fh:
-                return fh.read()
-        except OSError:
-            return None
+        return read_prose_file(m.group(1), cwd)
     if not (value.startswith("$(") and value.endswith(")")):
         return None
     inner = value[2:-1].strip()
-    words = inner.split()
-    if len(words) < 2 or words[0] != "git" or words[1] not in REPORTS:
-        return None
-    if any(bad in inner for bad in CAN_WRITE) or any(bad in inner[2:] for bad in CHAINS):
+    if any(bad in inner[2:] for bad in CHAINS):
         return None
     try:
-        got = subprocess.run(words, capture_output=True, text=True, timeout=20,
+        words = shlex.split(inner)            # so `--format="%B"` does not reach git with the quotes
+    except ValueError:
+        return None
+    if len(words) < 2 or words[0] != "git" or not _only_reports(words):
+        return None
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        got = subprocess.run(words[:1] + list(NO_CONFIGURED_COMMANDS) + words[1:],
+                             capture_output=True, text=True, timeout=20, env=env,
                              cwd=cwd or os.getcwd())
     except Exception:
         return None
@@ -276,8 +425,9 @@ def resolve(value, cwd=None):
 
 # A text argument whose value the tool call does not contain: `--body "$(git log -1 --format=%b)"`,
 # `--body "$(cat notes.md)"`, `--message "${SUMMARY}"`. The prose is real and is about to be published;
-# it just is not here.
-SUBSTITUTED = re.compile(r"""['"]?\$[({]""")
+# it just is not here. The quotes are gone by the time this is tested, because the value came from
+# `flag_values`, which reads the command as words.
+SUBSTITUTED = ("$(", "${")
 
 
 def unreadable(dest, tool, tool_input, cwd=None):
@@ -290,17 +440,18 @@ def unreadable(dest, tool, tool_input, cwd=None):
     """
     if tool != "Bash":
         return None
-    cmd = str(tool_input.get("command") or "")
+    passed = list(flag_values(str(tool_input.get("command") or "")))
     for flag in dest.get("text_arg") or ():
         if flag.endswith("-file") or flag in ("-F", "--file"):
             continue
-        m = re.search(re.escape(flag) + r"[= ]\s*(\S{0,3})", cmd)
-        if m and SUBSTITUTED.match(m.group(1)):
+        for value in (v for f, v in passed if f == flag):
+            if not value.startswith(SUBSTITUTED):
+                continue
             # Only complain about what could not be worked out. A substitution the tool can resolve is
             # not a gap, and telling someone to restructure a command that already works would be
-            # noise.
-            whole = re.search(re.escape(flag) + r"[= ]\s*(?:\"([^\"]*)\"|'([^']*)'|(\S+))", cmd)
-            if whole and resolve(next(g for g in whole.groups() if g is not None), cwd):
+            # noise. `resolve` is answered from the cache `extract` already filled, so asking again
+            # here runs nothing.
+            if resolve(value, cwd):
                 continue
             readable = next((f for f in dest.get("text_arg") or () if f.endswith("-file")), None)
             return (f"This is going to {dest['name']} and the text came from a shell substitution, so "
@@ -322,8 +473,9 @@ def previous(dest, tool, tool_input, cwd=None):
     This is deliberately a property of the repository or the disk rather than a claim by the caller, so
     it cannot be used to wave anything through.
     """
-    if dest.get("bash") and re.search(r"\bgit\s+commit\b", str(tool_input.get("command") or "")):
-        if re.search(r"--amend\b", str(tool_input.get("command") or "")):
+    cmd = command_itself(str(tool_input.get("command") or ""))
+    if dest.get("bash") and re.search(r"\bgit\s+commit\b", cmd):
+        if re.search(r"--amend\b", cmd):
             try:
                 got = subprocess.run(["git", "-C", cwd or os.getcwd(), "log", "-1", "--format=%B"],
                                      capture_output=True, text=True, timeout=10)
@@ -432,13 +584,7 @@ def _shape(tool, tool_input):
         cmd = str(tool_input.get("command") or "")
         if any(own in cmd for own in OWN_COMMANDS):
             return None
-        # A heredoc is a script, not a message. Prose inside one — a docstring, a comment, a test fixture
-        # — is prose, so the prose test passes it and `cd somewhere` was offered as a destination on the
-        # strength of a docstring in a heredoc it happened to carry. The cost of this, stated rather than
-        # hidden: `cat > notes.md <<MD ... MD` writes a prose file and is no longer noticed. The shape it
-        # would have recorded is `bash: cat`, which is not worth acting on, and heredocs carrying scripts
-        # are far more common than heredocs writing documents.
-        cmd = re.sub(r"<<-?\s*['\"]?(\w+)['\"]?.*?^\1", " ", cmd, flags=re.S | re.M)
+        cmd = command_itself(cmd)
         # From before the first quote, or the shape of `echo "<a paragraph>"` becomes `echo "The`.
         words = re.split(r"['\"]", cmd.strip(), 1)[0].split()
         head = " ".join(w for w in words[:2] if not w.startswith("-"))
@@ -551,10 +697,6 @@ def record_candidate(tool, tool_input):
 
 
 # ---------------------------------------------------------------------------- managing them
-def _user_path():
-    return os.path.join(config_dir(), "destinations.json")
-
-
 def _user_file():
     return _read(_user_path()) or {}
 
@@ -678,14 +820,12 @@ def _cli():
         # your copy stops you receiving their improvements to it, and silence about that is unhelpful.
         seen = set()
         for entry in DESTINATIONS:
-            lowered = str(entry.get("name", "")).lower()
-            entry["_shadowed"] = lowered in seen
-            seen.add(lowered)
-        for entry in DESTINATIONS:
             caps = " ".join(filter(None, [
                 f"effort<={entry['max_effort']}" if entry.get("max_effort") else "",
                 f"severity<={entry['max_severity']}" if entry.get("max_severity") else ""]))
-            mark = "  (shadowed by yours)" if entry.get("_shadowed") else ""
+            lowered = str(entry.get("name", "")).lower()
+            mark = "  (shadowed by yours)" if lowered in seen else ""
+            seen.add(lowered)
             print(f"{entry['name']:44s} {entry['_origin']:9s} {_how(entry):50s} {caps}{mark}")
         for name in SWITCHED_OFF:
             print(f"{name:44s} off        not checked on this machine")
