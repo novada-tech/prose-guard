@@ -92,7 +92,11 @@ already has.
 | `disabled` | nothing | — |
 | `low` | the term check only, no model call | +12s |
 | `medium` | plus one advisory judgement call | +19s |
-| `high` | four separate checks, re-verified after each edit | +75s |
+| `high` | five separate checks, re-verified after each edit | +75s |
+
+The seconds were measured when `high` ran four checks; the fifth was added afterwards and they have not
+been measured again. `measure/measure_cost.py --levels disabled,high --reps 5` refreshes them, and spends
+real model calls doing it.
 
 **Pick `medium`.** `/prose-guard:setup` asks and writes the answer for you. Two measured results make
 that choice less obvious than it looks:

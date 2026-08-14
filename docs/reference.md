@@ -71,9 +71,10 @@ percentile of the share seen when a message *is* scored against the audience it 
 measured both directions on 3,170 real messages: [docs/thresholds.md](docs/thresholds.md), including
 what the measurement fails to show.
 
-Three limits keep that bounded. Each check gets two attempts. A session gets six holds in total, and
-twelve model calls. Past those, everything turns advisory — so two checks that genuinely disagree make
-one message expensive and then let it through, rather than hanging your turn.
+Three limits keep that bounded. Each check gets two attempts, and a session gets six holds in total.
+Model calls are capped per message rather than per session — twenty of them, and a check that cannot be
+paid for is skipped for that message. So two checks that genuinely disagree make one message expensive
+and then let it through, rather than hanging your turn.
 
 ## What counts as sending
 
@@ -130,6 +131,10 @@ already gone out unchecked. Then the agent names the tools it can actually see, 
 and waits for you.
 
 You will install something new next month, and the guard notices on its own: when nothing claims a
+call carrying long prose it records the *shape* — `bash: git commit -m`, `tool: example__post [body]` —
+never the text. It mentions it **once**, on about the third use, and never again. Decline and it is
+declined for good.
+
 You see these, not just the agent. A hook has two channels — `additionalContext` reaches the model and
 `systemMessage` reaches the person, and the docs are explicit that neither sees the other. Discovery used
 only the first, so a decision that is yours was being made available only to whatever agent happened to be
@@ -227,7 +232,6 @@ Audiences overlap, and a channel can hold two of them. Combining is one operatio
 |---|---|---|
 | vocabulary | intersection | only what everyone knows is safe to leave unexplained |
 | shared context | minimum | assume the least-informed reader |
-| reach | maximum | the widest reader decides whether internal links resolve |
 
 Measured on two real audiences — 268 people on a public data-model repository, 20 in a client-services
 channel — intersecting costs 103 of the modellers' 220 terms and leaves 117. It does not collapse,

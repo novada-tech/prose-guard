@@ -17,15 +17,15 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/install_rule.py"
 
 ## 2. Choose a level
 
-The numbers are five paired sessions on one fixture and one model, so the ordering is the finding
-and the digits are not:
+The numbers are five paired sessions on one fixture and one model, taken when `high` ran four checks
+rather than the five it runs now — so the ordering is the finding and the digits are not:
 
 | level | what runs | added per message sent |
 |---|---|---|
 | `disabled` | nothing | — |
 | `low` | the term check only, no model call | +12s |
 | `medium` | plus one advisory writing check | +19s |
-| `high` | four separate checks, re-verified after each edit | +75s |
+| `high` | five separate checks, re-verified after each edit | +75s |
 
 Both counter-intuitive results are worth saying out loud:
 

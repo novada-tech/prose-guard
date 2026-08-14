@@ -75,8 +75,10 @@ Inside a team the names are unremarkable and useful: they are who the audience *
 `overlap` work, and the person who measured it is usually among them. Published, they are a list of
 named people, and some of those names come from sources wider than the team — a public repository's
 contributors, a channel shared with clients. So `share` asks GitHub whether the target repository is
-public, reports what it found, and refuses `--with-names` when the answer is yes. Where it cannot tell,
-it says so and leaves the decision with you.
+public, and `--with-names` goes ahead only when the answer is a definite no. Where it cannot tell — not
+a git repository yet, no `gh` on the path, `gh` not logged in, a remote that is not GitHub — it refuses
+and says which of those it hit. Not being able to tell used to mean the names went out, and three of the
+four ways a first-time user arrives are ways of not being able to tell.
 
 ### Retiring a shared audience
 

@@ -15,8 +15,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/check_prose.py" <file> --who "who reads this,
 These are the same checks prose-guard runs on a message you send, so what it
 says here is what the hook would say. It runs the most thorough level whatever the hook is set
 to, because this is one deliberate run rather than every message someone sends: the deterministic
-term check, then four separate checks for relevance, structure, sentences and reference. Four
-model calls of a few seconds each.
+term check, the deterministic mechanics check, then five model-based checks: relevance, structure,
+sentences, reference, and how it addresses the reader. At least five model calls of a few seconds each,
+and more where a check keeps finding something new — the ceiling is below.
 
 The two flags do different jobs. **`--for` sets the vocabulary** — run
 `python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" list` to see what exists. **`--who` describes the
