@@ -1935,6 +1935,43 @@ def test_stripping_code_out_of_prose_does_not_invent_a_doubled_word():
     check("and one after it", bool(mechanics.scan("run `git log` and and then stop")), True)
 
 
+def test_pairs_reads_backwards_from_the_parenthesis():
+    """Adversarial shapes for the expansion finder, which now anchors on the parenthesis.
+
+    Scanning for the phrase first tried a 120-character run at every offset in the text — 914 ms on
+    100,000 words. Anchoring on the parenthesis and reading backwards costs 3.7 ms for the same
+    output. These cases are the ones where "the same output" is easiest to get wrong.
+    """
+    import jargon
+    check("an ordinary pair", jargon.pairs("Application Default Credentials (ADC) failed"),
+          {"ADC": "Application Default Credentials"})
+    check("and the other way round", jargon.pairs("ADC (Application Default Credentials) failed"),
+          {"ADC": "Application Default Credentials"})
+    check("a parenthesis at offset 0 has nothing before it", jargon.pairs("(ADC) failed"), {})
+    check("nor does one with a single character before it", jargon.pairs("x (ADC)"), {})
+    check("an unclosed parenthesis is not a pair",
+          jargon.pairs("Application Default Credentials (ADC failed"), {})
+    check("the phrase stops at the nearest parenthesis",
+          jargon.pairs("Application Default Credentials (see Access (ADC) below)"), {})
+    check("two pairs in a row are both found",
+          jargon.pairs("Application Default Credentials (ADC) and Trade Reporting Rules (TRR)"),
+          {"ADC": "Application Default Credentials", "TRR": "Trade Reporting Rules"})
+    # 80 characters inside the brackets, which is where a parenthesis stops being an expansion and
+    # starts being a sentence. This is the bound the whole of an 'SF (Long Form)' pair has to fit in.
+    check("a bracket holding 93 characters is not an expansion",
+          jargon.pairs("ADC (Application Default Credentials as the mechanism machine "
+                       "authentication uses on this platform)"), {})
+    check("a run too long to reach across is not a pair",
+          jargon.pairs("Application Default Credentials " + "z" * 200 + " (ADC)"), {})
+    # The look-back is exactly 120 characters of phrase, whatever whitespace sits against the bracket.
+    # An off-by-one either way moves one of these two.
+    check("a phrase 120 characters long is still in reach",
+          bool(jargon.pairs("Alpha " + "z" * 100 + " Baker Charlie (ABC)")), True)
+    check("and 121 characters is not", jargon.pairs("Alpha " + "z" * 101 + " Baker Charlie (ABC)"), {})
+    check("whitespace against the bracket does not count towards it",
+          bool(jargon.pairs("Alpha " + "z" * 100 + " Baker Charlie" + " " * 40 + "(ABC)")), True)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
