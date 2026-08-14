@@ -60,13 +60,23 @@ FUNCTION_WORDS = ("and", "the", "in", "on", "of", "to", "for", "with", "through"
 DOUBLED_ON_PURPOSE = ("that", "had", "long")
 
 
+# What a strip leaves behind. Not a space: DOUBLED matches two identical words separated by spaces and
+# tabs, so stripping a span between them made them adjacent and invented a doubled word. That held back
+# two reviewers' own issue posts — "in `2`, `3` and `4` and deliberately absent", and three channel
+# names in backticks with "versus" abbreviated between them — and a held turn is the most expensive
+# thing this tool does. Not a placeholder word either, because two spans in a row would double that
+# word instead. GAP has no word characters in it and both rules below need one on each side of it, so a
+# strip can now only ever remove a finding, never invent one.
+GAP = " -- "
+
+
 def prose(text):
     """The text minus what is not prose. A doubled identifier in code is not a typo."""
-    text = re.sub(r"```.*?```", " ", text, flags=re.S)
-    text = re.sub(r"`[^`]*`", " ", text)
-    text = re.sub(r"^\s{4,}.*$", " ", text, flags=re.M)        # indented blocks
-    text = re.sub(r"^\s*\|.*$", " ", text, flags=re.M)         # table rows repeat headings
-    text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r"```.*?```", GAP, text, flags=re.S)
+    text = re.sub(r"`[^`]*`", GAP, text)
+    text = re.sub(r"^\s{4,}.*$", GAP, text, flags=re.M)        # indented blocks
+    text = re.sub(r"^\s*\|.*$", GAP, text, flags=re.M)         # table rows repeat headings
+    text = re.sub(r"https?://\S+", GAP, text)
     return text
 
 

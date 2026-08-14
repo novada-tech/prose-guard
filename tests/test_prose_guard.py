@@ -1900,6 +1900,32 @@ def test_rule_installer():
         check("an unrelated rule is not a rival", run("--install").startswith("installed"), True)
 
 
+def test_stripping_code_out_of_prose_does_not_invent_a_doubled_word():
+    """Both of these sentences are correct, and both were held back.
+
+    `prose()` used to replace what it strips with a single space, and DOUBLED matches two identical
+    words separated by spaces and tabs — so a stripped inline span left the words either side adjacent
+    and the rule fired on them. It blocked two reviewers' own issue posts, on text that had nothing to
+    do with the check. A held turn is the most expensive thing this tool does (`checks/config.py`), so
+    a false block costs more than any finding it could have made.
+
+    The third case is why the gap is not a placeholder *word*: two spans in a row would then leave that
+    word doubled, trading one invented typo for another.
+    """
+    from checks import mechanics
+    for text in ("The share threshold is exercised in `2`, `3` and `4` and deliberately absent.",
+                 "The three channels (`systemMessage` vs `additionalContext` vs "
+                 "`permissionDecisionReason`) are each used deliberately.",
+                 "Run `git log` `--oneline` to see it.",
+                 "The fence ```one``` and ```two``` and the rest of the paragraph.",
+                 "Compare https://example.com/a and https://example.com/b and decide."):
+        check(f"not a doubled word: {text[:34]}", mechanics.scan(text), [])
+    # and a real one either side of a stripped span is still found
+    check("a doubled word next to code is still a typo",
+          bool(mechanics.scan("we we should run `git log`")), True)
+    check("and one after it", bool(mechanics.scan("run `git log` and and then stop")), True)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
