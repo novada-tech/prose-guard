@@ -51,7 +51,7 @@ ask asks answer answers question questions issue issues
 # specialism reads these without pausing, so asking someone to expand them would be noise. Kept
 # here rather than in a baseline audience because knowing them depends on reading English, not on
 # what anybody works on.
-asap fyi eta aka etc vs tldr iirc afaik imo imho kpi cfo cto hr pto ooo eod eow
+asap fyi eta aka etc vs tldr iirc afaik imo imho kpi cfo cto hr pto ooo eod eow btw
 
 # General knowledge rather than anybody's vocabulary: places, time, dates, units, currencies, job
 # titles, company suffixes and office file formats. These were reaching the borderline pile in a real

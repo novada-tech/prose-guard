@@ -171,6 +171,50 @@ def from_text(paths):
             continue
 
 
+# What a written-out form has to look like to be recorded. Run against the real corpus, the loose version
+# produced `PREVIEW]` with nineteen netlify URLs, `E.G.` with three sentence fragments, and `CDM ->
+# cdm/pull/653>` — markdown links, code and abbreviations rather than expansions. An ambiguity check fed
+# that would fire on noise for ever.
+NOT_WORDS = ("/", ">", "<", "http", "@", "#", "|", "`", "*", "=", "{", "}", "[", "]")
+
+
+def _expansion(short, long):
+    """The written-out form, normalised, or "" if this pair is not an expansion at all."""
+    if not jargon.ACRONYM.fullmatch(short) or not jargon.is_acronym(short):
+        return ""
+    spelt = " ".join(long.split())
+    if any(bad in spelt for bad in NOT_WORDS):
+        return ""
+    words = spelt.split()
+    if not 1 < len(words) <= 8:
+        return ""                             # one word is rarely an expansion; eight is a sentence
+    if not all(w.strip("-'").replace("-", "").isalpha() for w in words):
+        return ""
+    if not _initials_match(short, words):
+        return ""
+    # Case-folded, so "CodeFresh Container Registry" and "Codefresh container registry" are one meaning
+    # rather than two. The first spelling seen is the one shown.
+    return spelt
+
+
+# Words an expansion skips over: "Hong Kong University of Science and Technology" is HKUST.
+SKIPPED = ("of", "and", "the", "for", "in", "on", "a", "an", "to", "at", "by", "with")
+
+
+def _initials_match(short, words):
+    """Whether the acronym's letters are the initials of these words, in order.
+
+    Without this, any parenthesis after a couple of words became an expansion: the real corpus gave
+    "child model (CDM)", "Xerces validation (XSD)" and "recently released (RC)" — three coincidences that
+    would each have been reported as a second meaning for a term that has one.
+    """
+    letters = [c for c in short.lower() if c.isalnum()]
+    initials = [w[0].lower() for w in words if w.lower() not in SKIPPED]
+    if len(initials) != len(letters):
+        return False
+    return all(a == b for a, b in zip(letters, initials))
+
+
 def tally(sources, cut=None, limit=None, keep=None, report=None, every=3.0):
     """Count as the documents arrive, saying so as it goes.
 
@@ -211,8 +255,9 @@ def tally(sources, cut=None, limit=None, keep=None, report=None, every=3.0):
                 authors[term.upper()].add(who)
                 uses[term.upper()] += 1
             for short, long in jargon.pairs(body).items():
-                if jargon.is_acronym(short):
-                    expansions[short.upper()][" ".join(long.split())].add(who)
+                spelt = _expansion(short, long)
+                if spelt:
+                    expansions[short.upper()][spelt].add(who)
             now = time.monotonic()
             if report and now - last >= every:
                 last = now
@@ -270,8 +315,7 @@ def cmd_scan(a):
            "members": sorted(people),
            # {TERM: {"Long Form": how many people wrote it that way}}. A term with two entries is one
            # this audience uses for two things.
-           "expansions": {t: {long: len(who) for long, who in sorted(seen.items())}
-                          for t, seen in sorted(expansions.items())},
+           "expansions": _folded(expansions),
            "known": known, "borderline": borderline, "needs_explaining": rest, "counts": rows}
     with open(a.out, "w") as fh:
         json.dump(out, fh, indent=1)
@@ -337,6 +381,20 @@ def _losses(name, fresh):
         other.append(f"the corpus shrank, {before_docs} documents to {now_docs} — if a source failed "
                      f"part way through, this is the only sign of it")
     return routing, other
+
+
+def _folded(expansions):
+    """One entry per meaning, case-folded, with the people who wrote each pooled."""
+    out = {}
+    for term, seen in sorted(expansions.items()):
+        merged = {}
+        for spelt, who in sorted(seen.items()):
+            key = spelt.lower()
+            first, people = merged.get(key, (spelt, set()))
+            merged[key] = (first, people | who)
+        out[term] = {first: len(people) for first, people in
+                     sorted(merged.values(), key=lambda pair: -len(pair[1]))}
+    return out
 
 
 def cmd_create(a):

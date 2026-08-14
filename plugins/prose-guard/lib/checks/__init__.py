@@ -62,6 +62,29 @@ def _points_at(text, finding):
     return -1                                 # nothing quoted, or quoted nothing in the text
 
 
+def wrote_which(text, fragment):
+    """Sentence numbers of `text` that `fragment` covers, or None when the whole text is new.
+
+    An edit into the middle of a document must be judged in the document — a list's purpose is stated in
+    its first paragraph, and a hunk cannot see that. But a complaint about a sentence the edit never
+    touched is not this edit's fault, so the caller needs to know which sentences it wrote.
+    """
+    if not fragment:
+        return None
+    whole = " ".join(text.split())
+    piece = " ".join(fragment.split())
+    at = whole.find(piece)
+    if at < 0:
+        return None
+    ends, mine, spent = SENTENCE_END.split(whole), set(), 0
+    for n, sentence in enumerate(ends):
+        start, stop = spent, spent + len(sentence)
+        if start < at + len(piece) and stop > at:
+            mine.add(n)
+        spent = stop + 1
+    return mine or None
+
+
 # How many times a check may run, and when to stop. A fixed number was wrong in both directions: it
 # stopped a document with ten real defects after the same number of runs as a clean one, and it capped a
 # 2,000-word document at the same effort as a 400-word one.

@@ -1665,6 +1665,52 @@ def test_how_hard_a_check_works_follows_the_text():
     check("and pays for one call", quiet.asked, 1)
 
 
+def test_an_edit_is_judged_inside_its_document():
+    """An edit into the middle of a document was being judged as though the hunk were the document.
+
+    Both "no sentence stating what this list is for" complaints landed on a file whose first paragraph is
+    exactly that, because the edit only touched the middle. A reference that resolved forty lines up read as
+    unresolved for the same reason. The file is on disk and was already being read for another purpose, so
+    the checks get the document as it will be after the call.
+
+    The other half matters as much: a complaint about a paragraph the edit never touched is worth saying and
+    is not grounds for refusing the edit, so the caller is told which sentences this call wrote.
+    """
+    import checks
+    import destinations as D
+    with tempfile.TemporaryDirectory() as repo:
+        subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True, timeout=60)
+        path = os.path.join(repo, "names.txt")
+        opening = ("This file lists every term the checker treats as shared vocabulary for this team. It "
+                   "exists so a reader can see what was measured rather than trusting a count.")
+        with open(path, "w") as fh:
+            fh.write(opening + "\n\nBSP is the batch submission pipeline.\nNFS is the shared file store.\n")
+        subprocess.run(["git", "-C", repo, "add", "names.txt"], capture_output=True, timeout=60)
+
+        fresh = ("CDM is the common domain model, measured the same way as everything above, so the count "
+                 "is authors and not uses.")
+        edit = {"file_path": path, "old_string": "NFS is the shared file store.", "new_string": fresh}
+        dest = D.match("Edit", edit)
+        check("an edit to a tracked prose file is claimed", (dest or {}).get("name"),
+              "prose file someone will read")
+        text = D.extract(dest, "Edit", edit, repo)
+        check("and the checks are given the whole document", opening in (text or ""), True)
+
+        whole, part = D.resulting(dest, "Edit", edit, repo)
+        mine = checks.wrote_which(whole, part)
+        total = len(checks.SENTENCE_END.split(" ".join(whole.split())))
+        check("the sentences this edit wrote are located", mine, {total - 1})
+        check("and are not the whole document", len(mine) < total, True)
+
+        # A write of a whole file has no old_string, so everything in it is this call's doing.
+        written = {"file_path": path, "content": opening + " " + fresh}
+        got, part = D.resulting(dest, "Write", written, repo)
+        check("a whole-file write has nothing to locate", (got, part), (None, ""))
+        check("so the content is what is judged",
+              D.extract(dest, "Write", written, repo), written["content"])
+        check("and every sentence counts as written here", checks.wrote_which(opening, ""), None)
+
+
 def test_an_audience_without_expansions_says_it_needs_a_rescan():
     """No compatibility shim, because there is no user base to be compatible with.
 

@@ -150,11 +150,43 @@ def _from_bash(dest, cmd, cwd=None):
     return None
 
 
+def resulting(dest, tool, tool_input, cwd=None):
+    """The document as it will be AFTER this call, and which part of it is new.
+
+    An edit was being judged as though the hunk were the whole document. Both "no sentence stating what
+    this list is for" complaints landed on a file whose first thirty lines are exactly that, because the
+    edit only touched the middle; a reference resolved forty lines up read as unresolved for the same
+    reason. Any edit into the middle of a document looked context-free.
+
+    The file on disk is right here — `previous` already reads it — so the checks get the document, and the
+    caller is told which sentences this call actually wrote. Returns (text, new_fragment) with
+    new_fragment empty when the whole thing is new.
+    """
+    path = tool_input.get("file_path")
+    if not (dest.get("file") and path):
+        return None, ""
+    fresh = tool_input.get("new_string")
+    if not isinstance(fresh, str):
+        return None, ""                       # a whole-file write: the content IS the document
+    before = tool_input.get("old_string")
+    try:
+        with open(path, errors="replace") as fh:
+            whole = fh.read()
+    except OSError:
+        return None, ""
+    if isinstance(before, str) and before and before in whole:
+        return whole.replace(before, fresh, 1), fresh
+    return None, ""
+
+
 def extract(dest, tool, tool_input, cwd=None):
     """The prose about to leave, or None if there is not enough of it to judge."""
     if tool == "Bash":
         text = _from_bash(dest, str(tool_input.get("command") or ""), cwd)
     else:
+        whole, _ = resulting(dest, tool, tool_input, cwd)
+        if whole and len(whole.split()) >= MIN_WORDS:
+            return whole
         text = None
         for field in dest.get("text_fields") or ():
             v = tool_input.get(field)
@@ -392,6 +424,13 @@ def _shape(tool, tool_input):
         cmd = str(tool_input.get("command") or "")
         if any(own in cmd for own in OWN_COMMANDS):
             return None
+        # A heredoc is a script, not a message. Prose inside one — a docstring, a comment, a test fixture
+        # — is prose, so the prose test passes it and `cd somewhere` was offered as a destination on the
+        # strength of a docstring in a heredoc it happened to carry. The cost of this, stated rather than
+        # hidden: `cat > notes.md <<MD ... MD` writes a prose file and is no longer noticed. The shape it
+        # would have recorded is `bash: cat`, which is not worth acting on, and heredocs carrying scripts
+        # are far more common than heredocs writing documents.
+        cmd = re.sub(r"<<-?\s*['\"]?(\w+)['\"]?.*?^\1", " ", cmd, flags=re.S | re.M)
         # From before the first quote, or the shape of `echo "<a paragraph>"` becomes `echo "The`.
         words = re.split(r"['\"]", cmd.strip(), 1)[0].split()
         head = " ".join(w for w in words[:2] if not w.startswith("-"))

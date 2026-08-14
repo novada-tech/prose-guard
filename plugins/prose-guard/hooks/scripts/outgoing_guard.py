@@ -32,7 +32,8 @@ import audiences  # noqa: E402
 import paths  # noqa: E402
 import destinations  # noqa: E402
 import checks as checks_module  # noqa: E402
-from checks import BLOCK, EFFORT, IN_ORDER as CHECKS, ceiling_for, pooled  # noqa: E402
+from checks import (BLOCK, EFFORT, IN_ORDER as CHECKS, _points_at, ceiling_for, pooled,
+                    wrote_which)  # noqa: E402
 
 MAX_PER_CHECK = 2      # one complaint, then one more if the fix did not land
 MAX_DENIALS = 6        # a ceiling across all of them, so one message cannot eat a session
@@ -52,6 +53,10 @@ class Context:
         # message introduces, and holding a message back over words somebody else wrote is a demand
         # nobody can satisfy.
         self.previous = destinations.previous(dest, tool, tool_input, cwd)
+        # Which sentences of the document this call actually wrote. None means all of them — a new file, a
+        # message, a commit. A finding outside them is about text that was already there.
+        whole, fresh = destinations.resulting(dest, tool, tool_input, cwd)
+        self.mine = wrote_which(whole, fresh) if whole else None
         # A destination can say the readers are better informed than the audience assumes, e.g. a
         # direct message inside a channel-wide audience. Never the other way round.
         override = self.situation.pop("_shared_context", None)
@@ -268,9 +273,15 @@ def main():
             continue
         # One message carrying everything this check found, so a caller pays one turn to fix several
         # things rather than one turn each.
+        # Block only on what this call wrote. A complaint about a paragraph the edit never touched is
+        # worth saying and is not grounds for refusing the edit.
+        def written_here(f):
+            return ctx.mine is None or _points_at(text, f) in ctx.mine
+        blocking = [f for f in firm if f.severity == BLOCK and written_here(f)]
         finding = found[0]._replace(
-            message="\n".join(f.message for f in found),
-            severity=BLOCK if any(f.severity == BLOCK for f in firm) else "advise")
+            message="\n".join(f.message + ("" if written_here(f) else "  (already in the file)")
+                              for f in found),
+            severity=BLOCK if blocking else "advise")
         # A destination can refuse to block at all. Blocking is justified by the text being about to
         # reach a reader unreviewed; where it is not — a draft that lands in your own compose box —
         # the finding is worth saying and not worth a turn spent arguing.
