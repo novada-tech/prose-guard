@@ -242,20 +242,19 @@ def test_matching():
 
 
 def test_combination():
-    """Three dimensions, three different combinators. Getting reach wrong is the expensive one."""
+    """Two dimensions, two different combinators. Getting either direction wrong is expensive."""
     with tempfile.TemporaryDirectory() as home:
         write_audience(home, "eng", matches={"channels": ["C1"]},
                        vocabulary={"JVM": 9, "SHARED": 9},
-                       assumptions={"shared_context": "high", "reach": "internal"})
+                       assumptions={"shared_context": "high"})
         write_audience(home, "clients", matches={"channels": ["C1"]},
                        vocabulary={"SHARED": 9, "SWAP": 9},
-                       assumptions={"shared_context": "low", "reach": "public"})
+                       assumptions={"shared_context": "low"})
         A, _ = fresh(home)
         r = A.resolve({"channel": "C1"})
         check("both audiences are in scope", sorted(r.names), ["clients", "eng"])
         check("vocabulary intersects", sorted(r.known), ["SHARED"])
         check("shared context takes the minimum", r.shared_context, "low")
-        check("reach takes the maximum", r.reach, "public")
         check("the description names both", "several groups" in r.describe(), True)
 
 
@@ -1898,6 +1897,21 @@ def test_rule_installer():
                      "is either backed by a command you ran and its output, or is explicitly marked "
                      "as unverified. Never present an inference as a finding.\n")
         check("an unrelated rule is not a rival", run("--install").startswith("installed"), True)
+
+
+def test_a_context_level_that_is_not_a_level_never_reaches_a_prompt():
+    """A hand-edited `"shared_context": "sideways"` used to rank as the safest value and be handed to
+    the model as itself, in the line "how much they already know of this: sideways"."""
+    import audiences
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "team", matches={"channels": ["C1"]}, vocabulary={"ABC": 9},
+                       assumptions={"shared_context": "sideways"})
+        A, _ = fresh(home)
+        r = A.resolve({"channel": "C1"})
+        check("it becomes the least-informed reader", r.shared_context, "low")
+        from checks import ask
+        check("so a prompt only ever names a level",
+              "sideways" in ask.context_text(Ctx(r)), False)
 
 
 def teardown_function(_fn):

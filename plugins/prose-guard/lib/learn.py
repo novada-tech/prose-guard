@@ -425,7 +425,7 @@ def cmd_create(a):
             "inherits": [cand.get("_meta", {}).get("inherits") or "engineers"],
             "members": cand.get("members") or [],
             "vocabulary": vocab,
-            "assumptions": {"shared_context": a.shared_context, "reach": a.reach},
+            "assumptions": {"shared_context": a.shared_context},
             "_meta": {"learned_from": cand.get("_meta", {}),
                       "accepted_by_hand": [t.upper() for t in a.also_known]}}
     routing, other = _losses(a.name, data)
@@ -488,7 +488,6 @@ def main():
     c.add_argument("--also-known", nargs="*", default=[])
     c.add_argument("--not-known", nargs="*", default=[])
     c.add_argument("--shared-context", choices=audiences.CONTEXT_ORDER, default="low")
-    c.add_argument("--reach", choices=audiences.REACH_ORDER, default="internal")
 
     a = ap.parse_args()
     (cmd_scan if a.cmd == "scan" else cmd_create)(a)

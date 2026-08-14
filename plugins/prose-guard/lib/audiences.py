@@ -10,7 +10,7 @@ of them, and then only what BOTH know is safe to leave unexplained.
     vocabulary  {TERM: how many distinct people used it}
     inherits    built-in baselines, e.g. "engineers"
     members     who they are, from the learn step. Local only, never published.
-    assumptions shared_context and reach, where the destination cannot say
+    assumptions shared_context, where the destination cannot say
 
 Routing is on `matches` alone, deterministically. Prose is a bad router: a mistake there happens
 before any check runs and so corrupts all of them. When nothing matches, the audience is
@@ -21,7 +21,12 @@ Combining several in-scope audiences is one operation per dimension, not one ope
 
     vocabulary      intersection  - only what everyone knows is safe
     shared_context  minimum       - assume the least-informed reader
-    reach           maximum       - the widest reader decides whether internal links resolve
+
+There was a third dimension, `reach`, meant to say whether readers outside the company can see this.
+Nothing ever read it: no prompt named it and no check asked for it, so two audiences differing only
+in `reach` produced identical prompts. Public reach reaches a check through
+`destinations.situation()`, which reads the destination's owner and is live. The audience dimension
+is gone rather than left looking load-bearing.
 
 There is deliberately no subset elimination. Dropping an audience whose members are contained in
 another looks like a free simplification and is not sound: measured breadth within the larger group
@@ -47,7 +52,11 @@ BUILTIN_DIR = os.path.join(_HERE, "..", "data", "audiences")
 MIN_AUTHORS = 4
 
 CONTEXT_ORDER = ("low", "medium", "high")
-REACH_ORDER = ("internal", "public")
+
+# What a name may be, because a name becomes a filename. Not only typed by a person: it comes out of
+# the audience file itself, and an audience file can arrive in a repository somebody pulled, so
+# `../../.claude/settings` is a name a file can claim.
+SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 def config_dir():
@@ -82,6 +91,12 @@ class Audience:
         self.inherits = list(data.get("inherits") or [])
         self.members = list(data.get("members") or [])
         self.assumptions = data.get("assumptions") or {}
+        # One place a level becomes a level. Anything that is not one ranks as the least-informed
+        # reader, which is the safe end — and, more to the point, is no longer handed to the model as
+        # itself: `"shared_context": "sideways"` in a hand-edited file used to reach a prompt verbatim,
+        # as "how much they already know of this: sideways". `show` still prints the file's own words.
+        level = self.assumptions.get("shared_context")
+        self.shared_context = level if level in CONTEXT_ORDER else CONTEXT_ORDER[0]
         self.meta = data.get("_meta") or {}
 
     # ---------------------------------------------------------------- matching
@@ -164,12 +179,10 @@ class Resolved:
         source = audiences or ([ALL[unresolved_default]] if unresolved_default in ALL else [])
         sets = [a.known(BASELINES) for a in source]
         self.known = set.intersection(*sets) if sets else set()
-        self.shared_context = min((a.assumptions.get("shared_context", "low") for a in source),
-                                  key=lambda v: CONTEXT_ORDER.index(v)
-                                  if v in CONTEXT_ORDER else 0) if source else "low"
-        self.reach = max((a.assumptions.get("reach", "internal") for a in source),
-                         key=lambda v: REACH_ORDER.index(v)
-                         if v in REACH_ORDER else 0) if source else "internal"
+        # The least-informed reader in scope. Every value is already one of CONTEXT_ORDER, because
+        # Audience clamped it on the way in, so this is a ranking and nothing else.
+        self.shared_context = min((a.shared_context for a in source),
+                                  key=CONTEXT_ORDER.index) if source else CONTEXT_ORDER[0]
 
     @property
     def names(self):
