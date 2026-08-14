@@ -186,6 +186,11 @@ def tally(sources, cut=None, limit=None, keep=None, report=None, every=3.0):
     """
     authors = collections.defaultdict(set)
     uses = collections.Counter()
+    # What each term was written out as, and by how many people. The scan already finds "Long Form (SF)"
+    # pairs and used to discard them. Keeping them is the only way to see that one abbreviation carries
+    # two meanings here: LF is Linux Foundation in this corpus and line feed in a kernel one, and a
+    # count on its own cannot tell those apart.
+    expansions = collections.defaultdict(lambda: collections.defaultdict(set))
     docs = 0
     people = set()
     newest = None
@@ -201,10 +206,13 @@ def tally(sources, cut=None, limit=None, keep=None, report=None, every=3.0):
                 handle.write(json.dumps({"author": who, "text": text,
                                          **({"ts": when} if when is not None else {})}) + "\n")
             # the same filter the checker uses, so the piles a human reads contain no THE, WAS or WITH
-            for term in set(t for t in jargon.ACRONYM.findall(jargon.prose(text))
-                            if jargon.is_acronym(t)):
+            body = jargon.prose(text)
+            for term in set(t for t in jargon.ACRONYM.findall(body) if jargon.is_acronym(t)):
                 authors[term.upper()].add(who)
                 uses[term.upper()] += 1
+            for short, long in jargon.pairs(body).items():
+                if jargon.is_acronym(short):
+                    expansions[short.upper()][" ".join(long.split())].add(who)
             now = time.monotonic()
             if report and now - last >= every:
                 last = now
@@ -219,7 +227,7 @@ def tally(sources, cut=None, limit=None, keep=None, report=None, every=3.0):
     finally:
         if handle:
             handle.close()
-    return authors, uses, docs, people, newest
+    return authors, uses, docs, people, newest, expansions
 
 
 def cmd_scan(a):
@@ -242,7 +250,7 @@ def cmd_scan(a):
             yield from s
 
     cut = audiences.MIN_AUTHORS
-    authors, uses, docs, people, newest = tally(
+    authors, uses, docs, people, newest, expansions = tally(
         chained(), cut=cut, limit=a.max_documents, keep=a.keep,
         report=(None if a.quiet else lambda line: print(line, file=sys.stderr, flush=True)))
     inherited = audiences.BASELINES.get(a.inherits or "engineers", set())
@@ -260,6 +268,10 @@ def cmd_scan(a):
                      "what": "authors is how many distinct people wrote the term. That, not how "
                              "often it appears, decides whether the audience shares it."},
            "members": sorted(people),
+           # {TERM: {"Long Form": how many people wrote it that way}}. A term with two entries is one
+           # this audience uses for two things.
+           "expansions": {t: {long: len(who) for long, who in sorted(seen.items())}
+                          for t, seen in sorted(expansions.items())},
            "known": known, "borderline": borderline, "needs_explaining": rest, "counts": rows}
     with open(a.out, "w") as fh:
         json.dump(out, fh, indent=1)
@@ -350,6 +362,7 @@ def cmd_create(a):
         raise SystemExit("an audience needs at least one identifier to match on, or it can never "
                          "apply: --match-channel, --match-repo, --match-owner or --match-path")
     data = {"name": a.name, "who": a.who or "",
+            "expansions": cand.get("expansions") or {},
             "matches": matches,
             "inherits": [cand.get("_meta", {}).get("inherits") or "engineers"],
             "members": cand.get("members") or [],

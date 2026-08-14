@@ -32,6 +32,40 @@ MAX_SHARE_TO_BLOCK = 1 / 3
 ALWAYS_ACTIONABLE = 2
 
 
+def _ambiguous(text, considered, ctx):
+    """Terms this audience has written out two different ways, or written out differently here.
+
+    An abbreviation is not one term. LF is the Linux Foundation in one corpus and a line feed in another,
+    and a count of authors cannot tell those apart — which is why the scan keeps what each term was
+    written out as. Two recorded meanings is the audience telling you the abbreviation is overloaded for
+    them, and the reader has no way to pick.
+
+    Deterministic and narrow on purpose. Which sense a message means, where it never says, is not
+    decidable here and is not guessed at.
+    """
+    meanings = getattr(ctx.audience, "meanings", None)
+    if meanings is None:
+        return ""
+    said = jargon.pairs(jargon.prose(text))
+    notes = []
+    for term in considered:
+        known = meanings(term)
+        if term in said:
+            # The message says which sense it means, so there is nothing for a reader to work out —
+            # whether or not the audience uses the abbreviation for other things as well.
+            here = " ".join(said[term].split())
+            only = min(known, key=lambda k: 0) if len(known) == 1 else None
+            if only and here.lower() != only.lower() and here.lower() not in only.lower():
+                notes.append(f'{term} is written out here as "{here}", and this audience has it as '
+                             f'"{only}". If both are meant, they are two terms')
+            continue
+        if len(known) > 1:
+            spelt = ", ".join(f"{long} ({n})" for long, n in sorted(known.items(),
+                                                                    key=lambda kv: -kv[1]))
+            notes.append(f"{term} is used here for more than one thing — {spelt} — so say which")
+    return ". ".join(notes[:3])
+
+
 def run(text, ctx):
     from . import ADVISE, BLOCK, Finding
     bad, considered = jargon.scan(text, ctx.audience.is_known)
@@ -42,8 +76,9 @@ def run(text, ctx):
     if before and bad:
         inherited = [t for t in bad if jargon.uses(before, t)]
         bad = [t for t in bad if t not in inherited]
+    ambiguous = _ambiguous(text, considered, ctx)
     if not bad:
-        return None
+        return Finding(ADVISE, ambiguous) if ambiguous else None
     fix = ("Explain each where it first appears, by anchoring it to something this reader already "
            "works with")
     listed = ", ".join(bad)

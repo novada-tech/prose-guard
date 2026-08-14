@@ -13,7 +13,11 @@ set -u
 CFG_HOME="${PROSE_GUARD_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/prose-guard}"
 if [ -z "${PROSE_GUARD_EFFORT:-}${CLAUDE_PLUGIN_OPTION_EFFORT:-}" ]; then
   [ -f "$CFG_HOME/config.json" ] || exit 0
-  grep -Eq '"effort"[[:space:]]*:[[:space:]]*"(low|medium|high)"' "$CFG_HOME/config.json" || exit 0
+  # A level set to something that is not a level has to reach the Python, which says so where the person
+  # can see it. Exiting here on anything but a known level made a typo indistinguishable from "off".
+  if ! grep -Eq '"effort"[[:space:]]*:[[:space:]]*"(low|medium|high)"' "$CFG_HOME/config.json"; then
+    grep -Eq '"effort"[[:space:]]*:[[:space:]]*"[^"]+"' "$CFG_HOME/config.json" || exit 0
+  fi
 fi
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="$(command -v python3 || true)"

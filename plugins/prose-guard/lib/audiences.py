@@ -69,6 +69,10 @@ class Audience:
         self.who = data.get("who") or ""
         self.matches_on = data.get("matches") or {}
         self.vocabulary = {str(k).upper(): int(v) for k, v in (data.get("vocabulary") or {}).items()}
+        # {TERM: {"Long Form": how many people wrote it out that way}}. Two entries for one term means
+        # this audience uses that abbreviation for two different things.
+        self.expansions = {str(k).upper(): dict(v)
+                           for k, v in (data.get("expansions") or {}).items()}
         self.inherits = list(data.get("inherits") or [])
         self.members = list(data.get("members") or [])
         self.assumptions = data.get("assumptions") or {}
@@ -164,6 +168,14 @@ class Resolved:
     @property
     def names(self):
         return [a.name for a in self.audiences]
+
+    def meanings(self, term):
+        """What this term has been written out as, by how many people, across the audiences in scope."""
+        out = {}
+        for a in self.audiences:
+            for long, count in (a.expansions.get(term.upper()) or {}).items():
+                out[long] = out.get(long, 0) + count
+        return out
 
     def is_known(self, term):
         return term.upper() in self.known

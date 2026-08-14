@@ -30,7 +30,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audiences  # noqa: E402
 import paths  # noqa: E402
-from checks import BLOCK, _points_at, config, confirms, for_effort  # noqa: E402
+from checks import BLOCK, config, for_effort, passes_for, pooled  # noqa: E402
 
 
 class Context:
@@ -46,44 +46,6 @@ class Context:
 # sends someone chasing a bar that good prose does not clear. See docs/reference.md and
 # measure/measure_stopping.py.
 HUMAN_BASELINE = 2
-
-
-def pooled(check, text, ctx, passes, unconfirmed):
-    """Findings from several runs of one check, pooled into one report.
-
-    A check returns exactly one item however it is asked. Measured on a 295-word document with about ten
-    known defects, asking for up to five items produced one item a run in every condition — so the single
-    item is what the check does, not a contract that can be widened.
-
-    What can be widened is the number of runs. Each run picks one item from those above its bar, and two
-    runs pick differently, which is the instability that made a rewrite loop feel endless. Pooled instead
-    of compared, that sampling is a list: N runs, N calls, and ONE round trip, against N passes costing N
-    round trips. A turn spent reading a finding and editing is dearer than the check's own call.
-
-    Items seen more than once are marked, because they are the ones a reader can rely on.
-    """
-    if passes <= 1 or not check.COSTS_A_CALL:
-        return check.run(text, ctx)
-    seen, order = {}, []
-    for _ in range(passes):
-        finding = check.run(text, ctx)
-        if finding is None:
-            continue
-        spot = _points_at(text, finding)
-        if spot in seen:
-            seen[spot] = (seen[spot][0] + 1, seen[spot][1])
-            continue
-        seen[spot] = (1, finding)
-        order.append(spot)
-    if not order:
-        return None
-    lines = []
-    for spot in order:
-        times, finding = seen[spot]
-        lines.append(("[seen in " + str(times) + f" of {passes} runs] " if times > 1
-                      else f"[once in {passes} runs] ") + finding.message)
-    first = seen[order[0]][1]
-    return first._replace(message="\n             ".join(lines))
 
 
 def history(path):
@@ -148,12 +110,9 @@ def main():
     ap.add_argument("--who",
                     help="describe the reader in a sentence, for the model-based checks. It cannot "
                          "change which terms are known; use --for for that")
-    ap.add_argument("--passes", type=int, default=1, metavar="N",
-                    help="run each check N times and pool what they find, marking how often each item "
-                         "came up. N calls and one round trip, instead of N passes and N round trips")
-    ap.add_argument("--unconfirmed", action="store_true",
-                    help="report every finding, including ones the check does not raise twice. "
-                         "Costs less and gives you nits to chase")
+    ap.add_argument("--passes", type=int, metavar="N",
+                    help="override how many times each check runs. The default scales with the length "
+                         "of the text, and is the same number the hook uses on the same text")
     ap.add_argument("--effort", choices=[x for x in config.LEVELS if x != "disabled"],
                     default="high")
     a = ap.parse_args()
@@ -192,30 +151,22 @@ def main():
               f"/prose-guard:audiences measures your own.")
     if a.who:
         print(f'reader described as:  "{a.who}"  (read by the model-based checks, not by terms)')
-    problems = 0
-    unconfirmed = []
+    passes = a.passes or passes_for(text)
+    print(f"{passes} runs of each check, from the length of the text")
+    problems, loose = 0, 0
     for check in for_effort(a.effort):
-        finding = pooled(check, text, ctx, a.passes, unconfirmed)
-        if finding is None:
+        found, firm = pooled(check, text, ctx, passes)
+        if not found:
             print(f"  {check.NAME:10s} ok")
             continue
-        # Every finding is put to the same check a second time, and kept only if it objects to the same
-        # sentence. Ten runs of the model-based checks over one document that had already been through
-        # six rounds of editing produced nine findings and no repeats: past the substantive problems,
-        # they generate nits, and acting on nits is work with no end. See docs/thresholds.md.
-        if a.passes == 1 and not a.unconfirmed and not confirms(check, text, ctx, finding):
-            unconfirmed.append((check.NAME, finding.message))
-            print(f"  {check.NAME:10s} ok (raised something once and not again — see below)")
-            continue
         problems += 1
-        mark = "must fix" if finding.severity == BLOCK else "consider"
-        print(f"  {check.NAME:10s} [{mark}] {finding.message}")
-    if unconfirmed:
-        print("\nRaised once and not reproduced, so not worth acting on. Read them, do not chase them:")
-        for name, message in unconfirmed:
-            print(f"  {name}: {message[:160]}")
+        loose += len(found) - len(firm)
+        mark = "must fix" if firm and found[0].severity == BLOCK else "consider"
+        for n, finding in enumerate(found):
+            print(f"  {check.NAME:10s} [{mark}] {finding.message}" if n == 0
+                  else f"  {'':10s}            {finding.message}")
     print()
-    print(verdict(a.file, problems, a.passes))
+    print(verdict(a.file, problems, passes))
     return 0
 
 

@@ -130,7 +130,12 @@ already gone out unchecked. Then the agent names the tools it can actually see, 
 and waits for you.
 
 You will install something new next month, and the guard notices on its own: when nothing claims a
-call carrying outgoing prose it records the *shape* — `bash: git commit -m`, `tool: example__post
+You see these, not just the agent. A hook has two channels — `additionalContext` reaches the model and
+`systemMessage` reaches the person, and the docs are explicit that neither sees the other. Discovery used
+only the first, so a decision that is yours was being made available only to whatever agent happened to be
+running. It goes to both now: you see the notice, and the agent knows enough to offer to act on it.
+
+For every call carrying outgoing prose it records the *shape* — `bash: git commit -m`, `tool: example__post
 [body]` — never the text. It mentions it **once**, on the third use, and never again. Decline and it is
 declined for good, so nothing can nag you twice about the same thing. At most 50 shapes are tracked.
 
@@ -265,6 +270,27 @@ Three of five well-built fixtures produce a finding on a single run of all five 
 two of those three report nothing to change, and the third reproduces — which is the point: what survives
 is worth reading.
 
+## One abbreviation, two meanings
+
+An audience records what each term was **written out as**, and by how many people, alongside the count of
+people who used it:
+
+```json
+"expansions": { "LF": { "Linux Foundation": 3, "line feed": 2 } }
+```
+
+The scan already found `Long Form (SF)` pairs and used to discard them. A count of authors cannot tell
+Linux Foundation from a line feed, and both are LF.
+
+Two recorded meanings is the audience telling you the abbreviation is overloaded for them, so a message
+using it without saying which is reported. Writing it out silences that — the reader can tell, whatever
+else the abbreviation does elsewhere. And a message that writes a known term out differently from the
+recorded sense is reported the other way round: "ADC is written out here as air data computer, and this
+audience has it as application default credential."
+
+What is deliberately not attempted: deciding which sense a message means where it never says. That is not
+decidable from the text, and guessing would be worse than saying nothing.
+
 ## One finding at a time, and what to do about it
 
 A check returns exactly one item, and that is not a contract that can be widened. Asked for up to five
@@ -280,11 +306,18 @@ the long one is held to a lower bar for the same number of passes. And each pass
 is an agent turn spent reading a finding and editing — dearer than the check's own call.
 
 What varies between runs is WHICH item, and that is the fix. Each run picks one item from those above the
-bar, so N runs sample N items:
+bar, so N runs sample N items — and N comes from the length of the text, with no flag to pass:
 
-```
-python3 lib/check_prose.py <file> --for <audience> --passes 3
-```
+| words | runs of each check |
+|---|---|
+| up to 100 | 2 |
+| 300 | 4 |
+| 450 and up | 5 |
+
+Never fewer than two, because one run cannot tell a reliable finding from a near-tie. Never more than
+five. The hook and a deliberate run call the same function on the same text, so they cannot drift apart:
+one bar per effort level, whichever way the text is being checked. A check that passes on its first run
+costs one call, so the extra calls are paid only where something was found.
 
 N calls, one round trip. On that same document, one pass found two findings and three pooled runs found
 six across four checks, including two checks that were silent in the single pass. Every item says how
@@ -323,10 +356,10 @@ measurement.
 At five passes each the numbers are 2.2, 1.2 and 0.2. The order holds, so the count measures relative
 quality, and zero IS reachable — the document taken through six rounds scored zero in four passes of five.
 
-What zero is not is the bar a good first draft clears. A senior engineer's own rewrite scored one finding
-a pass and never zero, so a text sitting at one is not unfinished; it is where a good writer's work lands.
-The stopping rule is that the count has stopped falling, and a reader who disagrees with what is left is
-allowed to be right.
+One finding a pass is where a senior engineer's own rewrite landed. That is a reference point and not a
+target: his writing is not perfect either, and the bar here is allowed to be higher than it. What the
+number is for is the trend — the stopping rule is that the count has stopped falling, and a reader who
+disagrees with what is left is allowed to be right.
 
 Calibrating it means tuning the bar until the human-edited version passes and the agent-written one does
 not. That needs more pairs than the one in `measure/fixtures/gold`, and from more than one author —
@@ -364,6 +397,11 @@ sharing a file of the same name.
 | file | what |
 |---|---|
 | `config.json` | effort level, which baseline to assume when no audience matches, and any shared directories |
+
+`/plugin configure` shows the effort level as a free-text box, because `userConfig` supports `string`,
+`number`, `boolean`, `directory` and `file` and has no enumerated type — there is no picker to offer. So a
+typo means no checking at all, which reads exactly like switching it off. A level set to something that is
+not a level now says so once a session, as a message to you rather than to the agent.
 | `audiences/*.json` | one per audience: who they are, what they know, who is in them |
 | `destinations.json` | your own or overridden destinations, read before the shipped ones |
 | `unclaimed-destinations.json` | shapes passive discovery noticed, and what you decided |

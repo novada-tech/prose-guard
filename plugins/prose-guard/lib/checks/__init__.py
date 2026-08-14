@@ -45,6 +45,21 @@ def capped(level, ceiling):
 
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
+# How many times to run a check, from the length of what it is judging. A check returns exactly one item
+# however it is asked — measured on a 295-word document with about ten known defects, asking for up to
+# five produced one a run — so coverage comes from runs. One item for a 100-word message and one for a
+# 1,000-word document holds the long one to a lower bar, and nobody should have to pass a flag to fix
+# that. Costing more for a longer document is the right trade.
+WORDS_PER_PASS = 100
+MOST_PASSES = 5
+# Never fewer than two, because one run cannot tell a reliable finding from a near-tie.
+FEWEST_PASSES = 2
+
+
+def passes_for(text):
+    """The same answer for the hook and for a deliberate run, so both apply one bar."""
+    return max(FEWEST_PASSES, min(MOST_PASSES, 1 + len(text.split()) // WORDS_PER_PASS))
+
 
 def _points_at(text, finding):
     """Which sentence of the text a finding is about, by the span it quotes.
@@ -63,25 +78,49 @@ def _points_at(text, finding):
     return -1                                 # nothing quoted, or quoted nothing in the text
 
 
-def confirms(check, text, ctx, finding):
-    """Whether running the same check again objects to the same sentence.
+def pooled(check, text, ctx, passes=None):
+    """Run a check enough times for the length of the text, and pool what the runs find.
 
-    Measured on one 370-word document already through six rounds of editing: ten runs of the five
-    model-based checks produced one clean result and nine findings, and no finding was raised twice.
-    `reference` objected on every run and to a different sentence almost every time. A check that
-    cannot reproduce its own complaint is generating nits, and acting on them is unbounded work — this
-    is what stops that, at the cost of one extra call for a check that fired.
+    One mechanism where there used to be two, because they were the same mechanism. Running a check
+    twice to see whether it says the same thing is pooling with two runs; running it four times on a long
+    document is pooling with four. The hook and a deliberate run now apply one bar: the same number of
+    passes for the same text, and the same rule for what counts.
+
+    Cheap when there is nothing to say. A check that passes on its first run costs one call — only a check
+    that found something is asked again, which is where the extra calls earn their place.
+
+    Returns (findings, firm) where findings is one entry per distinct sentence complained about, and firm
+    is the subset that more than one run pointed at. An item only one run raised is that run sampling from
+    what is above the bar: on a document with real defects that is a different real defect, and on a
+    polished one it is a near-tie. Which of those it is cannot be told from the item, so the count is
+    reported and the caller decides.
     """
+    first = check.run(text, ctx)
+    if first is None:
+        return [], []
     if not check.COSTS_A_CALL:
-        return True                           # deterministic: it will say the same thing every time
-    try:
+        return [first], [first]               # deterministic: it says the same thing every time
+    passes = passes or passes_for(text)
+    seen = {_points_at(text, first): [1, first]}
+    order = [_points_at(text, first)]
+    for _ in range(max(0, passes - 1)):
         again = check.run(text, ctx)
-    except Exception:
-        return False
-    if again is None:
-        return False
-    where = _points_at(text, finding)
-    return where >= 0 and where == _points_at(text, again)
+        if again is None:
+            continue
+        spot = _points_at(text, again)
+        if spot in seen:
+            seen[spot][0] += 1
+            continue
+        seen[spot] = [1, again]
+        order.append(spot)
+    findings, firm = [], []
+    for spot in order:
+        times, finding = seen[spot]
+        marked = finding._replace(message=f"[{times} of {passes} runs] " + finding.message)
+        findings.append(marked)
+        if times > 1:
+            firm.append(marked)
+    return findings, firm
 
 
 def for_effort(level=None):

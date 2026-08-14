@@ -392,11 +392,18 @@ def _shape(tool, tool_input):
         cmd = str(tool_input.get("command") or "")
         if any(own in cmd for own in OWN_COMMANDS):
             return None
+        # From before the first quote, or the shape of `echo "<a paragraph>"` becomes `echo "The`.
+        words = re.split(r"['\"]", cmd.strip(), 1)[0].split()
+        head = " ".join(w for w in words[:2] if not w.startswith("-"))
         for m in re.finditer(r"(--?[A-Za-z][-\w]*)[= ]\s*['\"]([^'\"]{80,})['\"]", cmd):
             if _reads_like_prose(m.group(2)):
-                words = cmd.strip().split()
-                head = " ".join(w for w in words[:2] if not w.startswith("-"))
                 return f"bash: {head} {m.group(1)}"
+        # Prose does not always arrive behind a flag. `echo "<a paragraph>"` and `somecli post "<a
+        # paragraph>"` put it in a positional argument, and neither was recorded at all — so the one
+        # example asked about would never have surfaced. The prose test is what keeps a grep pattern out.
+        for m in re.finditer(r"['\"]([^'\"]{80,})['\"]", cmd):
+            if _reads_like_prose(m.group(1)):
+                return f"bash: {head}"
         return None
     for field, value in tool_input.items():
         if field in NOT_OUTGOING:

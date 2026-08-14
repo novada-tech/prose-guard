@@ -59,6 +59,22 @@ def effort():
     return "disabled"
 
 
+def misspelt():
+    """A level that was set to something that is not a level, or "" if every source is clean.
+
+    `userConfig` has no enumerated type — string, number, boolean, directory and file are the whole list
+    — so `/plugin configure` offers a free-text box, and "medim" meant disabled with nothing said. This is
+    what lets the hook say so where the person can see it.
+    """
+    for name, value in (("PROSE_GUARD_EFFORT", os.environ.get("PROSE_GUARD_EFFORT")),
+                        ("the plugin's effort setting", os.environ.get("CLAUDE_PLUGIN_OPTION_EFFORT")),
+                        ("config.json", _from_file())):
+        text = (value or "").strip().lower()
+        if text and text not in LEVELS:
+            return f"{name} is set to {text!r}, which is not one of {', '.join(LEVELS)}"
+    return ""
+
+
 def save(level):
     """Write the choice. Raises rather than failing quietly, so a setup step can report it."""
     if level not in LEVELS:

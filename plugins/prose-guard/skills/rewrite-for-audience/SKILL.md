@@ -8,7 +8,7 @@ description: Rewrite a specific piece of text so a named audience can act on it 
 ## Run the checks first, before you read any further
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/lib/check_prose.py" <file> --for <audience> --passes 3
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/check_prose.py" <file> --for <audience>
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/check_prose.py" <file> --who "who reads this, in your own words"
 ```
 
@@ -38,7 +38,11 @@ command cannot be skipped by accident.
 
 Run it again on the rewrite. The check is on the current wording, not on the draft you started from.
 
-`--passes 3` is there because a check returns exactly one item however it is asked — measured on a
+Each check runs more than once, and how many times comes from the length of the text — two runs for a
+short message, up to five for a long document, with no flag to pass. It is the same number the hook uses on
+the same text, so a deliberate run and a message going out are held to one bar.
+
+The runs matter because a check returns exactly one item however it is asked — measured on a
 295-word document with about ten defects, asking for up to five items produced one item a run in every
 condition. What varies between runs is WHICH item, so three runs pooled give three items for three calls
 and one round trip. On that document one pass found two findings and three pooled runs found six across

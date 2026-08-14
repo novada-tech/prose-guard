@@ -534,108 +534,6 @@ def test_the_mechanical_errors_are_found_without_a_model():
     check("costing no model call", mechanics.COSTS_A_CALL, False)
 
 
-def test_several_runs_pool_into_one_report():
-    """A check returns one item however it is asked, so coverage comes from runs rather than from a list.
-
-    Measured on a 295-word document with about ten known defects: asked for up to five items, every check
-    returned one, the same as asking for one. What varies between runs is which item, so three runs pooled
-    give three items for three calls and one round trip — against three passes costing three round trips,
-    and a turn spent reading a finding and editing is dearer than the check's own call.
-
-    Pooling and confirming want opposite things, which is why they are separate modes. The hook blocks, so
-    it confirms and shows one item. A rewrite pass pools, because on a document with real defects an item
-    seen once is a different real defect rather than noise.
-    """
-    import check_prose
-    text = ("One idea here and nothing else. A second sentence about the resolver and what it does. "
-            "A third one entirely, which is also here.")
-
-    class Stub:
-        NAME = "stub"
-        COSTS_A_CALL = True
-
-        def __init__(self, replies):
-            self.replies = list(replies)
-
-        def run(self, text, ctx):
-            return self.replies.pop(0) if self.replies else None
-
-    def about(span):
-        return checks.Finding("advise", f'Consider: "{span}" is unclear')
-
-    import checks
-    first = about("A second sentence about the resolver")
-    same = about("second sentence about the resolver and what")
-    other = about("A third one entirely")
-
-    # Three runs finding three different real things: all three are reported.
-    pooled = check_prose.pooled(Stub([first, other, about("One idea here and nothing else")]),
-                                text, None, 3, [])
-    check("every distinct item is kept", pooled.message.count("Consider:"), 3)
-    check("and each says how often it came up", pooled.message.count("once in 3 runs"), 3)
-
-    # Two runs pointing at one sentence and one elsewhere: two items, and the repeat is marked.
-    pooled = check_prose.pooled(Stub([first, same, other]), text, None, 3, [])
-    check("a repeat is one item, not two", pooled.message.count("Consider:"), 2)
-    check("and is marked as reproduced", "seen in 2 of 3 runs" in pooled.message, True)
-
-    check("nothing found is nothing reported",
-          check_prose.pooled(Stub([]), text, None, 3, []), None)
-    # One pass is the hook's mode and must not pay for runs it did not ask for.
-    single = Stub([first, other])
-    check_prose.pooled(single, text, None, 1, [])
-    check("one pass runs the check once", len(single.replies), 1)
-
-
-def test_a_finding_has_to_be_raised_twice():
-    """A check that cannot reproduce its own complaint is generating nits, and chasing nits has no end.
-
-    Measured on one 370-word document already through six rounds of editing: ten runs of the five
-    model-based checks gave one clean result and nine findings, with no finding raised twice. `reference`
-    objected on every run and to a different sentence almost every time. So a finding is put back to the
-    same check and kept only if it points at the same sentence — after which four runs of the same
-    document reported nothing actionable, which is what makes the rewrite loop terminate.
-    """
-    import checks
-    text = ("One idea here and nothing else. A second sentence about the resolver and what it does. "
-            "A third one entirely.")
-
-    def about(span):
-        return checks.Finding("advise", f'Consider: "{span}" is unclear')
-
-    same = about("A second sentence about the resolver")
-    reworded = about("second sentence about the resolver and what")
-    elsewhere = about("A third one entirely")
-    check("two findings on one sentence agree",
-          checks._points_at(text, same), checks._points_at(text, reworded))
-    check("two findings on different sentences do not",
-          checks._points_at(text, same) == checks._points_at(text, elsewhere), False)
-    check("a finding quoting nothing in the text points nowhere",
-          checks._points_at(text, checks.Finding("advise", "no quotation at all")), -1)
-
-    class Stub:
-        NAME = "stub"
-        COSTS_A_CALL = True
-
-        def __init__(self, replies):
-            self.replies = list(replies)
-
-        def run(self, text, ctx):
-            return self.replies.pop(0) if self.replies else None
-
-    check("a check that says the same thing twice is believed",
-          checks.confirms(Stub([reworded]), text, None, same), True)
-    check("one that objects to something else is not",
-          checks.confirms(Stub([elsewhere]), text, None, same), False)
-    check("one that says nothing the second time is not",
-          checks.confirms(Stub([]), text, None, same), False)
-    # A deterministic check will say the same thing every time, so paying for a second run is waste.
-    class Cheap(Stub):
-        COSTS_A_CALL = False
-    check("a deterministic finding needs no confirming",
-          checks.confirms(Cheap([]), text, None, same), True)
-
-
 def test_destinations_can_be_shared_like_audiences():
     """A destination is worth more shared than an audience.
 
@@ -1108,7 +1006,8 @@ def test_a_vocabulary_can_come_from_any_command():
     with tempfile.TemporaryDirectory() as home:
         e = {**os.environ, "PROSE_GUARD_HOME": home}
         out = os.path.join(home, "candidates.json")
-        rows = [json.dumps({"author": who, "text": "the BSP run hit NFS latency again"})
+        rows = [json.dumps({"author": who,
+                            "text": "the BSP run hit network file system (NFS) latency again"})
                 for who in ("ann", "bob", "cat", "dan")]
         rows.append(json.dumps({"author": "deploy-bot", "text": "BSP BSP BSP BSP BSP"}))
         emit = "printf '%s\\n' " + " ".join(repr(r) for r in rows)
@@ -1118,6 +1017,10 @@ def test_a_vocabulary_can_come_from_any_command():
         check("the scan succeeds", r.returncode, 0)
         found = json.load(open(out))
         check("BSP reached the known pile", "BSP" in found["known"], True)
+        # What each term was written out as, kept rather than discarded: an author count cannot tell
+        # Linux Foundation from line feed, and both are LF.
+        check("an expansion written in the corpus is recorded",
+              found["expansions"].get("NFS"), {"network file system": 4})
         # The bot wrote BSP five times on its own. Counting writers rather than writings is what
         # stops one loud automated account from teaching the tool a term nobody read.
         check("a bot is not a person", found["counts"]["BSP"]["authors"], 4)
@@ -1591,6 +1494,143 @@ def test_one_command_can_be_excused_but_not_a_session():
         verdict, said = ask(f'PROSE_GUARD_SKIP="reason number three for skipping" {commit} '
                             f'-m "{body}"', "many")
         check("repeated use is counted and surfaced", "3 skips" in said, True)
+
+
+def test_a_check_runs_more_than_once_and_the_runs_are_pooled():
+    """One mechanism where there were two, because they were the same mechanism.
+
+    Running a check twice to see whether it says the same thing is pooling with two runs. Running it four
+    times on a long document is pooling with four. So the hook and a deliberate run now share one call and
+    apply one bar: passes scale with the length of the text, and an item more than one run pointed at is
+    the part that can be blocked on.
+
+    Why runs rather than a longer list: a check returns exactly one item however it is asked. Measured on a
+    295-word document with about ten known defects, asking for up to five items produced one a run in every
+    condition. What varies between runs is which item, so runs are the only way to widen coverage.
+    """
+    import checks
+    text = ("One idea here and nothing else. A second sentence about the resolver and what it does. "
+            "A third one entirely, which is also here.")
+
+    def about(span, severity="advise"):
+        return checks.Finding(severity, f'Consider: "{span}" is unclear')
+
+    first = about("A second sentence about the resolver")
+    reworded = about("second sentence about the resolver and what")
+    elsewhere = about("A third one entirely")
+
+    check("a finding is placed by the sentence it quotes, not by its wording",
+          checks._points_at(text, first), checks._points_at(text, reworded))
+    check("two sentences are two places",
+          checks._points_at(text, first) == checks._points_at(text, elsewhere), False)
+    check("and a finding quoting nothing in the text points nowhere",
+          checks._points_at(text, checks.Finding("advise", "no quotation at all")), -1)
+
+    class Stub:
+        NAME = "stub"
+        COSTS_A_CALL = True
+
+        def __init__(self, replies):
+            self.replies = list(replies)
+
+        def run(self, text, ctx):
+            return self.replies.pop(0) if self.replies else None
+
+    # Nothing on the first run costs one call and nothing else: a clean check must not pay for pooling.
+    quiet = Stub([None, first, first])
+    found, firm = checks.pooled(quiet, text, None, 3)
+    check("a check that passes is asked once", len(quiet.replies), 2)
+    check("and reports nothing", found, [])
+
+    # Two runs pointing at one sentence: one item, and it is firm.
+    found, firm = checks.pooled(Stub([first, reworded, elsewhere]), text, None, 3)
+    check("a repeat is one item", len(found), 2)
+    check("the repeat is what can be relied on", len(firm), 1)
+    check("and it says how often", "[2 of 3 runs]" in firm[0].message, True)
+
+    # Three runs finding three different things: three items, none firm. On a document with real defects
+    # each of those is a different real defect, which is why they are reported rather than filtered.
+    found, firm = checks.pooled(Stub([first, elsewhere, about("One idea here and nothing else")]),
+                                text, None, 3)
+    check("every distinct item is kept", len(found), 3)
+    check("with none of them firm", firm, [])
+
+    # Not covered here, and stated rather than left implied: that the HOOK calls this rather than running
+    # a check once. With a deterministic check the two are identical, and distinguishing them needs a
+    # model-based check, which this suite must not make. Checked by hand instead — the hook on a 295-word
+    # file reported "[2 of 2 runs]" against a paragraph, which only pooling produces.
+
+    # A deterministic check says the same thing every time, so it is never asked twice.
+    class Cheap(Stub):
+        COSTS_A_CALL = False
+    cheap = Cheap([first, first])
+    found, firm = checks.pooled(cheap, text, None, 3)
+    check("a deterministic check runs once", len(cheap.replies), 1)
+    check("and is firm on its own", len(firm), 1)
+
+
+def test_how_many_passes_comes_from_the_length():
+    """Nobody should have to pass a flag to make a long document get the same bar as a short one.
+
+    One item for 100 words and one for 1,000 holds the long one to a lower bar. The number of runs scales
+    with length, in one place, so the hook and a deliberate run cannot drift apart — and never fewer than
+    two, because one run cannot tell a reliable finding from a near-tie.
+    """
+    import checks
+    # Measured: three pooled runs of a 295-word document found six items where one pass found two, so
+    # a document that size wants three or four, not two.
+    for words, expected in ((30, 2), (140, 2), (300, 4), (450, 5), (2000, 5)):
+        check(f"{words} words", checks.passes_for(" ".join(["word"] * words)), expected)
+    check("never fewer than two", checks.passes_for(""), checks.FEWEST_PASSES)
+    check("and bounded, because a long document is not a licence to spend",
+          checks.passes_for(" ".join(["word"] * 100000)), checks.MOST_PASSES)
+
+
+def test_an_abbreviation_can_mean_two_things():
+    """A count of authors cannot tell Linux Foundation from line feed, and both are LF.
+
+    The scan already found "Long Form (SF)" pairs and threw them away, so an audience knew only that five
+    people had written LF. It records what each term was written out as now, and by how many people, which
+    is the only way two meanings become visible.
+
+    Deterministic and narrow. Which sense a message means, where it never says, is not decidable here and
+    is not guessed at — what the check can say is that this audience uses the abbreviation for two things.
+    """
+    import audiences
+    from checks import terms
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "team", matches={"paths": ["*"]}, inherits=["engineers"],
+                       members=["a", "b", "c", "d"], vocabulary={"LF": 5, "ADC": 6, "BSP": 9},
+                       expansions={"LF": {"Linux Foundation": 3, "line feed": 2},
+                                   "ADC": {"application default credential": 6}})
+        A, _ = fresh(home)
+        resolved = A.resolve({"path": "x.md"})
+        check("both senses are on the audience", len(resolved.meanings("LF")), 2)
+        check("and a term with one sense has one", len(resolved.meanings("ADC")), 1)
+
+        class Ctx:
+            audience = resolved
+
+        def said(text):
+            got = terms.run(text, Ctx())
+            return got.message if got else ""
+
+        # Used with no expansion, and the audience uses it for two things: the reader cannot pick.
+        message = said("The LF review is blocked until the BSP job finishes running again today.")
+        check("an overloaded term is called out", "more than one thing" in message, True)
+        check("naming both senses and their counts",
+              "Linux Foundation (3)" in message and "line feed (2)" in message, True)
+
+        # Expanded in the message, so the reader can tell. Nothing to say, whatever the audience does.
+        check("saying which sense silences it",
+              said("The Linux Foundation (LF) has not replied and the BSP job is blocked."), "")
+
+        # Expanded against the sense this audience records: two terms wearing one abbreviation.
+        message = said("An air data computer (ADC) reading was wrong again here this morning.")
+        check("a different expansion is reported", "air data computer" in message, True)
+        check("against the one on record", "application default credential" in message, True)
+        check("and expanding it as recorded says nothing",
+              said("The application default credential (ADC) expired and the BSP job stalled."), "")
 
 
 def test_rule_installer():

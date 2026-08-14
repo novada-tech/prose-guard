@@ -32,7 +32,7 @@ import audiences  # noqa: E402
 import paths  # noqa: E402
 import destinations  # noqa: E402
 import checks as checks_module  # noqa: E402
-from checks import BLOCK, EFFORT, IN_ORDER as CHECKS  # noqa: E402
+from checks import BLOCK, EFFORT, IN_ORDER as CHECKS, pooled  # noqa: E402
 
 MAX_PER_CHECK = 2      # one complaint, then one more if the fix did not land
 MAX_DENIALS = 6        # a ceiling across all of them, so one message cannot eat a session
@@ -125,21 +125,42 @@ def save_state(path, state):
         pass
 
 
-def emit(decision, message, hint=""):
+def emit(decision, message, hint="", for_user=""):
+    """`additionalContext` reaches the model and not the person; `systemMessage` reaches the person and
+    not the model — verified against the hooks reference. A finding is for whoever is writing, so it goes
+    to the model. A decision about what this tool should check in future is the person's, so it goes to
+    both: they see it, and the model knows enough to offer to do it."""
     out = {"hookEventName": "PreToolUse"}
+    if for_user:
+        out["systemMessage"] = for_user
     if decision == BLOCK:
         out["permissionDecision"] = "deny"
         # The hint goes after the instruction, not inside it: "then send again" is what to do, and
         # anything appended before it reads as part of the complaint.
         out["permissionDecisionReason"] = ("Hold this message. " + message + ", then send again."
                                           + hint)
-    else:
+    elif message:
         out["additionalContext"] = message
     print(json.dumps({"hookSpecificOutput": out}))
 
 
 def main():
     if not CHECKS:
+        # A level set to something that is not a level reads exactly like being switched off. Say so once
+        # a session, where the person can see it, because the setting is theirs.
+        from checks import config as _config
+        wrong = _config.misspelt()
+        if wrong:
+            try:
+                payload = json.load(sys.stdin)
+            except Exception:
+                payload = {}
+            path, state = load_state(str(payload.get("session_id") or "no-session"))
+            if not state.get("told_misspelt"):
+                state["told_misspelt"] = True
+                save_state(path, state)
+                emit("advise", "", for_user=f"prose-guard is doing nothing: {wrong}.")
+                return
         allow()                              # disabled, or nothing configured
     try:
         payload = json.load(sys.stdin)
@@ -173,7 +194,7 @@ def main():
         # It speaks up at most once per shape, ever — see destinations.record_candidate.
         note = destinations.record_candidate(tool, tool_input)
         if note:
-            emit("advise", note)
+            emit("advise", note, for_user=note)
             return
         allow()
     text = destinations.extract(dest, tool, tool_input, cwd)
@@ -233,13 +254,20 @@ def main():
         if check.COSTS_A_CALL:
             state["calls"] += 1
         try:
-            finding = check.run(text, ctx)
+            # The same pooling a deliberate run uses, so both apply one bar: passes scale with the
+            # length of the text, and an item more than one run pointed at is what can be blocked on.
+            found, firm = pooled(check, text, ctx)
         except Exception:
-            finding = None                   # a broken check is a silent check, never a blocker
+            found, firm = [], []             # a broken check is a silent check, never a blocker
         state["passed"][check.NAME] = digest
         save_state(path, state)
-        if finding is None:
+        if not found:
             continue
+        # One message carrying everything this check found, so a caller pays one turn to fix several
+        # things rather than one turn each.
+        finding = found[0]._replace(
+            message="\n".join(f.message for f in found),
+            severity=BLOCK if any(f.severity == BLOCK for f in firm) else "advise")
         # A destination can refuse to block at all. Blocking is justified by the text being about to
         # reach a reader unreviewed; where it is not — a draft that lands in your own compose box —
         # the finding is worth saying and not worth a turn spent arguing.
