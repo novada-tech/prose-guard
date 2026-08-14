@@ -1665,6 +1665,25 @@ def test_how_hard_a_check_works_follows_the_text():
     check("and pays for one call", quiet.asked, 1)
 
 
+def test_an_audience_without_expansions_says_it_needs_a_rescan():
+    """No compatibility shim, because there is no user base to be compatible with.
+
+    A file measured before expansions existed records none, and treating that as "no ambiguity anywhere"
+    is wrong in the one direction that matters: it reports an overloaded abbreviation as safe. So the
+    absence is marked rather than defaulted.
+    """
+    import audiences
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "old", matches={"paths": ["*"]}, vocabulary={"LF": 9})
+        A, _ = fresh(home)
+        check("an audience with no expansions key is stale", A.ALL["old"].stale, True)
+        check("and has no meanings to offer", A.resolve({"path": "x.md"}).meanings("LF"), {})
+        # An empty expansions block is a measured answer — this corpus wrote nothing out — and is not stale.
+        write_audience(home, "old", matches={"paths": ["*"]}, vocabulary={"LF": 9}, expansions={})
+        A, _ = fresh(home)
+        check("an empty one is a measurement, not an absence", A.ALL["old"].stale, False)
+
+
 def test_an_abbreviation_can_mean_two_things():
     """A count of authors cannot tell Linux Foundation from line feed, and both are LF.
 
@@ -1684,6 +1703,7 @@ def test_an_abbreviation_can_mean_two_things():
                                    "ADC": {"application default credential": 6}})
         A, _ = fresh(home)
         resolved = A.resolve({"path": "x.md"})
+        check("an audience with expansions is not stale", A.ALL["team"].stale, False)
         check("both senses are on the audience", len(resolved.meanings("LF")), 2)
         check("and a term with one sense has one", len(resolved.meanings("ADC")), 1)
 

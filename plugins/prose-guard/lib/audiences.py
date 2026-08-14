@@ -71,6 +71,12 @@ class Audience:
         self.vocabulary = {str(k).upper(): int(v) for k, v in (data.get("vocabulary") or {}).items()}
         # {TERM: {"Long Form": how many people wrote it out that way}}. Two entries for one term means
         # this audience uses that abbreviation for two different things.
+        #
+        # Required, not optional. A file without it was measured before expansions existed, and treating
+        # that as "no ambiguity anywhere" is wrong in the one direction that matters: it reports an
+        # overloaded abbreviation as safe. There is no compatibility shim, because there is no user base
+        # to be compatible with — the audience is marked as needing a rescan and says so.
+        self.stale = "expansions" not in data
         self.expansions = {str(k).upper(): dict(v)
                            for k, v in (data.get("expansions") or {}).items()}
         self.inherits = list(data.get("inherits") or [])
@@ -463,7 +469,8 @@ def _cli():
             known = len(aud.known(BASELINES))
             where = ", ".join(f"{k}={len(v)}" for k, v in aud.matches_on.items()) or "inherit only"
             print(f"{name:24s} {kind:9s} {aud.origin:9s} {known:4d} terms  "
-                  f"{len(aud.members):3d} people  {where}")
+                  f"{len(aud.members):3d} people  {where}"
+                  + ("   [rescan: no expansions recorded]" if aud.stale and aud.matches_on else ""))
         print(f"\nyours:  {user_dir()}")
         for directory in paths.shared():
             print(f"shared: {directory}")
@@ -513,6 +520,15 @@ def _cli():
     print(f"people     {len(aud.members)}: {', '.join(aud.members[:12])}"
           f"{' …' if len(aud.members) > 12 else ''}")
     print(f"assumes    {json.dumps(aud.assumptions)}")
+    if aud.expansions:
+        for term, seen in sorted(aud.expansions.items()):
+            if len(seen) > 1:
+                print(f"ambiguous  {term}: " + ", ".join(f"{long} ({n})"
+                                                         for long, n in sorted(seen.items(),
+                                                                               key=lambda kv: -kv[1])))
+    elif aud.stale and aud.matches_on:
+        print("rescan     this file records no expansions, so an abbreviation used here for two things "
+              "cannot be told apart. Re-run /prose-guard:audiences to measure them.")
     known = sorted(t for t, n in aud.vocabulary.items() if n >= MIN_AUTHORS)
     below = sorted(t for t, n in aud.vocabulary.items() if n < MIN_AUTHORS)
     print(f"knows      {len(known)} measured + {len(aud.known(BASELINES)) - len(known)} inherited")
