@@ -257,8 +257,11 @@ no finding raised twice — `reference` objected on every run and to a different
 time. Past the substantive problems, the checks generate nits, and chasing nits is work with no end. With
 confirmation, four runs of that same document reported nothing to act on.
 
-Unconfirmed findings are still printed, under a heading that says not to chase them. `--unconfirmed`
-turns the filter off and costs less.
+Unconfirmed findings are still printed, marked `consider` rather than `must fix`, because a finding
+only one run raised is either a real defect that run happened to reach first or a near-tie between two
+candidates — and which of those it is cannot be told from the finding. Nothing is filtered away, so
+there is no filter to turn off: what confirmation decides is whether a message can be held back, not
+whether you get to read the finding.
 
 Confirmation filters the symptom. The cause is that two runs choose differently between near-equal
 candidates, and the checks that point at a span now say to quote the earliest failing one rather than the

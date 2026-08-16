@@ -77,9 +77,16 @@ def status():
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--install", action="store_true")
-    ap.add_argument("--remove", action="store_true")
+    ap = argparse.ArgumentParser(
+        description="Install, remove or compare the writing rule this plugin ships. The rule is a "
+                    "copy rather than a link, because a plugin cannot ship one — so an upgrade does "
+                    "not refresh it, and --status is how you find out.")
+    ap.add_argument("--status", action="store_true",
+                    help="what is installed and whether it still matches the plugin's copy "
+                         "(the default when no other flag is given)")
+    ap.add_argument("--install", action="store_true",
+                    help="copy the rule into your rules directory, where every session loads it")
+    ap.add_argument("--remove", action="store_true", help="delete the installed copy")
     ap.add_argument("--force", action="store_true", help="overwrite a file you changed")
     a = ap.parse_args()
     state, message = status()

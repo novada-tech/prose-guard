@@ -54,6 +54,18 @@ def sources():
     return sorted(found)
 
 
+def every_script():
+    """Every file in this repository that has a command line."""
+    out = []
+    for directory in (os.path.join(PLUGIN, "lib"), os.path.join(PLUGIN, "lib", "checks"),
+                      os.path.join(REPO, "measure")):
+        for name in sorted(os.listdir(directory) if os.path.isdir(directory) else []):
+            path = os.path.join(directory, name)
+            if name.endswith(".py") and "argparse" in open(path, errors="replace").read():
+                out.append(path)
+    return out
+
+
 def undocumented():
     """Every command-line entry point that no documented command runs, down to the subcommand.
 
@@ -116,6 +128,47 @@ def helptext(*argv):
     return _help[argv]
 
 
+# A flag written in a sentence rather than in a command. `--status` was described in three places, in
+# prose, for a script that has never had it — and this test passed, because it only ever read the
+# flags inside a `python3 ...` line. A reader does not distinguish the two: both say the flag exists.
+IN_PROSE = re.compile(r"`(--[a-z][a-z-]+)`")
+# Flags of other people's tools, named in passing. This test knows nothing about them, and guessing
+# would turn a documentation check into a list of exceptions that grows for ever.
+NOT_OURS = ("--body", "--body-file", "--title", "--amend", "--format", "--pretty", "--output",
+            "--message", "--no-verify", "--ext-diff", "--textconv", "--upload-pack", "--header",
+            "--setting-sources", "--output-format", "--system-prompt", "--model", "--help",
+            "--no-pager", "--max-count", "--notes", "--notes-file", "--description", "--file")
+
+
+def ours():
+    """Every flag any script in this repository accepts, subcommands included."""
+    found = set()
+    for script in every_script():
+        found.update(FLAG.findall(helptext(script)))
+        for group in SUBCOMMANDS.findall(helptext(script)):
+            for sub in group.split(","):
+                found.update(FLAG.findall(helptext(script, sub)))
+    return found
+
+
+def mentioned_in_prose():
+    """A `--flag` a document names in a sentence must exist somewhere in this tool.
+
+    Existence, not the file it is named in: CONTRIBUTING.md explains a past bug by naming a flag of a
+    script it never runs, and that is honest prose rather than a mistake. What is not honest is a flag
+    that exists nowhere at all — `--status` was described in three places, in prose, for a script that
+    has never had it, and this test passed because it only read flags inside a `python3 ...` line. A
+    reader does not distinguish the two: both say the flag exists.
+    """
+    real = ours()
+    out = []
+    for doc in sources():
+        for flag in sorted(set(IN_PROSE.findall(open(doc).read()))):
+            if flag not in NOT_OURS and flag not in real:
+                out.append(f"{label(doc)}: describes {flag}, which no script in this repository has")
+    return out
+
+
 def main():
     seen = 0
     for doc in sources():
@@ -153,6 +206,7 @@ def main():
                     FAILS.append(f"{name}: {where} does not accept {flag}  (it accepts: "
                                  f"{', '.join(sorted(set(FLAG.findall(usage))))})")
 
+    FAILS.extend(mentioned_in_prose())
     if seen == 0:
         FAILS.append("found no commands in any documentation — this test would pass vacuously")
     FAILS.extend(undocumented())
