@@ -26,11 +26,26 @@ covers the same team twice.
 
 ## One term is wrong
 
-Reach for this before anything else. It applies immediately and needs no re-measuring.
+Reach for these before anything else. Both apply immediately and need no re-measuring.
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" accept <audience> <TERM>
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" reject <TERM>
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" unreject <TERM>
 ```
+
+`accept` says one audience knows a term the count did not reach. `reject` is the opposite and applies
+everywhere, including the shipped baselines: nobody is assumed to know it, whichever audience is in
+scope, and `unreject` puts it back.
+
+They are not mirror images, and the difference is which mistake they fix. A term wrongly UNKNOWN is
+loud — somebody is asked to explain a word everyone here uses, and they will tell you. A term wrongly
+KNOWN is silent: the message goes out carrying a word the reader does not have, and nothing is said.
+So `reject` is the one worth offering when somebody says "I don't know what that means" about a term
+the tool let through, and it is worth asking whether they mean it for this audience or in general.
+
+`HMR` is the case that produced the command. It shipped in the `engineers` baseline, which claims
+general industry vocabulary, and the engineer who found it in review had never met it.
 
 ## Delete
 

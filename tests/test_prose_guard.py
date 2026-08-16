@@ -1883,10 +1883,17 @@ def test_a_destination_can_cap_effort_and_severity():
     about text you were about to read anyway.
     """
     import checks
+    import settings
     check("a cap below the level applies", checks.capped("high", "low"), "low")
     check("a cap above it does not", checks.capped("low", "high"), "low")
     check("no cap changes nothing", checks.capped("high", None), "high")
     check("a nonsense cap changes nothing", checks.capped("high", "sideways"), "high")
+    # Leaving an unrecognised cap alone is the right answer for "sideways" and the wrong one for a level
+    # somebody has just added. `capped` kept its own copy of the levels, so a level added to settings and
+    # not to that copy would leave every destination naming it running at full effort, with nothing said.
+    # Asserted over every level a destination may be configured with, so adding one cannot skip this.
+    check("and every level a destination may name is one it can be capped to",
+          [c for c in settings.LEVELS if checks.capped("high", c) != c], [])
 
     with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as repo:
         write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"],
@@ -2032,6 +2039,7 @@ def test_a_check_runs_more_than_once_and_the_runs_are_pooled():
     condition. What varies between runs is which item, so runs are the only way to widen coverage.
     """
     import checks
+    from checks import placing
     text = ("One idea here and nothing else. A second sentence about the resolver and what it does. "
             "A third one entirely, which is also here.")
 
@@ -2043,19 +2051,19 @@ def test_a_check_runs_more_than_once_and_the_runs_are_pooled():
     elsewhere = about("A third one entirely")
 
     check("a finding is placed by the sentence it quotes, not by its wording",
-          checks._points_at(text, first), checks._points_at(text, reworded))
+          placing.points_at(text, first), placing.points_at(text, reworded))
     check("two sentences are two places",
-          checks._points_at(text, first) == checks._points_at(text, elsewhere), False)
+          placing.points_at(text, first) == placing.points_at(text, elsewhere), False)
     check("and a finding quoting nothing in the text points nowhere",
-          checks._points_at(text, checks.Finding("advise", "no quotation at all")), None)
+          placing.points_at(text, checks.Finding("advise", "no quotation at all")), None)
     # Nowhere is not a place two findings can share. `-1` was returned here and then used as a dict key,
     # so every finding that quoted nothing findable landed on one key and confirmed the others.
     nothing, other = (checks.Finding("advise", "no quotation at all"),
                       checks.Finding("advise", "a different complaint, also unquoted"))
     check("two unplaceable findings are two items",
-          checks._identity(text, nothing) == checks._identity(text, other), False)
+          placing.identity(text, nothing) == placing.identity(text, other), False)
     check("but one unplaceable finding is itself",
-          checks._identity(text, nothing), checks._identity(text, nothing))
+          placing.identity(text, nothing), placing.identity(text, nothing))
 
     class Stub:
         NAME = "stub"
@@ -2248,6 +2256,7 @@ def test_an_edit_is_judged_inside_its_document():
     import command as C
     import destinations as D
     import discover as V
+    from checks import placing
     with tempfile.TemporaryDirectory() as repo:
         subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True, timeout=60)
         path = os.path.join(repo, "names.txt")
@@ -2268,7 +2277,7 @@ def test_an_edit_is_judged_inside_its_document():
 
         whole, part = D.resulting(dest, "Edit", edit, repo)
         mine = checks.wrote_which(whole, part)
-        total = len(checks.SENTENCE_END.split(" ".join(whole.split())))
+        total = len(placing.SENTENCE_END.split(" ".join(whole.split())))
         check("the sentences this edit wrote are located", mine, {total - 1})
         check("and are not the whole document", len(mine) < total, True)
 
@@ -4036,6 +4045,59 @@ def test_a_long_document_gets_more_calls_than_a_short_message():
           [w for w in (200, 1200, 5000) if runs_each(w) > ceiling_for("word " * w)], [])
     check("and the whole thing is still bounded",
           guard.budget_for("word " * 100000, 6) <= guard.MOST_CALLS, True)
+
+
+def test_a_term_can_be_taken_out_of_a_vocabulary_as_well_as_put_in():
+    """`accept` widened a vocabulary and nothing narrowed one, and narrowing is the direction that
+    catches the silent failure.
+
+    A term wrongly known means a message goes out carrying a word the reader does not have, and it goes
+    out with nothing said — which is the failure this whole tool exists to prevent. `accept` refuses to
+    touch a shipped baseline at all, so the only correction was to write a whole file of the same name
+    and throw away the other 225 terms.
+
+    `HMR` is the case that prompted it: shipped in the `engineers` baseline, which claims general
+    industry vocabulary, and unknown to the senior engineer who found it in review.
+    """
+    import importlib
+
+    import audiences
+    import paths
+
+    with tempfile.TemporaryDirectory() as home:
+        was = os.environ.get("PROSE_GUARD_HOME")
+        os.environ["PROSE_GUARD_HOME"] = home
+        try:
+            importlib.reload(paths)
+            importlib.reload(audiences)
+            baseline = audiences.Resolved([], "engineers")
+            check("a baseline term starts known", baseline.is_known("HTML"), True)
+
+            check("rejecting one is recorded", audiences.reject("HTML") is not None, True)
+            importlib.reload(audiences)
+            check("and it is then unknown even on a shipped baseline",
+                  audiences.Resolved([], "engineers").is_known("HTML"), False)
+            check("while everything else is untouched",
+                  audiences.Resolved([], "engineers").is_known("JSON"), True)
+
+            check("rejecting it twice changes nothing", audiences.reject("HTML"), None)
+            check("and it can be undone", audiences.unreject("HTML") is not None, True)
+            importlib.reload(audiences)
+            check("after which it is known again",
+                  audiences.Resolved([], "engineers").is_known("HTML"), True)
+        finally:
+            if was is None:
+                os.environ.pop("PROSE_GUARD_HOME", None)
+            else:
+                os.environ["PROSE_GUARD_HOME"] = was
+            importlib.reload(paths)
+            importlib.reload(audiences)
+
+    # And the two terms that failed the baseline's own stated bar are gone from it. The bar is in the
+    # file: "general industry vocabulary but not your product's or your infrastructure's".
+    shipped = audiences.Resolved([], "engineers")
+    check("one ecosystem's vocabulary is not general industry vocabulary",
+          [t for t in ("HMR", "SSR") if shipped.is_known(t)], [])
 
 
 def teardown_function(_fn):

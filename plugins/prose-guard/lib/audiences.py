@@ -236,7 +236,7 @@ class Resolved:
         return out
 
     def is_known(self, term):
-        return term.upper() in self.known
+        return term.upper() in self.known and term.upper() not in never_known()
 
     def describe(self):
         """The prose the model-based checks are given. Only ever descriptive."""
@@ -336,6 +336,40 @@ def remove(name):
             f"everybody, remove it from that repository and say why.")
     os.remove(a.path)
     return a.path
+
+
+def never_known():
+    """Terms this machine says nobody should be assumed to know, whichever audience is in scope.
+
+    The escape hatch for a vocabulary that is wrong in the direction nothing else can correct. `accept`
+    widens a vocabulary and refuses to touch a shipped baseline at all, and replacing a baseline means
+    writing a whole file of the same name — heavy for one wrong term, and it throws away the other 226.
+
+    Widening is the safe direction: a term wrongly known means a message goes out with a word the reader
+    does not have, and it goes out silently, which is the failure this tool exists to prevent. So the
+    narrowing operation is the one that needed to exist, and it is one list rather than a per-audience
+    edit because a term nobody should assume is not a fact about one audience.
+
+    `HMR` is the case that prompted it: shipped in the `engineers` baseline, which claims general
+    industry vocabulary, and unknown to the senior engineer who found it.
+    """
+    return {str(t).upper() for t in (paths.config().get("not_known") or [])}
+
+
+def reject(term):
+    """Say that a term should never be assumed known. Returns where it was written."""
+    listed = [str(t).upper() for t in (paths.config().get("not_known") or [])]
+    if term.upper() in listed:
+        return None                           # already rejected: say so rather than claim a change
+    return paths.update_config(not_known=sorted(listed + [term.upper()]))
+
+
+def unreject(term):
+    """Undo `reject`. Returns where it was written, or None when it was not rejected."""
+    listed = [str(t).upper() for t in (paths.config().get("not_known") or [])]
+    if term.upper() not in listed:
+        return None
+    return paths.update_config(not_known=[t for t in listed if t != term.upper()])
 
 
 def accept(name, term):
@@ -474,6 +508,10 @@ def _cli():
     p = sub.add_parser("accept", help="mark one term known for one audience")
     p.add_argument("name")
     p.add_argument("term")
+    p = sub.add_parser("reject", help="never assume a term is known, whichever audience applies")
+    p.add_argument("term")
+    p = sub.add_parser("unreject", help="undo `reject` for one term")
+    p.add_argument("term")
     p = sub.add_parser("share", help="copy one audience into a directory your team keeps")
     p.add_argument("name")
     p.add_argument("--to", required=True, metavar="DIR",
@@ -584,6 +622,18 @@ def _cli():
             raise SystemExit(f"no audience called {a.name!r}. Try: list")
         except PermissionError as exc:
             raise SystemExit(str(exc))
+        return
+
+    if a.cmd in ("reject", "unreject"):
+        where = (reject if a.cmd == "reject" else unreject)(a.term)
+        if where is None:
+            print(f"{a.term.upper()} was already "
+                  + ("rejected" if a.cmd == "reject" else "not rejected") + "; nothing to change")
+        else:
+            print(f"updated {where}")
+            if a.cmd == "reject":
+                print(f"  {a.term.upper()} will be reported as unexplained for every audience, "
+                      f"including the shipped baselines")
         return
 
     if a.cmd == "accept":

@@ -108,7 +108,9 @@ CONTEXTS = ("low", "medium", "high")
 
 CONFIG = {"effort": one_of(*LEVELS),
           "shared": each(text),
-          "unresolved_audience": text}
+          "unresolved_audience": text,
+          # Terms never assumed known, whichever audience applies. See audiences.never_known.
+          "not_known": each(text)}
 
 # A destination: which tool calls carry prose to which readers, and how hard to look. `max_effort` and
 # `max_severity` are the two that exist to make the guard LESS aggressive, which is why a typo in
