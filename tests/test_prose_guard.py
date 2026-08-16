@@ -117,6 +117,31 @@ def fresh(home):
     return audiences, destinations
 
 
+def write_destinations(home, *entries):
+    """Put destinations in a temporary home, so a test declares what it needs.
+
+    The shipped set is three entries — the ones on every machine whose mapping a tool schema does not
+    show. Everything else is found at setup. Tests used to borrow Slack, Notion, Linear and `glab` from
+    that file as vehicles for testing something else, which meant they were testing the data as much as
+    the mechanism, and they broke the moment the data was trimmed. A test that needs two bash
+    destinations to prove they behave alike should say so.
+    """
+    with open(os.path.join(home, "destinations.json"), "w") as fh:
+        json.dump({"destinations": list(entries)}, fh)
+
+
+def chat_destination(name="our chat", tool="chat_send", **kw):
+    """A tool-shaped destination, the shape an MCP server would produce."""
+    return {"name": name, "tool": [tool], "text_fields": ["message", "text", "body"],
+            "identifiers": {"channel": "channel_id"}, **kw}
+
+
+def cli_destination(name="our cli", binary="ourcli", **kw):
+    """A command-shaped destination, the shape a vendor command-line tool would produce."""
+    return {"name": name, "bash": r"\b" + binary + r"\s+(post|note)\b",
+            "text_arg": ["--message", "--body-file"], **kw}
+
+
 def write_audience(home, name, **kw):
     d = os.path.join(home, "audiences")
     os.makedirs(d, exist_ok=True)
@@ -487,7 +512,15 @@ def test_severity():
 # ------------------------------------------------------------------ destinations
 def test_routing():
     with tempfile.TemporaryDirectory() as tmp:
-        _, D = fresh(os.path.join(tmp, "home"))
+        home = os.path.join(tmp, "home")
+        os.makedirs(home)
+        # The two tool-matched cases are declared here rather than borrowed. Nothing tool-shaped ships
+        # — an MCP server's tools are found at setup — and what these cases are about is the matching,
+        # not which vendor happens to be installed: a name reached through an MCP prefix, and a
+        # destination whose prose sits in a field the first one does not use.
+        write_destinations(home, chat_destination(),
+                           chat_destination(name="our tracker", tool="tracker_comment"))
+        _, D = fresh(home)
         long = ("Removed the exporter line because nothing on a laptop reads that variable, and it "
                 "broke terraform after an hour of shell uptime by shadowing the fallback "
                 "credential entirely.")
@@ -495,10 +528,9 @@ def test_routing():
         with open(bodyfile, "w") as fh:
             fh.write(long)
         cases = [
-            ("chat", "mcp__slack__slack_send_message", {"channel_id": "C1", "message": long},
-             "chat message"),
-            ("github comment", "mcp__github__add_issue_comment", {"body": long},
-             "code review or issue comment"),
+            ("chat", "mcp__ourchat__chat_send", {"channel_id": "C1", "message": long},
+             "our chat"),
+            ("tracker comment", "mcp__tracker__tracker_comment", {"body": long}, "our tracker"),
             ("commit -m", "Bash", {"command": f'git commit -m "{long}"'}, "commit message"),
             ("commit --message=", "Bash", {"command": f'git commit --message="{long}"'},
              "commit message"),
@@ -532,9 +564,9 @@ def test_routing():
         words = ("The exporter line went because nothing on a laptop reads that variable, and plans "
                  "had started failing in any shell older than an hour today, so access uses the "
                  "credential.").split()
-        chat = D.match("mcp__slack__slack_send_message", {"channel_id": "C1", "message": long})
+        chat = D.match("mcp__ourchat__chat_send", {"channel_id": "C1", "message": long})
         def sent(n):
-            return D.extract(chat, "mcp__slack__slack_send_message",
+            return D.extract(chat, "mcp__ourchat__chat_send",
                              {"channel_id": "C1", "message": " ".join(words[:n])})
         check("25 words is enough to be worth judging", bool(sent(25)), True)
         check("and 24 is not", sent(24), None)
@@ -987,6 +1019,10 @@ def test_prose_behind_a_substitution_still_reaches_the_checks():
                        capture_output=True, timeout=60)
         write_audience(home, "team", matches={"paths": ["*"]}, inherits=["engineers"],
                        members=["a", "b", "c", "d"])
+        # One shipped bash destination and one this test declares. Two shipped ones would show only
+        # that the shipped file is consistent with itself; a destination a user adds, going through
+        # the same two halves, is what says the behaviour is in the mechanism.
+        write_destinations(home, cli_destination())
         with open(os.path.join(home, "config.json"), "w") as fh:
             json.dump({"effort": "low"}, fh)
 
@@ -1002,12 +1038,12 @@ def test_prose_behind_a_substitution_still_reaches_the_checks():
         # Every bash destination, without any of them being named here: both halves read the
         # destination's own text_arg, so one added later behaves the same.
         for name, command in (("commit message", 'git commit -m "$(git log -1 --format=%B)"'),
-                              ("gitlab cli", 'glab mr note --message "$(git log -1 --format=%B)"')):
+                              ("our cli", 'ourcli note --message "$(git log -1 --format=%B)"')):
             verdict, said = ask(command, name[:6])
             check(f"{name}: a substitution is resolved too", "SFTR" in said, True)
 
         for name, command in (("commit message", 'git commit -m "${MSG}"'),
-                              ("gitlab cli", 'glab mr note --message "$(python3 render.py)"')):
+                              ("our cli", 'ourcli note --message "$(python3 render.py)"')):
             verdict, said = ask(command, "u" + name[:5])
             check(f"{name}: what cannot be resolved is held back", verdict, "deny")
             check(f"{name}: naming the destination", name in said, True)
@@ -1124,11 +1160,12 @@ def test_hook_end_to_end():
         home = os.path.join(tmp, "home")
         write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"],
                        vocabulary={"GKE": 9})
+        write_destinations(home, chat_destination())
         # REDIS, CIDR and OOM are in the shipped `engineers` baseline; GKE is not. So the same sentence
         # says two different things depending on whether a baseline is assumed at all.
         text = ("We moved the kubectl configuration onto GKE this week, and the REDIS pod hit an OOM "
                 "inside the old CIDR range." + PAD)
-        send = {"tool_name": "mcp__slack__slack_send_message", "session_id": "h1", "cwd": tmp,
+        send = {"tool_name": "mcp__ourchat__chat_send", "session_id": "h1", "cwd": tmp,
                 "tool_input": {"channel_id": "C1", "message": text}}
         check("a resolved audience that knows the term allows",
               run_guard(send, home, os.path.join(tmp, "s1"))[0], "allow")
@@ -1151,9 +1188,10 @@ def test_session_ledger_bounds_the_argument():
         home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
         write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"],
                        vocabulary={"KUBECTL": 9})
+        write_destinations(home, chat_destination())
         said = []
         for n in range(10):
-            payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": "ledger",
+            payload = {"tool_name": "mcp__ourchat__chat_send", "session_id": "ledger",
                        "cwd": tmp,
                        "tool_input": {"channel_id": "C1",
                                       "message": f"Draft {n} still talks about GKE." + PAD}}
@@ -1179,7 +1217,7 @@ def test_session_ledger_bounds_the_argument():
         # second attempt at the same draft is skipped entirely — so an edit made for a later check is
         # never re-verified against the earlier one, which is the whole reason a pass belongs to a text.
         again = os.path.join(tmp, "again")
-        same = {"tool_name": "mcp__slack__slack_send_message", "session_id": "resend", "cwd": tmp,
+        same = {"tool_name": "mcp__ourchat__chat_send", "session_id": "resend", "cwd": tmp,
                 "tool_input": {"channel_id": "C1", "message": "One draft about GKE." + PAD}}
         check("the same unfixed draft is refused twice, not waved through the second time",
               [run_guard(same, home, again)[0] for _ in range(2)], ["deny", "deny"])
@@ -1213,6 +1251,7 @@ def test_a_session_stops_paying_for_model_checks_once_its_budget_is_spent():
     with tempfile.TemporaryDirectory() as tmp:
         home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
         write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"])
+        write_destinations(home, chat_destination())
         os.makedirs(home, exist_ok=True)
         with open(os.path.join(home, "config.json"), "w") as fh:
             json.dump({"effort": "medium"}, fh)
@@ -1227,7 +1266,7 @@ def test_a_session_stops_paying_for_model_checks_once_its_budget_is_spent():
             with open(os.path.join(state, "sessions", session + ".json"), "w") as fh:
                 json.dump({"passed": {}, "denials": {}, "total_denials": 0, "calls": spent,
                            "advised": []}, fh)
-            payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": session,
+            payload = {"tool_name": "mcp__ourchat__chat_send", "session_id": session,
                        "cwd": tmp, "tool_input": {"channel_id": "C1", "message": clean}}
             out = hook_reply(payload, {**env(home, state, "medium"),
                                        "PATH": path_without_the_checker(tmp)})
@@ -1269,7 +1308,8 @@ def test_state_stays_out_of_the_plugin():
     with tempfile.TemporaryDirectory() as tmp:
         home = os.path.join(tmp, "home")
         write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"])
-        payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": "fb", "cwd": tmp,
+        write_destinations(home, chat_destination())
+        payload = {"tool_name": "mcp__ourchat__chat_send", "session_id": "fb", "cwd": tmp,
                    "tool_input": {"channel_id": "C1", "message": "GKE broke again." + PAD}}
         e = env(home, os.path.join(tmp, "state"))
         subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True, text=True,
@@ -1889,7 +1929,8 @@ def test_a_shared_audience_arrives_without_being_measured():
 def test_a_destination_can_cap_effort_and_severity():
     """Two different reasons to do less, and they are not the same knob.
 
-    Effort: measured across all eight destinations on the same 77 words of well-built prose, every one
+    Effort: measured across the eight destinations that shipped then, on the same 77 words of
+    well-built prose, every one
     costs about 15 seconds and 5 model calls — the cost is in the phases and the phases do not care
     where the text is going. So there is no such thing as an expensive destination. What varies is
     whether the questions apply: the phases ask whether this reader will care and whether the ask is
@@ -1915,6 +1956,13 @@ def test_a_destination_can_cap_effort_and_severity():
     with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as repo:
         write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"],
                        members=["a", "b", "c", "d"])
+        # The pair that makes the cap visible: the same text, the same audience, two destinations
+        # differing only in the cap. Declared here because the cap is the subject and a shipped entry
+        # carrying one is not — the send/draft pair the cap was written for is an MCP server's, found
+        # at setup.
+        write_destinations(home, chat_destination(),
+                           chat_destination(name="our draft", tool="chat_send_draft",
+                                            max_severity="advise"))
         with open(os.path.join(home, "config.json"), "w") as fh:
             json.dump({"effort": "low"}, fh)
         body = ("The SFTR job needs the JSON payload rebuilt before the API can serve it over HTTP "
@@ -1924,8 +1972,8 @@ def test_a_destination_can_cap_effort_and_severity():
             return verdict_on({"tool_name": tool, "session_id": tool[-8:], "cwd": repo,
                                "tool_input": {"channel_id": "C1", "message": body}}, home)
 
-        sent, said_sent = ask("mcp__slack__slack_send_message")
-        draft, said_draft = ask("mcp__slack__slack_send_message_draft")
+        sent, said_sent = ask("mcp__ourchat__chat_send")
+        draft, said_draft = ask("mcp__ourchat__chat_send_draft")
         check("a message about to be posted is held back", sent, "deny")
         check("the same text as a draft is not", draft, "advise")
         # The finding itself must be identical: the destination changes what is done about it, never
@@ -1936,7 +1984,7 @@ def test_a_destination_can_cap_effort_and_severity():
         # check runs again on the next call — but what has already been said about these exact words
         # survives that reset, because repeating it is a second interruption buying nothing.
         check("and the same draft is not argued about twice",
-              ask("mcp__slack__slack_send_message_draft")[0], "allowed")
+              ask("mcp__ourchat__chat_send_draft")[0], "allowed")
 
 
 def test_words_already_there_are_not_words_you_wrote():
@@ -2998,8 +3046,11 @@ def test_a_config_json_of_the_wrong_shape_is_no_configuration():
                                env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=120)
             check("share_dir.py says what is configured instead of raising", r.returncode, 0)
             check("and says none is", "no shared directories" in r.stdout, True)
-            # End to end, because two of these readers run at import time.
-            payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": "shape",
+            # End to end, because two of these readers run at import time. The destination is declared
+            # so the call is one the guard actually routes: unrouted, the hook returns before any of
+            # them is asked for a value, and "no traceback" is satisfied by nothing having happened.
+            write_destinations(home, chat_destination())
+            payload = {"tool_name": "mcp__ourchat__chat_send", "session_id": "shape",
                        "cwd": home,
                        "tool_input": {"channel_id": "C1", "message": "GKE broke again." + PAD}}
             r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
@@ -3372,7 +3423,7 @@ def test_a_team_can_retire_a_destination_as_well_as_add_one():
         # Sharing it is what gives the mechanism its team-wide form.
         with tempfile.TemporaryDirectory() as elsewhere:
             with open(os.path.join(home, "destinations.json"), "w") as fh:
-                json.dump({"off": ["gitlab cli"],
+                json.dump({"off": ["our cli"],
                            "destinations": [{"name": "our chat", "tool": ["ours_post"],
                                              "text_fields": ["message"]}]}, fh)
             _, D = fresh(home)
@@ -3381,7 +3432,7 @@ def test_a_team_can_retire_a_destination_as_well_as_add_one():
             check("what you switched off stays here unless you ask", landed.get("off"), None)
             D.share(elsewhere, with_off=True)
             landed = json.load(open(os.path.join(elsewhere, "destinations.json")))
-            check("and travels when you do", landed.get("off"), ["gitlab cli"])
+            check("and travels when you do", landed.get("off"), ["our cli"])
 
 
 def test_a_shared_audience_says_what_it_replaced():
@@ -3719,11 +3770,14 @@ def test_a_long_document_cannot_spend_the_whole_session_on_its_first_check():
         # has been reloading all along: a destination another test switched off, or a complaint another
         # test's deliberately broken config left behind, makes the hook return before any check runs —
         # and then every assertion below is about a check that was never asked.
-        fresh(os.path.join(tmp, "home"))
+        home = os.path.join(tmp, "home")
+        os.makedirs(home)
+        write_destinations(home, chat_destination())
+        fresh(home)
         stdin, for_effort = sys.stdin, checks_module.for_effort
         out = io.StringIO()
         sys.stdin = io.StringIO(json.dumps(
-            {"tool_name": "mcp__slack__slack_send_message", "session_id": "budget", "cwd": tmp,
+            {"tool_name": "mcp__ourchat__chat_send", "session_id": "budget", "cwd": tmp,
              "tool_input": {"channel_id": "C1", "message": text}}))
         try:
             checks_module.for_effort = lambda level=None: running
@@ -4286,16 +4340,20 @@ def test_only_the_command_itself_names_a_file_to_read():
 
 
 def test_a_destination_claims_only_its_own_tool():
-    """`slack_send_message` is a substring of `slack_send_message_draft`. The shipped file escaped that
-    only because the draft is listed first, so an ordinary chat destination in your own layer — read
-    before the shipped one — removed the draft's advise-only cap and started blocking drafts."""
+    """One send tool's name is a prefix of the same server's draft tool — `chat_send` and
+    `chat_send_draft` here, `slack_send_message` and `slack_send_message_draft` in the pair this was
+    found on. Matched as a substring, the plain send claims the draft as well, and the destination
+    listed first wins: an ordinary chat destination above the draft removed the draft's advise-only cap
+    and started blocking drafts."""
     import destinations as D
-    import discover as V
     was = D.DESTINATIONS
-    D.DESTINATIONS = [dict(name="mine", tool=["slack_send_message"], _origin="yours"), *was]
+    # The plain send first, which is the order that hides the bug, and the cap on the entry below it.
+    D.DESTINATIONS = [dict(chat_destination(name="mine"), _origin="yours"),
+                      dict(chat_destination(name="our draft", tool="chat_send_draft",
+                                            max_severity="advise"), _origin="yours")]
     try:
-        draft = D.match("slack_send_message_draft", {"text": "word " * 40})
-        prefixed = D.match("mcp__slack__slack_send_message_draft", {"text": "word " * 40})
+        draft = D.match("chat_send_draft", {"text": "word " * 40})
+        prefixed = D.match("mcp__ourchat__chat_send_draft", {"text": "word " * 40})
     finally:
         D.DESTINATIONS = was
     check("the draft is not claimed by the plain tool", draft["name"] != "mine", True)
