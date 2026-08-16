@@ -140,12 +140,14 @@ no way to tell whether the rewrite improved the message or merely satisfied the 
 kept so you can judge that:
 
 ```
-python3 lib/rounds.py list      # what was argued about, newest first
-python3 lib/rounds.py show 1    # one argument in full: every draft, what held it, what went out
-python3 lib/rounds.py forget    # delete all of it
+/prose-guard:feedback
 ```
 
-The tally line names the command when there is something to read, so you do not have to remember it.
+Ask for it in words — "why was that rewritten", "show me the drafts", "was that fair", "clear it". The
+tally line names the skill when there is something to read, so you do not have to remember anything.
+
+Underneath it is `lib/rounds.py`, with `list`, `show N` and `forget`, if you would rather read the
+drafts yourself than have them read back to you.
 
 **This is the only thing here that writes message text.** Passive discovery records the shape of a call
 and never its content, deliberately, and the rule that lets both be true is narrow: nothing is written
