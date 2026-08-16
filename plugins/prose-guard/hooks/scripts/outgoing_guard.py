@@ -19,12 +19,15 @@ honest — it names the exact terms — and leaves judgement with the model.
 
 Every failure path allows the call. A broken writing check must never block outbound work.
 """
+from __future__ import annotations
+
 import hashlib
 import json
 import os
 import re
 import shlex
 import sys
+from typing import Any, Callable, NoReturn, TYPE_CHECKING
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..", "..", "lib")))
@@ -38,6 +41,11 @@ import telling  # noqa: E402
 import checks as checks_module  # noqa: E402
 from checks import (BLOCK, EFFORT, IN_ORDER as CHECKS, Context, ceiling_for,  # noqa: E402
                     costs_a_call, pooled, written_here, wrote_which)
+
+if TYPE_CHECKING:
+    from audiences import Resolved
+    from checks import Check, Finding
+    from destinations import Dest
 
 MAX_PER_CHECK = 2      # one complaint, then one more if the fix did not land
 MAX_DENIALS = 6        # a ceiling across all of them, so one message cannot eat a session
@@ -56,7 +64,7 @@ MOST_CALLS = 90        # the absolute ceiling, so a runaway cannot happen
 MAX_UNREADABLE = 2     # times a session is asked to make its text visible before it is let through
 
 
-def context_for(dest, tool, tool_input, cwd):
+def context_for(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None) -> Context:
     """What the checks are told. Assembled once, read-only, and never inferred from the prose.
 
     The type is checks.Context, shared with check_prose.py. Two classes of the same name used to set
@@ -91,7 +99,7 @@ def context_for(dest, tool, tool_input, cwd):
 SKIP_VAR = "PROSE_GUARD_SKIP"
 
 
-def skipped(tool_input):
+def skipped(tool_input: dict[str, Any]) -> str | None:
     """The stated reason for skipping this one command, if there is one.
 
     Only where the shell would read it: an assignment before the command, at the front of the line or
@@ -125,22 +133,24 @@ def skipped(tool_input):
     return None
 
 
-def default_audience():
+def default_audience() -> str:
     return paths.config().get("unresolved_audience") or "engineers"
 
 
-def state_dir():
+def state_dir() -> str:
     """Per-session bookkeeping, beside everything else this tool remembers. Never inside the plugin:
     an earlier design fell back to the plugin directory and put one machine's denial count under
     version control."""
     return os.path.join(os.environ.get("PROSE_GUARD_STATE") or paths.home(), "sessions")
 
 
-def allow():
+# NoReturn, because callers below say `allow()` on its own line and carry on reading as though the
+# function had returned. It never does.
+def allow() -> NoReturn:
     sys.exit(0)
 
 
-def load_state(session):
+def load_state(session: str) -> tuple[str, dict[str, Any]]:
     path = os.path.join(state_dir(), session + ".json")
     # passed and denials describe the message being argued about and reset once it goes out.
     # total_denials is the session ledger and never resets, so the guard cannot keep blocking for a
@@ -158,7 +168,7 @@ def load_state(session):
     return path, state
 
 
-def save_state(path, state):
+def save_state(path: str, state: dict[str, Any]) -> None:
     try:
         os.makedirs(state_dir(), exist_ok=True)
         state["advised"] = state["advised"][-50:]
@@ -168,7 +178,7 @@ def save_state(path, state):
         pass
 
 
-def emit(decision, message, hint="", for_user=""):
+def emit(decision: str, message: str, hint: str = "", for_user: str = "") -> None:
     """`additionalContext` reaches the model and not the person; `systemMessage` reaches the person and
     not the model — verified against the hooks reference. A finding is for whoever is writing, so it goes
     to the model. A decision about what this tool should check in future is the person's, so it goes to
@@ -196,7 +206,7 @@ def emit(decision, message, hint="", for_user=""):
 MOST_TO_SAY = 3000
 
 
-def one_message(found, mine, budget):
+def one_message(found: list[Finding], mine: Callable[[Finding], bool], budget: int) -> str:
     """Everything worth saying about one check's findings, within what is left of the turn's budget.
 
     What this call wrote comes first, whatever order the runs found things in: those are the ones the
@@ -220,7 +230,8 @@ def one_message(found, mine, budget):
     return "\n".join(lines)
 
 
-def say(finding, check, state, path, digest, advice, keep=None):
+def say(finding: Finding, check: Check, state: dict[str, Any], path: str, digest: str,
+        advice: list[str], keep: Callable[[str, str], None] | None = None) -> bool:
     """Deny on this finding, or add it to the advice. True when the call was denied and we are done.
 
     Split out because an identical resend re-says what a check already decided, and doing that had to
@@ -257,7 +268,7 @@ def say(finding, check, state, path, digest, advice, keep=None):
     return False
 
 
-def reader(level, audience):
+def reader(level: str, audience: Resolved | None) -> str:
     """The opening of the line: which level ran, and who the message was judged for.
 
     Whether the audience matched is not a detail. One that did was measured from what those people have
@@ -272,7 +283,7 @@ def reader(level, audience):
     return f"prose-guard {level}, no audience for this — guessing against {guess}"
 
 
-def budget_for(text, paying):
+def budget_for(text: str, paying: int) -> int:
     """Model calls this message may cost, scaled the way the per-check ceiling is scaled.
 
     `ceiling_for` is what one check would spend on this text if it kept finding things; times the
@@ -282,7 +293,8 @@ def budget_for(text, paying):
 
 
 
-def tally(level, rewrites, notes, calls, audience=None):
+def tally(level: str, rewrites: int, notes: int, calls: int,
+          audience: Resolved | None = None) -> str:
     """The one line the person sees when a message has been checked.
 
     Written as counts rather than a verdict because the useful reading is comparative: three rewrites
@@ -308,7 +320,8 @@ def tally(level, rewrites, notes, calls, audience=None):
             + (". /prose-guard:feedback shows the drafts" if rewrites else "") + ".")
 
 
-def say_together(findings, checks, state, path, digest, advice, keep):
+def say_together(findings: list[Finding], checks: list[Check], state: dict[str, Any], path: str,
+                 digest: str, advice: list[str], keep: Callable[[str, str], None]) -> bool:
     """One interruption carrying what every free check found. True when the call was denied.
 
     Nothing when there is nothing: the caller does not have to check first. The denial is counted
@@ -331,7 +344,7 @@ def say_together(findings, checks, state, path, digest, advice, keep):
     return denied
 
 
-def main():
+def main() -> None:
     try:
         payload = json.load(sys.stdin)
     except Exception:
@@ -423,7 +436,7 @@ def main():
     # below, where a check has actually held something back. See lib/rounds.py.
     session = str(payload.get("session_id") or "no-session")
 
-    def envelope():
+    def envelope() -> dict[str, Any]:
         """Everything the checks were told before they read a word.
 
         Recorded because "why did it say that" is almost never answered by the finding. It is answered
@@ -442,7 +455,7 @@ def main():
                 "checks": [c.NAME for c in running],
                 "edit_of": len(ctx.mine) if ctx.mine else None}
 
-    def keep(name, said):
+    def keep(name: str, said: str) -> None:
         rounds.held(session, envelope(), text, name, said)
 
     # Walk the checks in order, skipping the ones this exact text already satisfied. A pass belongs
@@ -453,14 +466,15 @@ def main():
     # Order is editorial, outermost decision first, so no later check creates work for an earlier
     # one. Bounded three ways so two checks that genuinely disagree make a message expensive and
     # then let it go, rather than hanging the turn.
-    advice = []
+    advice: list[str] = []
     # Findings from the checks that cost nothing, held until all of them have run. Stopping at the
     # first objection is right when the next one costs a model call — and it is what keeps two blocking
     # checks from pulling a message apart, which `docs/design-notes.md` records producing no message at
     # all. Neither reason applies to `terms` and `mechanics`: both are free, both are absolute, and both
     # ask for a one-word fix. Being sent back for a doubled word and then again for an unexplained
     # acronym is one turn wasted, and a held turn is the most expensive thing this tool does.
-    free_findings, free_checks = [], []
+    free_findings: list[Finding] = []
+    free_checks: list[Check] = []
     # What this message may spend, from its own length. See budget_for.
     budget = budget_for(text, sum(1 for c in running if costs_a_call(c)))
     unpaid = [c for c in running if costs_a_call(c)
@@ -506,7 +520,7 @@ def main():
         # things rather than one turn each.
         # Block only on what this call wrote. A complaint about a paragraph the edit never touched is
         # worth saying and is not grounds for refusing the edit.
-        def mine(f):
+        def mine(f: Finding) -> bool:
             return written_here(text, f, ctx.mine)
         blocking = [f for f in firm if f.severity == BLOCK and mine(f)]
         finding = found[0]._replace(
