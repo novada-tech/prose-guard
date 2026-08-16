@@ -72,24 +72,31 @@ def _clip(text):
     return text if len(text) <= LONGEST else text[:LONGEST] + "\n[...truncated]"
 
 
-def held(session, destination, level, text, check, said):
-    """Record a draft that was refused, and why. The first call opens an argument."""
+def held(session, envelope, text, check, said):
+    """Record a draft that was refused, and why. The first call opens an argument.
+
+    `envelope` is everything the checks were told before they read a word — see `envelope()` in the
+    hook. It is kept because "why did it say that" is almost never answered by the finding: it is
+    answered by which audience applied, what the destination said the moment was, and which level
+    actually ran after the destination capped it.
+    """
     path = _path(session)
     data = _read(path)
     if not data.get("open"):
-        data["open"] = {"started": time.time(), "destination": destination, "level": level,
-                        "drafts": []}
+        data["open"] = {"started": time.time(), "drafts": [], **envelope}
     data["open"]["drafts"].append({"text": _clip(text), "held_by": check, "said": said})
     _write(path, data)
 
 
-def went_out(session, text):
+def went_out(session, text, spent=None):
     """Close the open argument with the text that finally went out. No argument, nothing written."""
     path = _path(session)
     data = _read(path)
     argument = data.pop("open", None)
     if not argument:
         return None                          # nothing was held back, so there is nothing to look at
+    if spent is not None:
+        argument["model_calls"] = spent
     argument["sent"] = _clip(text)
     argument["ended"] = time.time()
     data.setdefault("arguments", []).append(argument)
@@ -155,6 +162,24 @@ def _differs(before, after):
     return ""
 
 
+def _envelope_lines(argument):
+    """The envelope as label/value pairs, in the order somebody debugging reads them."""
+    out = [("effort", argument.get("level", "?"))]
+    if argument.get("asked_for") and argument["asked_for"] != argument.get("level"):
+        out.append(("capped from", f"{argument['asked_for']} — this destination is worth less"))
+    out.append(("judged for", argument.get("audience") or "?"))
+    if argument.get("guessing"):
+        out.append(("", "no audience matched, so nothing could be held back on terms"))
+    for key, value in (argument.get("situation") or {}).items():
+        out.append((key, value))
+    out.append(("checks that ran", ", ".join(argument.get("checks") or []) or "?"))
+    if argument.get("model_calls") is not None:
+        out.append(("model calls", argument["model_calls"]))
+    if argument.get("edit_of"):
+        out.append(("this call wrote", f"{argument['edit_of']} sentence(s) of a longer document"))
+    return out
+
+
 def _cli():
     ap = argparse.ArgumentParser(
         description="Read back an argument the guard had with an agent: every draft it held, what it "
@@ -184,8 +209,15 @@ def _cli():
         if not 1 <= a.which <= len(kept):
             raise SystemExit(f"there is no argument {a.which}. There are {len(kept)}.")
         argument = kept[a.which - 1]
-        print(f"{argument['destination']}, {_when(argument.get('started'))}, "
-              f"effort {argument.get('level', '?')}, {len(argument['drafts'])} rewrite(s)\n")
+        print(f"{argument.get('destination', '?')}, {_when(argument.get('started'))}, "
+              f"{len(argument['drafts'])} rewrite(s)\n")
+        # The envelope first, because "why did it say that" is nearly always answered here rather than
+        # in the finding: a level the destination capped, an audience that never matched, a situation
+        # line that told the checks something the reader would not recognise.
+        print("--- what the checks were told " + "-" * 40)
+        for label, value in _envelope_lines(argument):
+            print(f"  {label:22s} {value}")
+        print()
         for n, draft in enumerate(argument["drafts"], 1):
             print(f"--- draft {n} " + "-" * 58)
             print(draft["text"])

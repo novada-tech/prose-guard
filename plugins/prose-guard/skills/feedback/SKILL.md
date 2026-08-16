@@ -23,7 +23,22 @@ Then the one they mean:
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/rounds.py" show 1
 ```
 
-Every draft in full, what each was held for, and the text that finally went out.
+Every draft in full, what each was held for, the text that finally went out — and above all of it,
+**what the checks were told before they read a word**: which level actually ran and whether the
+destination capped it, which audience applied and whether one applied at all, what the destination said
+the moment was, which checks ran, and what it cost.
+
+Read the envelope first. "Why did it say that" is almost never answered by the finding:
+
+- **`capped from high`** — the destination is worth less than the level they set, so most checks never
+  ran. That is the answer to "why did it not catch X", and it is configuration rather than a defect.
+- **`guessing`** — no audience matched, so nothing could be held back on terms at all. If they are
+  asking why a message went out unchallenged, this is usually why, and `/prose-guard:audiences` is the
+  fix.
+- **`judged for <name>`** — a measured audience applied. A term flagged here was flagged because those
+  particular people have not been seen writing it, which is a claim they can disagree with.
+- **the destination line** — what the model-backed checks were told the moment was. If a complaint
+  reads as though the check misunderstood the situation, this is where to look.
 
 **Read it back to them rather than pasting it.** They asked because they want to judge something, and
 the something is almost always one of three questions. Answer the one they asked:

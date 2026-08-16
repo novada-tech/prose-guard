@@ -246,11 +246,27 @@ def say(finding, check, state, path, digest, advice, keep=None):
     return False
 
 
-def tally(level, rewrites, notes, calls):
+def reader(level, audience):
+    """The opening of the line: which level ran, and who the message was judged for.
+
+    Whether the audience matched is not a detail. One that did was measured from what those people have
+    actually written, and it can hold a message back. One that did not cannot — findings become advice,
+    because blocking on a guess spends somebody's first day arguing about their own house vocabulary.
+    Somebody watching a message go out unchallenged deserves to know which of those they are looking at,
+    and it used to be invisible.
+    """
+    if audience is not None and audience.resolved and audience.names:
+        return f"prose-guard {level} for {' + '.join(audience.names)}"
+    guess = getattr(audience, "fallback", None) or "the shipped baseline"
+    return f"prose-guard {level}, no audience for this — guessing against {guess}"
+
+
+def tally(level, rewrites, notes, calls, audience=None):
     """The one line the person sees when a message has been checked.
 
     Written as counts rather than a verdict because the useful reading is comparative: three rewrites
-    on one message is worth looking at, and so is a level nobody meant to be running.
+    on one message is worth looking at, and so is a level nobody meant to be running, or a reader
+    nobody meant to be assumed.
     """
     said = []
     if rewrites:
@@ -265,7 +281,8 @@ def tally(level, rewrites, notes, calls):
     # A skill rather than a script path, because everything else here is asked for in words —
     # /prose-guard:setup, /prose-guard:audiences — and a path to a file inside a plugin directory is
     # not something anybody should have to keep.
-    return (f"prose-guard {level}: " + (", ".join(said) if said else "nothing to say")
+    return (reader(level, audience) + ": "
+            + (", ".join(said) if said else "nothing to say")
             + (f" ({calls} model call{'s' if calls != 1 else ''})" if calls else "")
             + (". /prose-guard:feedback shows the drafts" if rewrites else "") + ".")
 
@@ -385,8 +402,27 @@ def main():
     # below, where a check has actually held something back. See lib/rounds.py.
     session = str(payload.get("session_id") or "no-session")
 
+    def envelope():
+        """Everything the checks were told before they read a word.
+
+        Recorded because "why did it say that" is almost never answered by the finding. It is answered
+        by which audience applied — and whether one applied at all — by what the destination said the
+        moment was, and by which level actually ran once the destination had capped it.
+        """
+        return {"destination": dest.get("name", "?"),
+                "level": level,
+                "asked_for": EFFORT,
+                "audience": " + ".join(ctx.audience.names) or ctx.audience.fallback or "?",
+                "guessing": not ctx.audience.resolved,
+                # What the model-backed checks are shown about the moment. Keys beginning with _ are
+                # internal and are not shown to them, so they are not shown here either.
+                "situation": {k: v for k, v in (ctx.situation or {}).items()
+                              if not k.startswith("_")},
+                "checks": [c.NAME for c in running],
+                "edit_of": len(ctx.mine) if ctx.mine else None}
+
     def keep(name, said):
-        rounds.held(session, dest.get("name", "?"), level, text, name, said)
+        rounds.held(session, envelope(), text, name, said)
 
     # Walk the checks in order, skipping the ones this exact text already satisfied. A pass belongs
     # to the text that earned it, so an edit made for a later check puts the earlier ones back in
@@ -486,7 +522,7 @@ def main():
     # check, so it cannot grow.
     # The message is going out, so close the argument with the text that finally went. Returns None
     # when nothing was ever held back, and then nothing has been written at any point.
-    rounds.went_out(session, text)
+    rounds.went_out(session, text, state["calls"])
 
     # Read before they are cleared: this is the whole argument that led to the message going out.
     rewrites = sum(state["denials"].values())
@@ -510,7 +546,7 @@ def main():
     # was checked. That is what makes a miss visible without reading a transcript.
     #
     # It costs the agent nothing. `systemMessage` reaches the person and not the model.
-    for_user = " ".join(x for x in (for_user, tally(level, rewrites, len(advice), calls)) if x)
+    for_user = " ".join(x for x in (for_user, tally(level, rewrites, len(advice), calls, ctx.audience)) if x)
 
     if not advice and not for_user:
         allow()

@@ -3782,13 +3782,13 @@ def test_you_are_told_when_a_message_was_checked_and_what_it_cost():
         check("a denial is its own notice, so it does not also carry a tally",
               [s for _, s in (first, second)], ["", ""])
         check("the message that goes out says how many rewrites it took",
-              third[1].startswith("prose-guard low: 2 rewrites."), True)
+              third[1].startswith("prose-guard low for team: 2 rewrites."), True)
 
         # And a clean message says so, which is the half that makes a miss visible: if this line is
         # absent, nothing was checked, and that is now the only thing absence can mean.
         clean = send("Rebuild the payload index after the credential job once more" + pad)
         check("a message nobody objected to says it was checked",
-              clean, ("allow", "prose-guard low: nothing to say."))
+              clean, ("allow", "prose-guard low for team: nothing to say."))
 
 
 def test_the_argument_before_a_message_goes_out_can_be_read_back():
@@ -3842,6 +3842,15 @@ def test_the_argument_before_a_message_goes_out_can_be_read_back():
             importlib.reload(rounds)
 
         check("the whole argument is one entry", len(kept), 1)
+        # The envelope: everything the checks were told before reading a word. "Why did it say that" is
+        # nearly always answered here rather than in the finding.
+        kept_one = kept[0]
+        check("it records which level actually ran", kept_one.get("level"), "low")
+        check("and which audience applied", kept_one.get("audience"), "team")
+        check("and whether that was measured or a guess", kept_one.get("guessing"), False)
+        check("and which checks ran", "terms" in (kept_one.get("checks") or []), True)
+        check("and what the destination said the moment was",
+              "commit message" in str(kept_one.get("situation")), True)
         check("with a draft for every time it was held back", len(kept[0]["drafts"]), 2)
         check("each saying which check held it", {d["held_by"] for d in kept[0]["drafts"]}, {"terms"})
         check("the first draft is the one that was written first",
@@ -3927,6 +3936,65 @@ def test_the_free_checks_object_together_rather_than_one_turn_each():
         # Counting it per check would halve what a session gets for a message held back a single time.
         with open(os.path.join(home, "sessions", "b.json")) as fh:
             check("which costs the session one denial", json.load(fh)["total_denials"], 1)
+
+
+def test_the_line_says_who_the_message_was_judged_for():
+    """Which audience applied decides what the tool is allowed to do, and it was invisible.
+
+    An audience that matched was measured from what those people have written, and it can hold a message
+    back. One that did not match cannot — findings become advice, because blocking on a guess spends
+    somebody's first day arguing about their own house vocabulary. Watching a message go out
+    unchallenged, those two look identical, and the difference is the whole reason nothing was held.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "guard_for_reader_test", os.path.join(PLUGIN, "hooks", "scripts", "outgoing_guard.py"))
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+
+    class Audience:
+        def __init__(self, resolved, names, fallback):
+            self.resolved, self.names, self.fallback = resolved, names, fallback
+
+    check("a measured audience is named",
+          guard.reader("low", Audience(True, ["platform"], None)), "prose-guard low for platform")
+    check("two at once are both named",
+          guard.reader("high", Audience(True, ["platform", "docs"], None)),
+          "prose-guard high for platform + docs")
+    check("and a guess says so, and says what it fell back to",
+          guard.reader("low", Audience(False, [], "engineers")),
+          "prose-guard low, no audience for this — guessing against engineers")
+    # Never a bare name that could be read as measured when it was not.
+    check("with no audience at all it still cannot read as measured",
+          "guessing" in guard.reader("low", None), True)
+
+    # End to end, because the hook has to pass the audience it actually used rather than re-derive one.
+    with tempfile.TemporaryDirectory() as home:
+        repo = os.path.join(home, "repo")
+        os.makedirs(os.path.join(home, "audiences"))
+        os.makedirs(repo)
+        for argv in (["init", "-q"], ["config", "user.email", "a@b.c"], ["config", "user.name", "t"],
+                     ["remote", "add", "origin", "git@github.com:acme/infra.git"]):
+            subprocess.run(["git", "-C", repo, *argv], capture_output=True, timeout=60)
+        with open(os.path.join(home, "audiences", "platform.json"), "w") as fh:
+            json.dump({"name": "platform", "who": "engineers here",
+                       "matches": {"repos": ["acme/infra"]}, "inherits": ["engineers"],
+                       "members": ["a", "b", "c", "d"], "vocabulary": {"PAYLOAD": 5},
+                       "expansions": {}}, fh)
+        env = {**os.environ, "PROSE_GUARD_HOME": home, "PROSE_GUARD_EFFORT": "low"}
+        clean = ("Rebuild the payload index after the credential job so anyone rebuilding it later can "
+                 "tell which figures were used and why it had to be rewritten before sign off")
+
+        def said_for(cwd, session):
+            out = hook_reply({"session_id": session, "tool_name": "Bash", "cwd": cwd,
+                              "tool_input": {"command": f'git commit -m "{clean}"'}}, env, 120) or {}
+            return out.get("systemMessage", "")
+
+        check("inside a repository the audience routes on, it is named",
+              "for platform" in said_for(repo, "a"), True)
+        check("and outside it, the guess is named as a guess",
+              "guessing against engineers" in said_for(home, "b"), True)
 
 
 def teardown_function(_fn):
