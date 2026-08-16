@@ -403,19 +403,28 @@ The same verbs as audiences, on the same three layers:
 ```
 python3 lib/destinations.py list                      # every one, and which layer it came from
 python3 lib/destinations.py show "commit message"
+python3 lib/destinations.py add "our wiki" --tool wiki_create --text-field content
 python3 lib/destinations.py off "gitlab cli"          # stop checking one here, whatever layer it is from
 python3 lib/destinations.py on "gitlab cli"
 python3 lib/destinations.py rm "my wiki"              # delete one of your own
-python3 lib/destinations.py share --to DIR --only "our chat"
+python3 lib/destinations.py share --to DIR --only "our chat" --with-off
 ```
 
 Yours is read first, then any directory your team shares, then the shipped set, and the first match wins.
 So local and shared coexist: a team shares the chat tool everyone posts to, and the document one person
 writes invoices in stays on that person's machine. `--only` exists for exactly that split.
 
+`add` is the one thing that writes a destination, and it refuses what the loader would drop: a cap that
+is not a level, a tool with no field carrying the prose, a pattern that does not compile. Each of those
+was written by hand before and failed open — `max_effort: "lo"` was ignored, so the destination meant to
+stop at the cheapest check ran every check and could block. `--help` lists the fields.
+
 `rm` works on your own. A shipped destination is inside the plugin and is replaced on update, so there is
-nothing to delete — `off` records the name in your own file instead and it stops being read, whichever layer
-it came from. A shared one is retired for everybody by removing it from the directory it comes from.
+nothing to delete — `off` records the name in a file instead and it stops being read, whichever layer it
+came from. `off` is read from every layer, so a team retires a shipped destination for everybody by
+sharing it with `--with-off`, and `on` says so rather than pretending when the name was switched off in
+somebody else's file. A shared destination itself is retired by removing it from the directory it comes
+from.
 
 `list` marks an entry as shadowed when a name appears in more than one layer. That is the layering working
 — your copy overrides the team's — but it also means their improvements to it stop reaching you, and `share`

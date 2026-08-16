@@ -19,20 +19,16 @@ import settings
 import re
 import subprocess
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-SHIPPED = os.path.join(_HERE, "..", "data", "destinations.json")
-
 # A short message is not the failure this catches, and is not worth a model call.
 MIN_WORDS = 25
 FILE_TOOLS = ("Write", "Edit", "NotebookEdit")
 
-
-def config_dir():
-    return paths.home()
+# The fields whose value is a regular expression run against a command or a path.
+PATTERNS = ("bash", "file")
 
 
 def _user_path():
-    return os.path.join(config_dir(), "destinations.json")
+    return paths.mine().destinations
 
 
 def _read(path):
@@ -43,16 +39,37 @@ def _read(path):
         complaints.append(f"{os.path.basename(path)}: destinations should be a list, so none were read")
         rows = []
     for n, entry in enumerate(rows):
-        clean, said = settings.checked(entry, settings.DESTINATION,
-                                       f"{os.path.basename(path)} destination {n + 1}")
+        where = f"{os.path.basename(path)} destination {n + 1}"
+        clean, said = settings.checked(entry, settings.DESTINATION, where)
+        said = said + _uncompilable(clean, where)
         # A destination with no name cannot be switched off, shown or shared, so it is not one.
         if clean.get("name"):
             kept.append(clean)
         elif not said:
-            said = [f"{os.path.basename(path)} destination {n + 1} has no name, so it was not read"]
+            said = [f"{where} has no name, so it was not read"]
         complaints.extend(said)
     got["destinations"] = kept
     return got, complaints
+
+
+def _uncompilable(entry, where):
+    """Complaints for any pattern that will not compile. The field is dropped rather than kept.
+
+    A pattern is the one thing the declaration cannot check by shape: `"bash": "gh pr ("` is perfectly
+    good text and raises `re.error` out of `_matches` at the moment the hook runs it. A PreToolUse hook
+    that exits non-zero lets the tool call through unchecked, so an unbalanced bracket in a
+    hand-written file is the guard switching itself off for every call, silently.
+    """
+    out = []
+    for key in PATTERNS:
+        if entry.get(key) is None:
+            continue
+        try:
+            re.compile(entry[key])
+        except re.error as exc:
+            entry.pop(key)
+            out.append(f"{where}: {key} does not compile as a pattern ({exc}), so it was not read")
+    return out
 
 
 def load():
@@ -64,27 +81,33 @@ def load():
     describes one group of readers; a destination is a fact about which tool sends prose and which field
     carries it, and that fact is the same for everyone using that tool. One person working it out with
     /prose-guard:setup is the whole team's answer.
+
+    `off` is read from every layer rather than from yours alone. There is no deleting a shipped
+    destination — the file is inside the plugin and is replaced on update — so `off` is the only way to
+    retire one, and reading it from one layer meant a team could add a destination for everybody and
+    could not stop one for anybody. Each name comes back with the layer that switched it off and how
+    many entries it actually stopped: a name that stops nothing is one somebody renamed in a release,
+    and printing it as switched off is how a person comes to believe a check is not running.
     """
-    where = [("yours", _user_path())]
-    where += [("shared", os.path.join(directory, "destinations.json")) for directory in paths.shared()]
-    where.append(("built in", SHIPPED))
     layers, complaints = [], []
-    for origin, path in where:
-        got, said = _read(path)
-        layers.append((origin, got))
+    for layer in paths.layers():
+        got, said = _read(layer.destinations)
+        layers.append((layer.origin, got))
         complaints.extend(said)
-    # Names switched off in YOUR file, whatever layer they came from. There is no deleting a shipped
-    # destination — the file is inside the plugin and is replaced on update — so this is how you stop one.
-    switched_off = [str(n) for n in (layers[0][1].get("off") or [])]
-    off = {n.lower() for n in switched_off}
+    silenced = {}
+    for origin, layer in layers:
+        for name in layer.get("off") or []:
+            silenced.setdefault(str(name).lower(), [str(name), origin, 0])
     found, owners = [], set()
     for origin, layer in layers:
         for entry in layer.get("destinations") or []:
-            if str(entry.get("name", "")).lower() in off:
+            stopped = silenced.get(str(entry.get("name", "")).lower())
+            if stopped:
+                stopped[2] += 1
                 continue
             found.append(dict(entry, _origin=origin))
         owners |= {str(o).lower() for o in (layer.get("public_owners") or [])}
-    return found, owners, switched_off, complaints
+    return found, owners, [tuple(v) for v in silenced.values()], complaints
 
 
 DESTINATIONS, PUBLIC_OWNERS, SWITCHED_OFF, COMPLAINTS = load()
@@ -355,7 +378,7 @@ def _user_file():
 
 
 def _save_user(data):
-    os.makedirs(config_dir(), exist_ok=True)
+    paths.ensure()
     with open(_user_path(), "w") as fh:
         json.dump(data, fh, indent=1)
         fh.write("\n")
@@ -387,34 +410,96 @@ def remove(name):
     return _save_user(data)
 
 
+def switched_off_by(name):
+    """The layers whose `off` list holds this name: yours, shared, built in."""
+    return [origin for n, origin, _ in SWITCHED_OFF if n.lower() == name.lower()]
+
+
 def switch(name, on):
-    """Stop, or resume, checking a destination on this machine, whichever layer it came from."""
+    """Stop, or resume, checking a destination on this machine, whichever layer it came from.
+
+    Only your own file is written. A name your team switched off is refused rather than quietly left
+    off, because "already on" while it stays off is the answer that costs somebody an afternoon.
+    """
     data = _user_file()
     off = [str(n) for n in (data.get("off") or [])]
     lowered = [n.lower() for n in off]
+    elsewhere = [o for o in switched_off_by(name) if o != "yours"]
     if on:
         if name.lower() not in lowered:
+            if elsewhere:
+                raise PermissionError(
+                    f"{name} is switched off in the {elsewhere[0]} destinations.json, not in yours, so "
+                    f"it is not yours to switch back on. Take the name out of the `off` list in that "
+                    f"file and it is checked again for everybody.")
             return None
         data["off"] = [n for n in off if n.lower() != name.lower()]
     else:
+        # Checked before `find`, which cannot see a destination that is already switched off.
+        if name.lower() in lowered or elsewhere:
+            return None
         if find(name) is None:
             raise KeyError(name)
-        if name.lower() in lowered:
-            return None
         data["off"] = off + [name]
     return _save_user(data)
 
 
-def share(directory, only=None):
+def add(entry):
+    """Write one destination into your own file. The only writer, checked by the same declaration
+    `load` reads with, so the file cannot hold a shape the loader will drop.
+
+    What created a destination before this was prose: /prose-guard:setup told an agent to hand-write
+    JSON into the config directory. Nothing checked it, and the two fields that exist to make the guard
+    LESS aggressive fail open — `max_effort: "lo"` was ignored, so the destination that was meant to
+    stop at a cheap check ran every check and could block.
+
+    Refuses rather than repairs. A destination that matches nothing, or matches and can never find the
+    prose, is worse than no destination: it looks configured.
+    """
+    clean, complaints = settings.checked(entry, settings.DESTINATION, "this destination")
+    complaints += _uncompilable(clean, "this destination")
+    if not clean.get("name"):
+        complaints.append("this destination has no name, and a name is how you show, share or "
+                          "switch off a destination later")
+    if not any(clean.get(k) for k in ("tool", *PATTERNS)):
+        complaints.append("nothing says when this applies: give it a tool, a command pattern (bash) "
+                          "or a file pattern (file), or it can never match a call")
+    if clean.get("tool") and not clean.get("text_fields"):
+        complaints.append("a tool destination needs text_fields — which field of the call carries the "
+                          "prose — or it matches the call and never finds anything to check")
+    if clean.get("bash") and not clean.get("text_arg"):
+        complaints.append("a command destination needs text_arg — which flag carries the prose — or it "
+                          "matches the command and never finds anything to check")
+    if clean.get("name") and any(str(r.get("name", "")).lower() == clean["name"].lower()
+                                 for r in (_user_file().get("destinations") or [])):
+        complaints.append(f"you already have a destination called {clean['name']} — `rm` it first, or "
+                          f"give this one another name")
+    if complaints:
+        raise ValueError("\n".join(complaints))
+    shadowed = find(clean["name"])
+    data = _user_file()
+    data["destinations"] = list(data.get("destinations") or []) + [clean]
+    return _save_user(data), (shadowed or {}).get("_origin")
+
+
+def share(directory, only=None, with_off=False):
     """Copy destinations from this machine into a directory a team keeps.
 
     Only ever your own: the shipped set is already everywhere, and copying it would put a stale duplicate
     in front of the maintained one. `only` names one, for the common case where some of what you have
     worked out is the team's business and some is not.
+
+    `with_off` takes the names you have switched off with it, which is what retiring a shipped
+    destination for a whole team looks like — the copy of `off` in a shared file is read on every
+    machine that reads that directory. Asked for rather than automatic: switching something off here is
+    usually about this machine, and doing it for eleven colleagues because one person muted it is the
+    surprise worth a flag.
     """
-    rows = [r for r in (_user_file().get("destinations") or [])
+    mine = _user_file()
+    rows = [r for r in (mine.get("destinations") or [])
             if only is None or str(r.get("name", "")).lower() == only.lower()]
-    if not rows:
+    off = [str(n) for n in (mine.get("off") or [])] if with_off else []
+    if not rows and not off:
         return ("nothing to share: " + (f"you have no destination called {only}" if only else
                 "no destinations have been added on this machine. The shipped ones are already "
                 "everywhere; /prose-guard:setup works out what is missing."))
@@ -426,6 +511,10 @@ def share(directory, only=None):
     added = [x for x in fresh if json.dumps(x, sort_keys=True) not in have]
     merged = dict(existing)
     merged["destinations"] = list(existing.get("destinations") or []) + added
+    theirs = [str(n) for n in (existing.get("off") or [])]
+    retired = [n for n in off if n.lower() not in {t.lower() for t in theirs}]
+    if theirs or retired:
+        merged["off"] = theirs + retired
     merged.setdefault("_meta", {})["what"] = (
         "Destinations this team has worked out. Read after your own file and before the shipped set, so "
         "your own destinations.json still wins locally.")
@@ -434,7 +523,9 @@ def share(directory, only=None):
         fh.write("\n")
     names = ", ".join(x.get("name", "?") for x in added) or "nothing new"
     return (f"{len(added)} added to {target}: {names}\n"
-            f"Nothing is shared until you commit it. Then anyone whose config lists that directory has "
+            + (f"{len(retired)} switched off for everyone who reads that directory: "
+               f"{', '.join(retired)}\n" if retired else "")
+            + f"Nothing is shared until you commit it. Then anyone whose config lists that directory has "
             f"them, with no setup conversation of their own.\n"
             f"Your own copy still wins locally, so improvements the team makes to it will not reach you. "
             f"`rm` the local one once it is committed, or keep it if yours is deliberately different.")
@@ -449,6 +540,24 @@ def _how(entry):
     return f"{len(tools)} tool(s): " + ", ".join(tools[:2]) + (" …" if len(tools) > 2 else "")
 
 
+def _identifiers(pairs):
+    """`channel=channel_id`, `repo=owner,name` or `cwd_repo=true`, as the map audiences route on.
+
+    An identifier is what turns a tool call into a reader: the channel id in the call is what says
+    which audience is about to read this. A destination without one is checked against whatever
+    baseline is configured rather than against the people it is going to.
+    """
+    out = {}
+    for pair in pairs:
+        key, _, source = str(pair).partition("=")
+        if not key or not source:
+            raise ValueError(f"{pair!r} is not KEY=FIELD — for example channel=channel_id, or "
+                             f"cwd_repo=true for the repository the command runs in")
+        out[key] = True if source.lower() == "true" else (
+            source.split(",") if "," in source else source)
+    return out
+
+
 def _cli():
     import argparse
     ap = argparse.ArgumentParser(description="Inspect and manage destinations — what counts as sending.")
@@ -456,6 +565,30 @@ def _cli():
     sub.add_parser("list", help="every destination, where it came from, and how it is recognised")
     p = sub.add_parser("show", help="one destination in full")
     p.add_argument("name")
+    p = sub.add_parser("add", help="add one of your own, checked as it is written")
+    p.add_argument("name", help="what to call it — how you show, share or switch it off later")
+    p.add_argument("--tool", nargs="+", metavar="NAME",
+                   help="tool names that carry prose. The whole name, or the name after an MCP "
+                        "server's prefix: slack_send_message matches mcp__slack__slack_send_message")
+    p.add_argument("--bash", metavar="REGEX", help="a pattern matching the command itself")
+    p.add_argument("--file", metavar="REGEX", help="a pattern matching the path being written")
+    p.add_argument("--text-field", nargs="+", metavar="FIELD",
+                   help="which field of the tool call carries the prose. Required with --tool")
+    p.add_argument("--text-arg", nargs="+", metavar="FLAG",
+                   help="which flag carries it, for --bash. A flag ending in -file, or -F, names a "
+                        "file whose contents are read")
+    p.add_argument("--identifier", nargs="+", metavar="KEY=FIELD",
+                   help="what the call reveals about who will read it, so an audience can be matched: "
+                        "channel=channel_id, repo=owner,name, cwd_repo=true")
+    p.add_argument("--note", metavar="TEXT", help="what this destination is, for the checks to read")
+    p.add_argument("--caveat", metavar="TEXT", help="what a person should know before it holds a call")
+    p.add_argument("--max-effort", choices=settings.LEVELS,
+                   help="never check harder than this here, whatever the configured level")
+    p.add_argument("--max-severity", choices=settings.SEVERITIES,
+                   help="advise: this destination may never block a call")
+    p.add_argument("--require-tracked", action="store_true",
+                   help="with --file: only a file inside a git working tree and not ignored, which is "
+                        "the line between a document colleagues read and a scratch file")
     p = sub.add_parser("rm", help="delete one of your own")
     p.add_argument("name")
     p = sub.add_parser("off", help="stop checking one on this machine, whichever layer it came from")
@@ -465,31 +598,54 @@ def _cli():
     p = sub.add_parser("share", help="copy your own into a directory your team keeps")
     p.add_argument("--to", required=True, metavar="DIR")
     p.add_argument("--only", metavar="NAME", help="just this one, rather than everything you added")
+    p.add_argument("--with-off", action="store_true",
+                   help="take the names you have switched off too, which retires them for everyone "
+                        "who reads that directory rather than only here")
     a = ap.parse_args()
 
     if a.cmd == "list":
-        # First match wins, so a name in two layers means the earlier one decides and the later one is
+        # First match wins, so a name in two layers means the nearer one decides and the further one is
         # dead. That is the point of the layering — you can override the team's copy — but it also means
-        # your copy stops you receiving their improvements to it, and silence about that is unhelpful.
-        seen = set()
+        # their improvements to it stop reaching you, and silence about that is unhelpful.
+        seen = {}
         for entry in DESTINATIONS:
             caps = " ".join(filter(None, [
                 f"effort<={entry['max_effort']}" if entry.get("max_effort") else "",
                 f"severity<={entry['max_severity']}" if entry.get("max_severity") else ""]))
             lowered = str(entry.get("name", "")).lower()
-            mark = "  (shadowed by yours)" if lowered in seen else ""
-            seen.add(lowered)
+            mark = f"  (shadowed by the {seen[lowered]} one)" if lowered in seen else ""
+            seen.setdefault(lowered, entry["_origin"])
             print(f"{entry['name']:44s} {entry['_origin']:9s} {_how(entry):50s} {caps}{mark}")
-        for name in SWITCHED_OFF:
-            print(f"{name:44s} off        not checked on this machine")
-        print(f"\nyours:  {_user_path()}")
-        for directory in paths.shared():
-            print(f"shared: {os.path.join(directory, 'destinations.json')}")
-        print(f"shipped: {SHIPPED}")
+        for name, origin, stopped in SWITCHED_OFF:
+            said = (f"not checked, switched off {origin}" if stopped else
+                    "switched off, but no destination has that name — renamed or removed?")
+            print(f"{name:44s} off        {said}")
+        print()
+        for layer in paths.layers():
+            print(f"{layer.origin + ':':9s} {layer.destinations}")
+        return
+
+    if a.cmd == "add":
+        entry = {"name": a.name, "tool": a.tool, "bash": a.bash, "file": a.file,
+                 "text_fields": a.text_field, "text_arg": a.text_arg, "note": a.note,
+                 "caveat": a.caveat, "max_effort": a.max_effort, "max_severity": a.max_severity,
+                 "require_tracked": a.require_tracked or None}
+        try:
+            if a.identifier:
+                entry["identifiers"] = _identifiers(a.identifier)
+            where, shadowed = add({k: v for k, v in entry.items() if v is not None})
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        print(f"{a.name} -> {where}")
+        if shadowed:
+            print(f"  a {shadowed} destination has that name as well. Yours is read first, so yours is "
+                  f"the one that applies — and their improvements to it will not reach you")
+        print("  it applies to the next tool call; `list` shows it, `share --to DIR` gives it to your "
+              "team")
         return
 
     if a.cmd == "share":
-        print(share(a.to, a.only))
+        print(share(a.to, a.only, with_off=a.with_off))
         return
 
     if a.cmd in ("off", "on"):
@@ -497,6 +653,8 @@ def _cli():
             where = switch(a.name, a.cmd == "on")
         except KeyError:
             raise SystemExit(f"no destination called {a.name!r}. Try: list")
+        except PermissionError as exc:
+            raise SystemExit(str(exc))
         if where is None:
             print(f"{a.name} was already {'on' if a.cmd == 'on' else 'off'}; nothing to change")
         else:

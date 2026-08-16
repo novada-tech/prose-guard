@@ -3100,7 +3100,7 @@ def test_one_name_switched_off_does_not_have_to_be_a_list():
             found, _, switched, _ = D.load()
         finally:
             os.environ.pop("PROSE_GUARD_HOME") if was is None else os.environ.update(PROSE_GUARD_HOME=was)
-        check("the name is read as one name", switched, ["commit message"])
+        check("the name is read as one name", [n for n, _, _ in switched], ["commit message"])
         check("and it is switched off", [d for d in found if d["name"] == "commit message"], [])
 
 
