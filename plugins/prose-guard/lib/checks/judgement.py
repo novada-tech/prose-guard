@@ -5,11 +5,17 @@ string literal. It only ever advises: measured against a provenance-based label 
 agrees 50-70% of the time, and unstably — the same condition scored 5/10 then 7/10 on the same ten
 texts. Useful as a prompt to look again; not something to gate on.
 """
+from __future__ import annotations
+
 import os
+from typing import TYPE_CHECKING
 
 from . import ask as _ask
 from . import model
 from .finding import ADVISE, VERDICT, Finding
+
+if TYPE_CHECKING:
+    from .context import Context
 
 NAME = "judgement"
 # Running this repeatedly buys nothing, and that is measured rather than assumed: three runs cost three
@@ -26,7 +32,7 @@ MODE = VERDICT
 PROMPT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "judgement_prompt.md")
 
 
-def run(text, ctx):
+def run(text: str, ctx: Context | None) -> Finding | None:
     # ADVISE, and the docstring above is the reason: a check that agrees with a real label 50-70% of the
     # time, and disagrees with itself between runs, is a prompt to look again rather than a gate. One word
     # here makes `medium` — the level to recommend — hold messages back on it.

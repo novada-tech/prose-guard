@@ -35,9 +35,15 @@ two of three, all pointing at the same sentence. It got through because it was o
 words — so this adds no sixth model call to re-find what two checks already find. Splitting the document
 to sharpen those checks was measured and dropped; see docs/design-notes.md.
 """
+from __future__ import annotations
+
 import re
+from typing import TYPE_CHECKING
 
 from . import finding
+
+if TYPE_CHECKING:
+    from .context import Context
 
 NAME = "mechanics"
 MODE = finding.EXACT
@@ -78,7 +84,7 @@ DOUBLED_ON_PURPOSE = ("that", "had", "long")
 GAP = " -- "
 
 
-def prose(text):
+def prose(text: str) -> str:
     """The text minus what is not prose. A doubled identifier in code is not a typo."""
     text = re.sub(r"```.*?```", GAP, text, flags=re.S)
     text = re.sub(r"`[^`]*`", GAP, text)
@@ -88,7 +94,7 @@ def prose(text):
     return text
 
 
-def scan(text):
+def scan(text: str) -> list[str]:
     body = prose(text)
     out = []
     for m in DOUBLED.finditer(body):
@@ -103,7 +109,7 @@ def scan(text):
     return out
 
 
-def run(text, ctx):
+def run(text: str, ctx: Context | None) -> finding.Finding | None:
     from . import BLOCK, Finding
     found = scan(text)
     if not found:

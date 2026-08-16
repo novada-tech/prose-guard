@@ -17,6 +17,8 @@ This file kept its own copy of that table and both results, and both had drifted
 four gating checks when it runs five, and that the comparison scored four concerns when it scored five.
 A reader here is looking for where the setting is stored, not choosing a level.
 """
+from __future__ import annotations
+
 import os
 import sys
 
@@ -35,7 +37,7 @@ LEVELS = settings.LEVELS
 _LEVEL = settings.one_of(*LEVELS)
 
 
-def _sources():
+def _sources() -> tuple[tuple[str, str | None], ...]:
     """Where a level may be set, nearest first, each with a name for saying which one is wrong."""
     return (("PROSE_GUARD_EFFORT", os.environ.get("PROSE_GUARD_EFFORT")),
             # Set by Claude Code from the plugin's userConfig. Verified: it reaches a hook's
@@ -44,7 +46,7 @@ def _sources():
             ("config.json", paths.config().get("effort")))
 
 
-def effort():
+def effort() -> str:
     for _, value in _sources():
         level, _ = _LEVEL(value)
         if level:
@@ -52,7 +54,7 @@ def effort():
     return "disabled"
 
 
-def complaints():
+def complaints() -> list[str]:
     """Everything wrong with how this level was set, in sentences, or [] when nothing is.
 
     The environment is checked here and the file is checked by its declaration in settings.py, because
@@ -60,7 +62,7 @@ def complaints():
     number, boolean, directory and file are the whole list — so `/plugin configure` offers a free-text
     box, and `medim` in it means disabled with nothing said unless somebody looks.
     """
-    out = []
+    out: list[str] = []
     for name, value in _sources()[:2]:            # the file's own complaint comes from its declaration
         if (value or "").strip():
             _, complaint = _LEVEL(value)
@@ -69,7 +71,7 @@ def complaints():
     return out + paths.config_complaints()
 
 
-def capped(level, ceiling):
+def capped(level: str, ceiling: str | None) -> str:
     """The lower of what was asked for and what this destination is worth.
 
     Here rather than beside the ladder because it needs the levels in order, and this module is where
@@ -84,7 +86,7 @@ def capped(level, ceiling):
     return level if LEVELS.index(level) <= LEVELS.index(ceiling) else ceiling
 
 
-def save(level):
+def save(level: str) -> str:
     """Write the choice. Raises rather than failing quietly, so a setup step can report it."""
     if level not in LEVELS:
         raise ValueError(f"{level!r} is not one of {', '.join(LEVELS)}")

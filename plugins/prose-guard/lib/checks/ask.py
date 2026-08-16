@@ -4,6 +4,8 @@ their prompt file, not in how they are asked.
 A minimal system prompt instead of the full coding-agent one: the same verdicts as far as we
 could measure, for about a third of the output tokens and 35% less cache-read.
 """
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -11,10 +13,14 @@ import secrets
 import subprocess
 import sys
 import tempfile
+from typing import Any, TYPE_CHECKING
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import host  # noqa: E402
 import telling  # noqa: E402
+
+if TYPE_CHECKING:
+    from .context import Context
 
 MODEL = os.environ.get("CHECKER_MODEL", "claude-sonnet-5")
 EFFORT = os.environ.get("CHECKER_EFFORT", "medium")
@@ -37,7 +43,7 @@ VERDICT = re.compile(r"(?:^|(?<=[.!?])[ \t]+)(PASS|FAIL)\b:?[ \t]*", re.M)
 UNPRINTABLE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]|[\x00-\x08\x0b-\x1f\x7f]")
 
 
-def context_text(ctx):
+def context_text(ctx: Context | None) -> str:
     """What the model is told about the reader and the moment. Descriptive only: the audience was
     already decided deterministically, so nothing here can change which vocabulary applies."""
     if ctx is None:
@@ -51,7 +57,7 @@ def context_text(ctx):
     return "\n\nWhat you know about the situation:\n" + "\n".join(lines) + "\n"
 
 
-def _log_usage(name, usage, seconds):
+def _log_usage(name: str, usage: dict[str, Any], seconds: float) -> None:
     """Record what a check cost, when asked to. Lets anyone re-measure the real per-message
     price on their own traffic instead of trusting a number from someone else's run."""
     path = os.environ.get("CHECKER_COST_LOG")
@@ -64,7 +70,7 @@ def _log_usage(name, usage, seconds):
         pass
 
 
-def read_prompt(path):
+def read_prompt(path: str) -> str | None:
     try:
         with open(path) as fh:
             return fh.read()
@@ -72,7 +78,7 @@ def read_prompt(path):
         return None
 
 
-def read_verdict(out):
+def read_verdict(out: str | None) -> tuple[bool, str]:
     """(ok, message) from a checker's reply.
 
     The verdict is the LAST one stated, not the first. Asked about a hard document, a checker opened
@@ -94,12 +100,12 @@ def read_verdict(out):
     return False, reason[:700] or "the checker gave no reason"
 
 
-def printable(text):
+def printable(text: str) -> str:
     """Text safe to hand back to a terminal and to an agent's context."""
     return UNPRINTABLE.sub("", text)
 
 
-def fenced(prompt, text, ctx=None):
+def fenced(prompt: str, text: str, ctx: Context | None = None) -> str:
     """The whole prompt, with the text under review inside markers a message cannot forge.
 
     The label is random per call. Without one there was no closing marker and no escaping, so a
@@ -113,7 +119,7 @@ def fenced(prompt, text, ctx=None):
             f"===== MESSAGE {label} =====\n{text}\n===== END {label} =====\n")
 
 
-def ask(name, prompt, text, ctx=None):
+def ask(name: str, prompt: str, text: str, ctx: Context | None = None) -> tuple[bool, str]:
     """(ok, message). Any failure to reach the checker is a pass: it must not block work."""
     import time
     if not prompt:

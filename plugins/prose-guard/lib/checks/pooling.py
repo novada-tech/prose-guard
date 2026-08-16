@@ -8,11 +8,29 @@ Imports `finding` for the modes and `placing` for what makes two findings the sa
 else — in particular not its own package, so a check can use any of it without the circular import that
 put `finding.py` where it is.
 """
+from __future__ import annotations
+
+import typing
+from typing import TYPE_CHECKING
+
 from .finding import EXACT, MODES, VERDICT
 from .placing import identity
 
+if TYPE_CHECKING:
+    from .context import Context
+    from .finding import Check, Finding
 
-def mode_of(check):
+
+class Pooled(typing.NamedTuple):
+    """What `pooled` returns. Named because `findings` and `firm` are the same type and the second is a
+    subset of the first, so a caller that took them in the wrong order would block on everything."""
+
+    findings: list[Finding]
+    firm: list[Finding]
+    runs: int
+
+
+def mode_of(check: Check) -> str:
     """Which of the three modes this check runs in, or an error naming the check that did not say.
 
     An error rather than a default. `POOLS` used to be read with `getattr(check, "POOLS", True)`, so
@@ -26,7 +44,7 @@ def mode_of(check):
     return mode
 
 
-def costs_a_call(check):
+def costs_a_call(check: Check) -> bool:
     """Whether one run of this check spends a model call. The budget is kept in calls."""
     return mode_of(check) != EXACT
 
@@ -50,7 +68,7 @@ MOST_RUNS = 25           # a bound, not a target: 2,500 words reaches it
 DRY_RUNS = 1             # consecutive runs adding nothing that are tolerated before stopping
 
 
-def ceiling_for(text):
+def ceiling_for(text: str) -> int:
     """The most times a check may run on this text.
 
     Linear in words above the base, so a 2,000-word document gets more care than a 400-word one. This is a
@@ -60,7 +78,8 @@ def ceiling_for(text):
     return max(BASE_CEILING, min(MOST_RUNS, 1 + len(text.split()) // WORDS_PER_RUN))
 
 
-def pooled(check, text, ctx, passes=None, dry_runs=DRY_RUNS):
+def pooled(check: Check, text: str, ctx: Context | None, passes: int | None = None,
+           dry_runs: int = DRY_RUNS) -> Pooled:
     """Run a check until its runs stop surfacing anything new, and pool what they found.
 
     One mechanism where there used to be two, because they were the same mechanism. Running a check twice
@@ -71,8 +90,8 @@ def pooled(check, text, ctx, passes=None, dry_runs=DRY_RUNS):
     exactly where that is warranted — a document that keeps yielding new findings keeps being asked, up to
     a ceiling that grows with its length.
 
-    Returns (findings, firm, runs). `runs` is how many calls this cost, because the caller is keeping a
-    budget and one call per check stopped being true the moment a check could run twenty times.
+    `runs` is how many calls this cost, because the caller is keeping a budget and one call per check
+    stopped being true the moment a check could run twenty times.
 
     `firm` is the subset more than one run pointed at. An item only one run raised
     is that run sampling from what is above the bar: on a document with real defects that is a different
@@ -85,13 +104,13 @@ def pooled(check, text, ctx, passes=None, dry_runs=DRY_RUNS):
     cost = 0 if mode == EXACT else 1
     first = check.run(text, ctx)
     if first is None:
-        return [], [], cost
+        return Pooled([], [], cost)
     if mode == EXACT:
-        return [first], [first], 0            # deterministic: it says the same thing every time
+        return Pooled([first], [first], 0)            # deterministic: it says the same thing every time
     if mode == VERDICT:
         # One combined verdict has nothing to pick between, so asking again restates it. See
         # checks/judgement.py for the measurement.
-        return [first], [first], 1
+        return Pooled([first], [first], 1)
     ceiling = passes or ceiling_for(text)
     seen = {identity(text, first): [1, first]}
     order = list(seen)
@@ -113,11 +132,12 @@ def pooled(check, text, ctx, passes=None, dry_runs=DRY_RUNS):
         seen[which] = [1, again]
         order.append(which)
         dry = 0                               # still yielding, so keep going
-    findings, firm = [], []
+    findings: list[Finding] = []
+    firm: list[Finding] = []
     for which in order:
         times, finding = seen[which]
         marked = finding._replace(message=f"[{times} of {runs} runs] " + finding.message)
         findings.append(marked)
         if times > 1:
             firm.append(marked)
-    return findings, firm, runs
+    return Pooled(findings, firm, runs)

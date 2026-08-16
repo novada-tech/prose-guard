@@ -33,14 +33,16 @@ writes `from .pooling import pooled`, and both get the same function.
     model.py      the one way a model-backed check asks its question
     sequence.py   the separate concerns `high` runs, one per prompt file
 """
+from __future__ import annotations
+
 from . import config, judgement, mechanics, sequence, terms
 from .config import capped
 from .context import Context
-from .finding import ADVISE, BLOCK, EXACT, POOLED, VERDICT, Finding
+from .finding import ADVISE, BLOCK, EXACT, POOLED, VERDICT, Check, Finding
 from .placing import written_here, wrote_which
 from .pooling import ceiling_for, costs_a_call, mode_of, pooled
 
-__all__ = ["ADVISE", "BLOCK", "EXACT", "POOLED", "VERDICT", "Context", "Finding", "capped",
+__all__ = ["ADVISE", "BLOCK", "EXACT", "POOLED", "VERDICT", "Check", "Context", "Finding", "capped",
            "ceiling_for", "costs_a_call", "for_effort", "mode_of", "pooled", "written_here",
            "wrote_which"]
 
@@ -49,13 +51,13 @@ __all__ = ["ADVISE", "BLOCK", "EXACT", "POOLED", "VERDICT", "Context", "Finding"
 # runs. Written out three times before, and a sixth deterministic check added to `low` did not reach
 # `high` — the containment was a thing to remember rather than a thing the code did.
 # `terms` and `mechanics` cost nothing and are exact, so they run at every level that runs anything.
-def _ladder(level):
+def _ladder(level: str) -> tuple[Check, ...]:
     low = (terms, mechanics)
     return {"low": low, "medium": low + (judgement,),
             "high": low + tuple(sequence.phases())}.get(level, ())
 
 
-def for_effort(level=None):
+def for_effort(level: str | None = None) -> tuple[Check, ...]:
     return _ladder(level or config.effort())
 
 

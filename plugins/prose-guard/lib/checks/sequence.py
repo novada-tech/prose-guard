@@ -8,14 +8,20 @@ Order is editorial — outermost decision first — so no later phase creates wo
 Unlike the single judgement call these DO block, which is the trade `high` exists to make: a named
 concern with a quoted span is actionable in a way a combined verdict is not, at several times the calls.
 """
+from __future__ import annotations
+
 import os
 import sys
+from typing import TYPE_CHECKING
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import telling  # noqa: E402
 
 from . import model
 from .finding import ADVISE, BLOCK, POOLED, Finding
+
+if TYPE_CHECKING:
+    from .context import Context
 
 # A phase whose filename ends in this advises rather than blocks.
 ADVISORY = ".advise"
@@ -26,7 +32,7 @@ PHASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "phases")
 class Phase:
     MODE = POOLED
 
-    def __init__(self, path):
+    def __init__(self, path: str) -> None:
         # `4-reference.md` is the reference check and blocks. `6-promise.advise.md` is the promise
         # check and only advises. The severity is in the filename because a check that has not earned
         # the right to hold a message back should say so where somebody adding one will see it, and
@@ -38,7 +44,7 @@ class Phase:
         self.NAME = stem.split("-", 1)[-1]
         self._path = path
 
-    def run(self, text, ctx):
+    def run(self, text: str, ctx: Context | None) -> Finding | None:
         # A phase BLOCKS by default, and that is the whole difference between one of these and the
         # combined verdict: one named concern with a quoted span can be acted on, so it is worth
         # holding a message for. A phase that has not been measured to that standard advises instead —
@@ -47,7 +53,7 @@ class Phase:
         return None if ok else Finding(ADVISE if self.advises else BLOCK, why)
 
 
-def phases():
+def phases() -> list[Phase]:
     try:
         names = sorted(f for f in os.listdir(PHASE_DIR) if f.endswith(".md"))
     except OSError:

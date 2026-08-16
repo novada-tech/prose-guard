@@ -6,9 +6,23 @@ package imports the checks at module level and hoisting the import to the top of
 style, and it was copied into every check that was added. The type and the severities live here so a
 check and the package can both import them at the top of the file, where an import belongs.
 """
-import collections
+from __future__ import annotations
 
-Finding = collections.namedtuple("Finding", "severity message")
+import typing
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Only a type checker reads this. `Context` is a leaf too, so importing it at runtime would not
+    # loop — but it would make this module import one, and the docstring above is why it does not.
+    from .context import Context
+
+
+# A typing.NamedTuple rather than collections.namedtuple, for the field types alone: the same tuple at
+# runtime, and `severity` is one of the two strings below rather than any string a caller invents.
+class Finding(typing.NamedTuple):
+    severity: str
+    message: str
+
 
 # Severity belongs to the finding rather than to the check, because the same check is sometimes exact
 # enough to hold a message back and sometimes only guessing — the term check knows the difference and
@@ -28,3 +42,17 @@ EXACT = "exact"          # no model call. One run is the whole answer, so it is 
 VERDICT = "verdict"      # one model call, one combined verdict. Asking again restates it.
 POOLED = "pooled"        # one model call a run, until the runs stop surfacing anything new.
 MODES = (EXACT, VERDICT, POOLED)
+
+
+class Check(typing.Protocol):
+    """What every check offers, spelled as a type: the contract stated in prose in `__init__.py`.
+
+    Satisfied by a module — one check per file — and by `sequence.Phase`, which is a class because the
+    phases differ only in a prompt file. Nothing calls `isinstance` on it; it exists so that the
+    `check` a caller passes to `pooled` or `mode_of` is a named thing rather than an unspecified object.
+    """
+
+    NAME: str
+    MODE: str
+
+    def run(self, text: str, ctx: Context | None) -> Finding | None: ...

@@ -9,9 +9,12 @@ reported from there.
 Both callers used to do the read-the-prompt-then-ask pair themselves, which is why neither noticed
 that a prompt file it could not read was a pass.
 """
+from __future__ import annotations
+
 import os
 import shutil
 import sys
+from typing import TYPE_CHECKING
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import host  # noqa: E402
@@ -19,10 +22,13 @@ import telling  # noqa: E402
 
 from . import ask as _ask
 
+if TYPE_CHECKING:
+    from .context import Context
+
 BINARY = host.CLI
 
 
-def verdict(name, prompt_path, text, ctx):
+def verdict(name: str, prompt_path: str, text: str, ctx: Context | None) -> tuple[bool, str]:
     """(ok, why) from the model, and a notice instead of a silent pass where it never got asked."""
     prompt = _ask.read_prompt(prompt_path)
     if not prompt:

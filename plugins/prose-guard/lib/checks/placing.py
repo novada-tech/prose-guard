@@ -10,7 +10,15 @@ A leaf for the reason `finding.py` is one: the package imports every check at mo
 that lives in `__init__.py` is unreachable from a check without a circular import. Nothing here needs
 the package, so nothing here has to be reached round the houses.
 """
+from __future__ import annotations
+
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Under the guard, so the leaf stays a leaf: `from .finding import Finding` at runtime would
+    # initialise the package, and the package imports every check. Only a type checker reads this.
+    from .finding import Finding
 
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
@@ -28,7 +36,7 @@ QUOTED = re.compile("|".join(
 LONGEST_NEEDLE = 40
 
 
-def spans(finding):
+def spans(finding: Finding) -> list[str]:
     """Every span the finding quotes, in the order it quotes them."""
     out = []
     for match in QUOTED.finditer(finding.message):
@@ -41,7 +49,7 @@ def spans(finding):
     return out
 
 
-def hits(text, finding):
+def hits(text: str, finding: Finding) -> list[int]:
     """Which sentences of the text this finding quotes, in the order it quotes them.
 
     Word-anchored, because the floor on a span is three characters: `"a a"` inside `a another` is not
@@ -57,13 +65,13 @@ def hits(text, finding):
     return out
 
 
-def points_at(text, finding):
+def points_at(text: str, finding: Finding) -> int | None:
     """Which sentence of the text a finding is about, or None when it quotes nothing that is in it."""
     found = hits(text, finding)
     return found[0] if found else None
 
 
-def identity(text, finding):
+def identity(text: str, finding: Finding) -> int | str:
     """What makes two findings the same item: where it points, or failing that its own words.
 
     This used to be the sentence number or `-1`, and `-1` was used as a dict key. So every finding that
@@ -79,7 +87,7 @@ def identity(text, finding):
     return "said: " + " ".join(finding.message.lower().split())
 
 
-def written_here(text, finding, mine):
+def written_here(text: str, finding: Finding, mine: set[int] | None) -> bool:
     """Whether this finding is about text this call wrote. `mine` is None when all of it is.
 
     Fails closed. An unplaceable finding used to count as somebody else's, which is what turned every
@@ -96,7 +104,7 @@ def written_here(text, finding, mine):
     return not found or any(n in mine for n in found)
 
 
-def wrote_which(text, fragment):
+def wrote_which(text: str, fragment: str) -> set[int] | None:
     """Sentence numbers of `text` that `fragment` covers, or None when the whole text is new.
 
     An edit into the middle of a document must be judged in the document — a list's purpose is stated in

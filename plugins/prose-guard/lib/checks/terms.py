@@ -12,14 +12,20 @@ terms the reader met are unknown. Three unknown out of twenty in a long document
 oversight. Fifteen out of twenty is the tool having the wrong reader in mind, and insisting then is
 worse than saying so. A check that demands wholesale rewriting is usually wrong about the situation.
 """
+from __future__ import annotations
+
 import os
 import sys
+from typing import TYPE_CHECKING
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import jargon  # noqa: E402
 
 from . import finding  # noqa: E402
+
+if TYPE_CHECKING:
+    from .context import Context
 
 NAME = "terms"
 MODE = finding.EXACT
@@ -34,7 +40,7 @@ MAX_SHARE_TO_BLOCK = 1 / 3
 ALWAYS_ACTIONABLE = 2
 
 
-def _ambiguous(said, considered, ctx):
+def _ambiguous(said: dict[str, str], considered: list[str], ctx: Context) -> str:
     """Terms this audience has written out two different ways, or written out differently here.
 
     An abbreviation is not one term. LF is the Linux Foundation in one corpus and a line feed in another,
@@ -70,7 +76,7 @@ def _ambiguous(said, considered, ctx):
     return ". ".join(notes[:3])
 
 
-def run(text, ctx):
+def run(text: str, ctx: Context) -> finding.Finding | None:
     from . import ADVISE, BLOCK, Finding
     bad, considered, said = jargon.examine(text, ctx.audience.is_known)
     # Terms the previous version already used are not terms this text introduces. Rewriting a

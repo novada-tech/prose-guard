@@ -8,11 +8,20 @@ said so. Every field is declared here with the default that means "nothing known
 does not set one gets the documented behaviour rather than a disabled rule, and a field added later
 reaches both callers or fails loudly in one.
 """
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # A type checker only. `import audiences` at runtime would run its module-level `load()` — every
+    # audience file on the machine read — for a class that holds one and looks at none of it.
+    from audiences import Resolved
 
 
 class Context:
-    def __init__(self, audience, situation=None, previous="", mine=None):
-        # audiences.Resolved: whose vocabulary applies, and whether it was measured or guessed.
+    def __init__(self, audience: Resolved, situation: dict[str, Any] | None = None,
+                 previous: str = "", mine: set[int] | None = None) -> None:
+        # Whose vocabulary applies, and whether it was measured or guessed.
         self.audience = audience
         # Facts about the moment rather than the reader — a thread reply, an edit, a public repo. Read
         # by the model-backed checks; keys beginning with _ are not shown to them.
