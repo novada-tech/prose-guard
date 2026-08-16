@@ -82,6 +82,22 @@ jobs:
             echo "::error::.claude-plugin/marketplace.json."
             exit 1
           fi
+          # Different is not the same as newer, and only checking difference let a branch take the
+          # version BACKWARDS while this passed. That is the same failure the check exists to prevent,
+          # in the form it could not see: somebody already on the higher version is offered a lower one
+          # and never moves, and nothing anywhere says so.
+          python3 - "$before" "$after" <<'SEMVER'
+          import sys
+          def parts(v):
+              return tuple(int(x) for x in v.split("."))
+          before, after = sys.argv[1], sys.argv[2]
+          if parts(after) < parts(before):
+              print(f"::error::the version went backwards, {before} -> {after}. Anybody already on "
+                    f"{before} is offered {after} and will never move to it, because an update only "
+                    f"goes forwards. If the lower number is deliberate, say so in the pull request and "
+                    f"expect every existing install to need removing and adding again.")
+              sys.exit(1)
+          SEMVER
           market=$(python3 -c 'import json; d=json.load(open(".claude-plugin/marketplace.json")); print([p["version"] for p in d["plugins"] if p["name"]=="prose-guard"][0])')
           if [ "$market" != "$after" ]; then
             echo "::error::plugin.json says $after and marketplace.json says $market. They must match"
