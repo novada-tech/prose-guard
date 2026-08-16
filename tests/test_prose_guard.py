@@ -3782,13 +3782,93 @@ def test_you_are_told_when_a_message_was_checked_and_what_it_cost():
         check("a denial is its own notice, so it does not also carry a tally",
               [s for _, s in (first, second)], ["", ""])
         check("the message that goes out says how many rewrites it took",
-              third[1], "prose-guard low: 2 rewrites.")
+              third[1].startswith("prose-guard low: 2 rewrites."), True)
 
         # And a clean message says so, which is the half that makes a miss visible: if this line is
         # absent, nothing was checked, and that is now the only thing absence can mean.
         clean = send("Rebuild the payload index after the credential job once more" + pad)
         check("a message nobody objected to says it was checked",
               clean, ("allow", "prose-guard low: nothing to say."))
+
+
+def test_the_argument_before_a_message_goes_out_can_be_read_back():
+    """A held message is an exchange nobody sees, and only the last version reaches anybody.
+
+    So a fair complaint and an unfair one look identical afterwards, and there is no way to tell whether
+    the rewrite improved the message or merely satisfied the tool. The drafts are kept so somebody can
+    judge that.
+
+    This writes message text, which nothing else in this tool does — `discover.py` records the shape of
+    a call and never its content, deliberately. The rule that lets both be true is narrow and is what
+    the second half of this test pins: nothing is written unless a check actually held something back.
+    """
+    import importlib
+
+    import paths
+    import rounds
+
+    with tempfile.TemporaryDirectory() as home:
+        repo = os.path.join(home, "repo")
+        os.makedirs(os.path.join(home, "audiences"))
+        os.makedirs(repo)
+        for argv in (["init", "-q"], ["config", "user.email", "a@b.c"], ["config", "user.name", "t"],
+                     ["remote", "add", "origin", "git@github.com:acme/infra.git"]):
+            subprocess.run(["git", "-C", repo, *argv], capture_output=True, timeout=60)
+        with open(os.path.join(home, "audiences", "team.json"), "w") as fh:
+            json.dump({"name": "team", "who": "engineers here", "matches": {"repos": ["acme/infra"]},
+                       "inherits": ["engineers"], "members": ["a", "b", "c", "d"],
+                       "vocabulary": {"PAYLOAD": 5}, "expansions": {}}, fh)
+        env = {**os.environ, "PROSE_GUARD_HOME": home, "PROSE_GUARD_EFFORT": "low"}
+        pad = (" so anyone rebuilding it later can tell which figures were used and why the whole "
+               "index had to be rewritten before it could be signed off at all")
+
+        def send(text, session="s"):
+            return hook_reply({"session_id": session, "tool_name": "Bash", "cwd": repo,
+                               "tool_input": {"command": f'git commit -m "{text}"'}}, env, 120) or {}
+
+        send("Rebuild the SFTR index after the ADC migration" + pad)
+        send("Rebuild the SFTR index after the credential migration" + pad)
+        out = send("Rebuild the reporting index after the credential migration" + pad)
+
+        was, os.environ["PROSE_GUARD_HOME"] = os.environ.get("PROSE_GUARD_HOME"), home
+        try:
+            importlib.reload(paths)
+            importlib.reload(rounds)
+            kept = rounds.everything()
+        finally:
+            if was is not None:
+                os.environ["PROSE_GUARD_HOME"] = was
+            importlib.reload(paths)
+            importlib.reload(rounds)
+
+        check("the whole argument is one entry", len(kept), 1)
+        check("with a draft for every time it was held back", len(kept[0]["drafts"]), 2)
+        check("each saying which check held it", {d["held_by"] for d in kept[0]["drafts"]}, {"terms"})
+        check("the first draft is the one that was written first",
+              "ADC migration" in kept[0]["drafts"][0]["text"], True)
+        check("and the last entry is what actually went out",
+              "reporting index" in kept[0]["sent"], True)
+        check("the person is told where to read it",
+              "rounds.py" in out.get("systemMessage", ""), True)
+
+    # The other half, and the reason writing text here does not contradict discover.py: a message
+    # nobody objected to leaves nothing behind at all.
+    with tempfile.TemporaryDirectory() as home:
+        env = {**os.environ, "PROSE_GUARD_HOME": home, "PROSE_GUARD_EFFORT": "low"}
+        clean = ("Rebuild the reporting index after the credential migration so anyone rebuilding it "
+                 "later can tell which figures were used and why it had to be rewritten before sign off")
+        for n in range(3):
+            hook_reply({"session_id": f"c{n}", "tool_name": "Bash",
+                        "tool_input": {"command": f'git commit -m "{clean}"'}}, env, 120)
+        on_disk = []
+        for root, _, files in os.walk(home):
+            for f in files:
+                with open(os.path.join(root, f), errors="replace") as fh:
+                    if "reporting index" in fh.read():
+                        on_disk.append(f)
+        check("a message nobody held back writes no rounds directory",
+              os.path.isdir(os.path.join(home, "rounds")), False)
+        check("and its text is nowhere on disk", on_disk, [])
 
 
 def teardown_function(_fn):

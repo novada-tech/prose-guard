@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..", "..", "lib")))
 
 import audiences  # noqa: E402
 import paths  # noqa: E402
+import rounds  # noqa: E402
 import destinations  # noqa: E402
 import discover  # noqa: E402
 import telling  # noqa: E402
@@ -208,7 +209,7 @@ def one_message(found, mine, budget):
     return "\n".join(lines)
 
 
-def say(finding, check, state, path, digest, advice):
+def say(finding, check, state, path, digest, advice, keep=None):
     """Deny on this finding, or add it to the advice. True when the call was denied and we are done.
 
     Split out because an identical resend re-says what a check already decided, and doing that had to
@@ -231,6 +232,8 @@ def say(finding, check, state, path, digest, advice):
                     'PROSE_GUARD_SKIP="<why>" in front of the command excuses that one command. '
                     "If a term is fine for this reader in general, "
                     "`/prose-guard:audiences` is the lasting fix.")
+            if keep:
+                keep(check.NAME, finding.message)
             emit(BLOCK, finding.message, hint)
             return True
     # Advice, or a block that has run out of budget. Say it once per text and move on: giving up on
@@ -254,8 +257,13 @@ def tally(level, rewrites, notes, calls):
         said.append(f"{rewrites} rewrite" + ("s" if rewrites != 1 else ""))
     if notes:
         said.append(f"{notes} note" + ("s" if notes != 1 else ""))
+    # Where to read the argument back, said only when there is one. A rewrite is an exchange that
+    # happened out of sight, and a person who wants to judge whether the complaint was fair needs the
+    # drafts rather than the count. Nothing is written unless a check held something back, so this
+    # line and that file appear together or not at all.
     return (f"prose-guard {level}: " + (", ".join(said) if said else "nothing to say")
-            + (f" ({calls} model call{'s' if calls != 1 else ''})" if calls else "") + ".")
+            + (f" ({calls} model call{'s' if calls != 1 else ''})" if calls else "")
+            + (f". `python3 {rounds.__file__} show 1` reads the drafts" if rewrites else "") + ".")
 
 
 def main():
@@ -343,6 +351,16 @@ def main():
     digest = hashlib.sha1(text.encode()).hexdigest()[:16]
     ctx = context_for(dest, tool, tool_input, cwd)
 
+    # A held message is an exchange nobody sees: the guard objects, the agent rewrites, and only the
+    # last version reaches anybody — so a bad complaint and a good one look identical afterwards. This
+    # keeps the drafts so somebody can read the argument back. It writes message text, which nothing
+    # else here does, and the rule that makes that acceptable is that it only ever runs on the path
+    # below, where a check has actually held something back. See lib/rounds.py.
+    session = str(payload.get("session_id") or "no-session")
+
+    def keep(name, said):
+        rounds.held(session, dest.get("name", "?"), level, text, name, said)
+
     # Walk the checks in order, skipping the ones this exact text already satisfied. A pass belongs
     # to the text that earned it, so an edit made for a later check puts the earlier ones back in
     # play — the only thing that can catch "make this sentence simpler" dropping a fact the reader
@@ -362,7 +380,7 @@ def main():
             # It objected to this exact text and the text has not changed, so the answer has not
             # either. Re-say it without paying for it again.
             finding = checks_module.Finding(remembered["severity"], remembered["message"])
-            if say(finding, check, state, path, digest, advice):
+            if say(finding, check, state, path, digest, advice, keep):
                 return
             continue
         if costs_a_call(check) and state["calls"] >= MAX_CALLS:
@@ -404,7 +422,7 @@ def main():
             finding = finding._replace(severity="advise")
         state["verdicts"][check.NAME] = {"digest": digest, "message": finding.message,
                                      "severity": finding.severity}
-        if say(finding, check, state, path, digest, advice):
+        if say(finding, check, state, path, digest, advice, keep):
             return
 
     # The message is going out, so the argument is over: a new message gets a fresh allowance and a
@@ -416,6 +434,10 @@ def main():
     # check make of this exact text" cannot change, and the digest stored beside it already separates
     # one text from the next, so clearing it only bought the same answer again. It holds one entry per
     # check, so it cannot grow.
+    # The message is going out, so close the argument with the text that finally went. Returns None
+    # when nothing was ever held back, and then nothing has been written at any point.
+    rounds.went_out(session, text)
+
     # Read before they are cleared: this is the whole argument that led to the message going out.
     rewrites = sum(state["denials"].values())
     calls = state["calls"]

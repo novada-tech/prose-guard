@@ -35,6 +35,14 @@ CONTINUED = re.compile(r"\\\n\s*")
 # flag's choices — `--effort {low,medium,high}` made `check_prose.py draft.md` look like a
 # subcommand call, and the check reported a command that works perfectly.
 SUBCOMMANDS = re.compile(r"^\s{2,}\{([a-z][\w,-]*)\}\s*$", re.M)
+# A shell comment after a documented command is ordinary — it is how three commands in a block say what
+# each is for. Reading it as arguments made `# what was argued about` a subcommand called `#`.
+COMMENT = re.compile(r"(?<!\S)#.*$")
+
+
+def arguments(tail):
+    """What a documented invocation actually passes, with any trailing comment removed."""
+    return COMMENT.sub("", tail)
 FAILS = []
 _help = {}
 
@@ -91,6 +99,7 @@ def undocumented():
     ran = set()
     for doc in sources():
         for script_ref, tail in INVOCATION.findall(doc_text(doc)):
+            tail = arguments(tail)
             script = os.path.realpath(resolve(script_ref))
             words = [w for w in tail.split() if not w.startswith("-")]
             ran.add((script, words[0] if words else None))
@@ -204,6 +213,7 @@ def main():
     for doc in sources():
         name = label(doc)
         for script_ref, tail in INVOCATION.findall(doc_text(doc)):
+            tail = arguments(tail)
             seen += 1
             script = resolve(script_ref)
             if not os.path.isfile(script):

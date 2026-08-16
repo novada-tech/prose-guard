@@ -132,6 +132,28 @@ with no `-m`, and text the guard could not read and said so about.
 
 It costs the agent nothing. `systemMessage` never enters the conversation the model is paying for.
 
+### Reading back an argument
+
+A held message is an exchange you never see: the guard objects, the agent rewrites, and only the last
+version reaches anybody. So a fair complaint and an unfair one look identical afterwards, and there is
+no way to tell whether the rewrite improved the message or merely satisfied the tool. The drafts are
+kept so you can judge that:
+
+```
+python3 lib/rounds.py list      # what was argued about, newest first
+python3 lib/rounds.py show 1    # one argument in full: every draft, what held it, what went out
+python3 lib/rounds.py forget    # delete all of it
+```
+
+The tally line names the command when there is something to read, so you do not have to remember it.
+
+**This is the only thing here that writes message text.** Passive discovery records the shape of a call
+and never its content, deliberately, and the rule that lets both be true is narrow: nothing is written
+unless a check actually held a message back. A message that passes leaves no trace, and no `rounds`
+directory is created until the first time one is refused. It lives in your own config directory beside
+everything else this tool remembers, bounded at 40 arguments and 6,000 characters a draft — never in a
+repository, and never anywhere it can be pushed.
+
 A deliberate run of `check_prose.py` needs none of this — it prints every finding, the ceiling it was
 working to, and what it actually spent, straight to the terminal you ran it in.
 
