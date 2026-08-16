@@ -3700,11 +3700,19 @@ def test_a_long_document_cannot_spend_the_whole_session_on_its_first_check():
                 os.environ.pop(key, None) if value is None else os.environ.update({key: value})
     said = json.loads(out.getvalue() or "{}").get("hookSpecificOutput", {})
 
-    # 2,700 words, so the ceiling on one check is 25 runs and the session's whole budget is 20 calls.
-    # Handed the ceiling instead of its share, the first check spends the lot and the second never runs
-    # — which is the level's entire purpose, one concern at a time, gone in silence.
-    check("the first check gets a share of the budget, not the ceiling", running[0].asked <= 10, True)
+    # Handed the whole budget instead of its share, the first check spends the lot and the second never
+    # runs — which is the level's entire purpose, one concern at a time, gone in silence. Asserted as
+    # the property rather than a number: the budget is scaled by document length now, so a number here
+    # would pin today's arithmetic instead of the thing that has to stay true.
+    import importlib.util as _iu
+    spec = _iu.spec_from_file_location("guard_for_share", os.path.join(PLUGIN, "hooks", "scripts",
+                                                                      "outgoing_guard.py"))
+    budgeting = _iu.module_from_spec(spec)
+    spec.loader.exec_module(budgeting)
+    whole = budgeting.budget_for(text, 2)
+    check("the first check does not spend the whole budget", running[0].asked < whole, True)
     check("so the second concern is checked too", running[1].asked > 0, True)
+    check("and neither is starved", min(running[0].asked, running[1].asked) > 1, True)
     check("and both are reported", [c.NAME in str(said.get("additionalContext")) for c in running],
           [True, True])
     # Every run said something different, so nothing was confirmed twice. That is the reason pooling
@@ -3995,6 +4003,39 @@ def test_the_line_says_who_the_message_was_judged_for():
               "for platform" in said_for(repo, "a"), True)
         check("and outside it, the guess is named as a guess",
               "guessing against engineers" in said_for(home, "b"), True)
+
+
+def test_a_long_document_gets_more_calls_than_a_short_message():
+    """A flat budget is a budget for a chat message, silently applied to a document as well.
+
+    At 20 calls divided among six model-backed checks it was three runs each — for 200 words and for
+    10,000 alike — while `ceiling_for` was asking for between six and twenty-five. So the scaling that
+    exists precisely because a long document deserves more care was dead in the hook, and dividing the
+    budget between checks, which was right on its own, made it bind harder.
+
+    A clean document is unaffected either way: pooling stops as soon as a run adds nothing, so one call
+    a check is what good prose costs at any length. This only binds on a document with real defects.
+    """
+    import importlib.util
+
+    from checks import ceiling_for
+
+    spec = importlib.util.spec_from_file_location(
+        "guard_for_budget_scaling", os.path.join(PLUGIN, "hooks", "scripts", "outgoing_guard.py"))
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+
+    def runs_each(words, paying=6):
+        text = "word " * words
+        return min(ceiling_for(text), max(1, guard.budget_for(text, paying) // paying))
+
+    short, medium, long_ = runs_each(200), runs_each(1200), runs_each(5000)
+    check("a longer document gets more runs a check", short < medium < long_, True)
+    check("and a short one is not starved to pay for it", short >= 6, True)
+    check("nothing exceeds the per-check ceiling",
+          [w for w in (200, 1200, 5000) if runs_each(w) > ceiling_for("word " * w)], [])
+    check("and the whole thing is still bounded",
+          guard.budget_for("word " * 100000, 6) <= guard.MOST_CALLS, True)
 
 
 def teardown_function(_fn):

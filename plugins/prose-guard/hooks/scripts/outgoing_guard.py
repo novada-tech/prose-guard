@@ -41,7 +41,18 @@ from checks import (BLOCK, EFFORT, IN_ORDER as CHECKS, Context, ceiling_for,  # 
 
 MAX_PER_CHECK = 2      # one complaint, then one more if the fix did not land
 MAX_DENIALS = 6        # a ceiling across all of them, so one message cannot eat a session
-MAX_CALLS = 20         # calls one message may cost, across every check and every run of one
+# Calls one message may cost, across every check and every run of one. Scaled by length, because a flat
+# number is not a budget for a document — it is a budget for a chat message, silently applied to both.
+#
+# Flat at 20 it bound in every case: 20 divided among six model-backed checks is three runs each, for a
+# 200-word message and a 10,000-word document alike, while `ceiling_for` was asking for between six and
+# twenty-five. The whole point of scaling runs with length was dead in the hook, and dividing the budget
+# between the checks — which was right, and bought five concerns instead of one — made it bind harder.
+#
+# A clean document is unaffected: pooling stops as soon as runs stop finding things, so one call a check
+# is what good prose costs whatever its length. This only ever binds on a document with real defects,
+# which is the case that deserves the calls.
+MOST_CALLS = 90        # the absolute ceiling, so a runaway cannot happen
 MAX_UNREADABLE = 2     # times a session is asked to make its text visible before it is let through
 
 
@@ -261,6 +272,16 @@ def reader(level, audience):
     return f"prose-guard {level}, no audience for this — guessing against {guess}"
 
 
+def budget_for(text, paying):
+    """Model calls this message may cost, scaled the way the per-check ceiling is scaled.
+
+    `ceiling_for` is what one check would spend on this text if it kept finding things; times the
+    checks that cost anything, that is what the message would spend unbounded. MOST_CALLS is the stop.
+    """
+    return min(MOST_CALLS, max(1, paying) * ceiling_for(text))
+
+
+
 def tally(level, rewrites, notes, calls, audience=None):
     """The one line the person sees when a message has been checked.
 
@@ -440,6 +461,8 @@ def main():
     # ask for a one-word fix. Being sent back for a doubled word and then again for an unexplained
     # acronym is one turn wasted, and a held turn is the most expensive thing this tool does.
     free_findings, free_checks = [], []
+    # What this message may spend, from its own length. See budget_for.
+    budget = budget_for(text, sum(1 for c in running if costs_a_call(c)))
     unpaid = [c for c in running if costs_a_call(c)
               and (state["verdicts"].get(c.NAME) or {}).get("digest") != digest]
     for check in running:
@@ -457,7 +480,7 @@ def main():
             if say(finding, check, state, path, digest, advice, keep):
                 return
             continue
-        if costs_a_call(check) and state["calls"] >= MAX_CALLS:
+        if costs_a_call(check) and state["calls"] >= budget:
             state["verdicts"][check.NAME] = {"digest": digest}
             continue
         try:
@@ -468,7 +491,7 @@ def main():
             # whatever was left meant the first one took it: on an edit of one sentence in a 1,960-word
             # file, all nineteen calls went to `relevance` and four concerns never ran at all. A share
             # each buys five concerns for the same money, which is what `high` is being paid for.
-            share = max(1, (MAX_CALLS - state["calls"]) // max(1, len(unpaid)))
+            share = max(1, (budget - state["calls"]) // max(1, len(unpaid)))
             found, firm, spent = pooled(check, text, ctx, min(ceiling_for(text), share))
             state["calls"] += spent
             if costs_a_call(check):
