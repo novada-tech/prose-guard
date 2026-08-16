@@ -45,10 +45,15 @@ measured both directions on 3,170 real messages: [thresholds.md](thresholds.md),
 what the measurement fails to show.
 
 Three limits keep that bounded. Each check gets two attempts, and a session gets six holds in total.
-Model calls are capped per message rather than per session — twenty of them, and a check that cannot be
-paid for is skipped for that message; a check that may run twenty times makes "one call per check"
-false. So two checks that genuinely disagree make one message expensive and then let it through, rather
-than hanging your turn.
+Model calls are capped per message rather than per session, and the cap is scaled by the length of the
+text rather than flat: what one check would spend if it kept finding things, times the checks that cost
+anything, up to ninety. A check that cannot be paid for is skipped for that message. So two checks that
+genuinely disagree make one message expensive and then let it through, rather than hanging your turn.
+
+A flat cap was tried first, and it was a cap for a chat message quietly applied to documents as well —
+twenty divided among six checks is three runs each, for two hundred words and for ten thousand alike. A
+clean document is unaffected either way, because pooling stops as soon as a run adds nothing: one call
+per check is what good prose costs at any length. The cap only binds on a document with real defects.
 
 ## What counts as sending
 
