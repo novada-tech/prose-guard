@@ -106,27 +106,21 @@ already has.
 | `medium` | plus one advisory judgement call over the five concerns | +19s |
 | `high` | five separate checks, re-verified after each edit | +75s |
 
-The seconds were measured when `high` ran four checks; the fifth was added afterwards and they have not
-been measured again. `measure/measure_cost.py --levels disabled,high --reps 5` refreshes them, and spends
-real model calls doing it.
+The seconds were measured when `high` ran four checks, so `high`'s is a floor.
 
-**Pick `medium`.** `/prose-guard:setup` asks and writes the answer for you. Two measured results make
-that choice less obvious than it looks:
-
-- **`low` is not the cheap option.** It spends no model call, but holding a message back costs a whole
-  agent turn on your own context — dearer than the small call `medium` adds.
-- **`high` is not known to be better.** Both satisfied every concern on every message measured, so the
-  measurement could not tell them apart — which is not the same as their being equal.
-
-Those figures come from five paired sessions per level on one task, with `claude-sonnet-5` writing the
-message. Read the ordering rather than the digits: your own traffic and your own model will move them.
+**Pick `medium`.** `/prose-guard:setup` asks and writes the answer for you. `low` is not the cheap
+option and `high` is not measurably better, which is less obvious than it looks — the numbers, the
+unguarded run they were priced against, and what the measurement cannot tell you are in
+[docs/design-notes.md](docs/design-notes.md).
 
 ## Reading further
 
 | | |
 |---|---|
-| [docs/reference.md](docs/reference.md) | what counts as sending, managing audiences, where files live, checking a draft by hand |
-| [docs/design-notes.md](docs/design-notes.md) | what was measured, and the two ideas that did not survive it |
+| [docs/reference.md](docs/reference.md) | how it behaves once you are using it: what counts as sending, what the caps do, where files live, checking a draft by hand |
+| [docs/design-notes.md](docs/design-notes.md) | what was measured, and the designs that did not survive it |
+| [docs/audiences.md](docs/audiences.md) | managing audiences, and sharing one with a team |
+| [docs/sources.md](docs/sources.md) | where a vocabulary comes from: the contract, and recipes for chat, mail and wikis |
 | [docs/thresholds.md](docs/thresholds.md) | the two numbers that decide whether a message is held back |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | how to test and measure a change |
 | [measure/](measure/) | the harnesses that do the measuring |

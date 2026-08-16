@@ -163,7 +163,8 @@ one above, so the test could not have shown a problem even if there were one.
 
 ## Effort levels, priced against a control in the same run
 
-Five paired sessions per level, medians, one fixture and one model.
+Five paired sessions per level on one task, medians, one fixture, with `claude-sonnet-5` writing the
+message. Read the ordering rather than the digits: your own traffic and your own model will move them.
 
 | level | wall clock | your turns | your output tokens | model calls |
 |---|---|---|---|---|
@@ -177,6 +178,15 @@ own context, which is dearer than the small call `medium` adds.
 
 `high` satisfied every concern on every message measured, and so did `medium`. That is a judge at its
 ceiling, not evidence they are equal.
+
+The wall clock was measured when `high` ran four checks; the fifth was added afterwards and has not been
+measured again, so `high`'s figure is a floor. Refresh the whole table with:
+
+```
+python3 measure/measure_cost.py --levels disabled,high --reps 5
+```
+
+That spends real model calls doing it.
 
 ## Two proposals that did not survive contact
 
