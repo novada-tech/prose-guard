@@ -432,18 +432,9 @@ says so when you have just created that situation.
 
 ## Managing audiences
 
-```
-python3 lib/audiences.py list
-python3 lib/audiences.py show platform-team
-python3 lib/audiences.py accept platform-team GKE      # one term is wrong; applies immediately
-python3 lib/audiences.py match platform-team channel C054ZDE533R   # change when it applies
-python3 lib/audiences.py share platform-team --to ~/work/team-scripts/claude/audiences
-```
-
-Files on disk, one per audience. Read them, diff them, edit them.
-
-[audiences.md](audiences.md) is the whole of it: the three layers that get read, how one person
-measures an audience and everybody else gets it by pulling, and what does and does not travel with it.
+[audiences.md](audiences.md) is the whole of it: every command, the three layers that get read, how one
+person measures an audience and everybody else gets it by pulling, and what does and does not travel
+with it. Files on disk, one per audience — read them, diff them, edit them.
 
 What an audience *knows* comes from scanning writing those people already did, from any source you can
 pipe — [sources.md](sources.md) has the contract and recipes for chat, mail and wikis. What an audience

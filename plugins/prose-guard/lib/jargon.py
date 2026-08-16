@@ -35,11 +35,9 @@ LOOK_BACK = 120         # how far before a bracket the phrase may start
 
 
 def _system_words():
-    """The system word list, used to tell an acronym from a capitalised English word.
+    """The system word list. `is_acronym` uses it to tell an acronym from a capitalised English word.
 
-    An acronym is by definition not a word, so this belongs here rather than in any audience: THE,
-    WAS, LOGGER, NULL, ERROR and ASCII all lowercase to real words and were being reported as jargon
-    nobody had explained. A hand-kept exclusion list would grow for ever.
+    A word list rather than a hand-kept list of exceptions, because the exceptions would grow for ever.
     """
     for path in ("/usr/share/dict/words", "/usr/dict/words"):
         try:
@@ -134,8 +132,9 @@ def _base_forms(low):
 def is_acronym(token):
     """False when this is a capitalised English word rather than an acronym.
 
-    An acronym is by definition not a word. THE, WAS, LOGGER, NULL and ASCII all lowercase to real
-    words and were being reported as jargon nobody had explained.
+    An acronym is by definition not a word, so this belongs here rather than in any audience: THE,
+    WAS, LOGGER, NULL, ERROR and ASCII all lowercase to real words and were being reported as jargon
+    nobody had explained.
     """
     low, words = token.lower(), _words()
     return low not in words and not any(base in words for base in _base_forms(low))

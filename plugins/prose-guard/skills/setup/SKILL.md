@@ -23,7 +23,7 @@ rather than the five it runs now — so the ordering is the finding and the digi
 | level | what runs | added per message sent |
 |---|---|---|
 | `disabled` | nothing | — |
-| `low` | the term check only, no model call | +12s |
+| `low` | the two deterministic checks only, no model call | +12s |
 | `medium` | plus one advisory writing check | +19s |
 | `high` | five separate checks, re-verified after each edit | +75s |
 
@@ -107,9 +107,16 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/discover.py" --share <a directory their team 
 It copies only what this machine added, never the shipped set, and skips anything already there.
 Everyone else registers the directory once, or has their team's setup script do it.
 
-Write confirmed entries to `<config dir>/destinations.json`, whose shape is documented in
-[`data/destinations.json`](../../data/destinations.json). User entries are read first, so the same
-file also overrides a shipped entry — that is how to stop checking something.
+Write confirmed entries with `add`, which refuses what the loader would have dropped — a cap that is
+not a level, a tool with no field carrying the prose, a pattern that does not compile:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/destinations.py" add "our chat" \
+  --tool chat_send --text-field body --max-severity advise
+```
+
+Yours are read before the shipped set, so giving one the same name overrides it. To stop checking a
+shipped one entirely, `destinations.py off "<name>"`.
 
 Already covered without asking: chat messages, GitHub and GitLab comments and PR descriptions,
 documentation pages, issue trackers, `git commit` and `git tag -m`, and prose files that are inside
