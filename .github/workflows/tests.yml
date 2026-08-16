@@ -14,9 +14,32 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        # The oldest interpreter this plugin claims, and the newest anybody will run it on. 3.9.6 is
+        # macOS's `/usr/bin/python3`, which is what a first-time user has and what the hook will
+        # actually be executed by — the plugin needs no virtualenv, so it takes whatever python3 is
+        # there. The runners default to 3.12+, so before this the floor was never tested at all: one
+        # `dict[str, int]` in a signature without `from __future__ import annotations` is a green
+        # pipeline and a hook that will not import for every macOS user.
+        #
+        # This is cheap and exact where a type checker is neither. mypy 2.3.1 cannot target 3.9 at
+        # all, and run at its default version it reports 33 errors here, of which the three I read
+        # are all correct at runtime — `proc.stdout` is never None with `stdout=PIPE`, the quote
+        # pairs are two characters, `known` is a shadowed local. Neither of the two bugs found in
+        # this pull request is a static type error, so a gate on it would have caught neither.
+        python: ['3.9', '3.x']
+        exclude:
+          # `macos-latest` is arm64 and the 3.9 builds are x64 only — the newest is 3.9.25, darwin/x64
+          # — so this leg would fail while installing the interpreter and say nothing about the code.
+          # What it would have tested is not OS-specific anyway: a builtin generic in a signature
+          # without the future import fails to import on 3.9 everywhere.
+          - os: macos-latest
+            python: '3.9'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
 
       # No system word list is installed, and that is the point: the dictionary ships with the
       # plugin, so a verdict does not depend on which list a machine happens to have. Ubuntu's
