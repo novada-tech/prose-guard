@@ -25,7 +25,8 @@ back. `finding.py` exists because that circle was real. Everything the ladder is
 module down and is re-exported below, so a caller writes `from checks import pooled` and a check
 writes `from .pooling import pooled`, and both get the same function.
 
-    finding.py    what a check returns, and the three modes it can run in
+    finding.py    what a check returns, the three modes it can run in, and `Check` — the three
+                  lines above, stated as a type so a caller can name what it is being passed
     context.py    what a check is told about the reader and the moment
     placing.py    where in the text a finding points, and whether this call wrote it
     pooling.py    what one run costs, and running a check until it stops yielding
