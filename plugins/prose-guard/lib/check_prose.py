@@ -30,15 +30,23 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audiences  # noqa: E402
 import paths  # noqa: E402
-from checks import BLOCK, config, for_effort, passes_for, pooled  # noqa: E402
+from checks import (BLOCK, Context, ceiling_for, config, costs_a_call, for_effort,  # noqa: E402
+                    notice, pooled)
 
 
-class Context:
-    def __init__(self, audience, who=None):
-        self.audience = audience
-        self.situation = {"destination": "a draft being checked before it is sent anywhere"}
-        if who:
-            self.situation["who the author says reads this"] = who
+# The budget a deliberate run may spend, in model calls. There was none: five pooled checks each free
+# to run to their own ceiling cost 125 calls and about half a million input tokens on a 3,200-word
+# document — on the path /prose-guard:rewrite-for-audience opens with, which tells the agent it costs
+# five calls and then says to run it again. Higher than the hook's twenty because this is one
+# deliberate run rather than every message someone sends.
+MAX_CALLS = 40
+
+
+def context_for(audience, who=None):
+    situation = {"destination": "a draft being checked before it is sent anywhere"}
+    if who:
+        situation["who the author says reads this"] = who
+    return Context(audience, situation)
 
 
 # What a person's own writing scores here, measured on one message a senior engineer rewrote himself:
@@ -110,9 +118,6 @@ def main():
     ap.add_argument("--who",
                     help="describe the reader in a sentence, for the model-based checks. It cannot "
                          "change which terms are known; use --for for that")
-    ap.add_argument("--passes", type=int, metavar="N",
-                    help="override how many times each check runs. The default scales with the length "
-                         "of the text, and is the same number the hook uses on the same text")
     ap.add_argument("--effort", choices=[x for x in config.LEVELS if x != "disabled"],
                     default="high")
     a = ap.parse_args()
@@ -138,7 +143,7 @@ def main():
     else:
         resolved = audiences.resolve({})
 
-    ctx = Context(resolved, a.who)
+    ctx = context_for(resolved, a.who)
     # Say what each half is working from. Reporting only "none named" hid the fact that a --who was
     # passed and used, so a reader could not tell whether their sentence had done anything.
     if resolved.resolved:
@@ -151,11 +156,19 @@ def main():
               f"/prose-guard:audiences measures your own.")
     if a.who:
         print(f'reader described as:  "{a.who}"  (read by the model-based checks, not by terms)')
-    passes = a.passes or passes_for(text)
+    running = for_effort(a.effort)
+    # A share each, so the first check cannot spend the run. Same rule as the hook, one line different:
+    # a deliberate run may spend more of them.
+    paying = max(1, sum(1 for c in running if costs_a_call(c)))
+    passes = min(ceiling_for(text), max(1, MAX_CALLS // paying))
     print(f"up to {passes} runs of each check, stopping when a run adds nothing")
-    problems, loose = 0, 0
-    for check in for_effort(a.effort):
-        found, firm, _ = pooled(check, text, ctx, passes)
+    problems, loose, spent = 0, 0, 0
+    for check in running:
+        left = max(1, (MAX_CALLS - spent) // max(1, paying))
+        found, firm, cost = pooled(check, text, ctx, min(passes, left))
+        spent += cost
+        if costs_a_call(check):
+            paying = max(1, paying - 1)
         if not found:
             print(f"  {check.NAME:10s} ok")
             continue
@@ -166,6 +179,10 @@ def main():
             print(f"  {check.NAME:10s} [{mark}] {finding.message}" if n == 0
                   else f"  {'':10s}            {finding.message}")
     print()
+    for missed in notice.noted():
+        # A check that never ran reads exactly like a check that passed, so it is said out loud rather
+        # than left to be inferred from a clean report.
+        print(f"  NOT CHECKED: {missed}")
     print(verdict(a.file, problems, passes))
     return 0
 

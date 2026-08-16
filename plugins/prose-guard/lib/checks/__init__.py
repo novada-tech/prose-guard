@@ -40,11 +40,6 @@ def mode_of(check):
     here — up to `ceiling_for(text)` model calls for a check whose author expected one.
     """
     mode = getattr(check, "MODE", None)
-    if mode is None and getattr(check, "COSTS_A_CALL", None) is False:
-        # terms.py and mechanics.py still declare the older boolean, and both are EXACT. Translated
-        # rather than defaulted: a check that declares neither attribute is a mistake, not an EXACT
-        # check, and these two lines go when those files name their mode.
-        mode = EXACT
     if mode not in MODES:
         raise ValueError(f"check {getattr(check, 'NAME', check)!r} declares no MODE "
                          f"(one of {', '.join(MODES)})")
@@ -202,11 +197,6 @@ def ceiling_for(text):
     something, so a clean document costs one call a check whatever its length.
     """
     return max(BASE_CEILING, min(MOST_RUNS, 1 + len(text.split()) // WORDS_PER_RUN))
-
-
-def passes_for(text):
-    """Kept as the name the measurement harnesses use. The ceiling, not a fixed number of runs."""
-    return ceiling_for(text)
 
 
 def pooled(check, text, ctx, passes=None, dry_runs=DRY_RUNS):

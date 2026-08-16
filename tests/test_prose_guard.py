@@ -2490,6 +2490,44 @@ def test_the_call_budget_is_divided_between_the_checks_not_handed_over():
     check("for the same money", (before_calls, after_calls), (budget, budget))
 
 
+def test_a_check_that_could_not_run_says_so_instead_of_reading_as_a_pass():
+    """Every failure path allows the call, which is right and is also the same answer as clean prose.
+
+    An unreadable phases directory turned `high` into `low`, charged nothing and said nothing. No
+    `claude` on PATH did the same at every level above `low`. `checks/config.misspelt()` exists because
+    a setting that silently disables checking is the worst failure this tool has; these are that same
+    failure, and they now get the same treatment — recorded, and read out by whoever can reach a person.
+    """
+    import checks
+    from checks import model, notice, sequence
+
+    notice.forget()
+    check("nothing to say when everything is readable",
+          (len(sequence.phases()) > 0, notice.noted()), (True, []))
+
+    notice.forget()
+    moved = sequence.PHASE_DIR + ".moved-by-test"
+    os.rename(sequence.PHASE_DIR, moved)
+    try:
+        got = sequence.phases()
+    finally:
+        os.rename(moved, sequence.PHASE_DIR)
+    check("no checks, and it is said", (got, len(notice.noted())), ([], 1))
+    check("naming the directory it could not read",
+          sequence.PHASE_DIR in notice.noted()[0], True)
+
+    notice.forget()
+    was = os.environ["PATH"]
+    os.environ["PATH"] = "/nonexistent-so-there-is-no-checker"
+    try:
+        ok, why = model.verdict("relevance", sequence.phases()[0]._path, "some text", None)
+    finally:
+        os.environ["PATH"] = was
+    check("a missing checker still allows the call", (ok, why), (True, ""))
+    check("and says that it never ran", any("PATH" in n for n in notice.noted()), True)
+    notice.forget()
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 

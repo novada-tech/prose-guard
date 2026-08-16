@@ -321,9 +321,19 @@ def main():
     state["calls"] = 0
     save_state(path, state)
 
-    if not advice:
+    # A check that could not run reads exactly like a check that passed. Said to the person, once a
+    # session, because it is their install that is not doing what they set it to do — the same bargain
+    # a misspelt effort level gets.
+    missed = [m for m in checks_module.notice.noted() if m not in state.get("told_missing", [])]
+    if missed:
+        state.setdefault("told_missing", []).extend(missed)
+        save_state(path, state)
+    for_user = "prose-guard: " + "; ".join(missed) + "." if missed else ""
+
+    if not advice and not for_user:
         allow()
-    emit("advise", " ".join(advice) + " Advice from a noisy check, not a blocker.")
+    emit("advise", (" ".join(advice) + " Advice from a noisy check, not a blocker.") if advice else "",
+         for_user=for_user)
 
 
 if __name__ == "__main__":
