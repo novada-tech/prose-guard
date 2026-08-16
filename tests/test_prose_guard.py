@@ -3603,6 +3603,86 @@ def test_a_phase_can_declare_that_it_only_advises():
           {s for n, s in severities.items() if n != "promise"}, {BLOCK})
 
 
+def test_a_long_document_cannot_spend_the_whole_session_on_its_first_check():
+    """Two bounds that live inside the hook, and every check that can reach them costs a model call.
+
+    So neither could be seen from outside without a model: the budget could be handed to the first
+    check whole, and one run's finding could be enough to hold a message back, with the suite green.
+    `test_the_call_budget_is_divided_between_the_checks_not_handed_over` re-implements the arithmetic
+    in the test, which is exactly why the real call site was free.
+
+    The hook is run in this process against stub checks instead. No model, no subprocess, and the
+    question asked is the orchestration's — how much may one check spend, and what is a finding worth —
+    rather than what a model makes of the prose.
+    """
+    import contextlib
+    import importlib.util
+    import io
+    import itertools
+
+    import checks as checks_module
+
+    spec = importlib.util.spec_from_file_location(
+        "outgoing_guard_for_budget", os.path.join(PLUGIN, "hooks", "scripts", "outgoing_guard.py"))
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+
+    class Ever:
+        """Never stops finding something new, and never says the same thing twice: the worst case for a
+        budget, and the case where nothing can be relied on."""
+
+        MODE = checks_module.POOLED
+
+        def __init__(self, name):
+            self.NAME, self._n, self.asked = name, itertools.count(), 0
+
+        def run(self, text, ctx):
+            self.asked += 1
+            return checks_module.Finding(
+                checks_module.BLOCK, f'The "{self.NAME} complaint {next(self._n)}" is unclear')
+
+    running = [Ever("first"), Ever("second")]
+    text = " ".join(f"Sentence number {n} about the resolver and what it does." for n in range(300))
+    with tempfile.TemporaryDirectory() as tmp:
+        was = {k: os.environ.get(k) for k in ("PROSE_GUARD_HOME", "PROSE_GUARD_STATE")}
+        os.environ["PROSE_GUARD_STATE"] = os.path.join(tmp, "state")
+        # Rebuilt against a home of its own, because the modules the hook holds are the ones this file
+        # has been reloading all along: a destination another test switched off, or a complaint another
+        # test's deliberately broken config left behind, makes the hook return before any check runs —
+        # and then every assertion below is about a check that was never asked.
+        fresh(os.path.join(tmp, "home"))
+        stdin, for_effort = sys.stdin, checks_module.for_effort
+        out = io.StringIO()
+        sys.stdin = io.StringIO(json.dumps(
+            {"tool_name": "mcp__slack__slack_send_message", "session_id": "budget", "cwd": tmp,
+             "tool_input": {"channel_id": "C1", "message": text}}))
+        try:
+            checks_module.for_effort = lambda level=None: running
+            guard.CHECKS = running
+            with contextlib.redirect_stdout(out):
+                guard.main()
+        except SystemExit:
+            pass
+        finally:
+            sys.stdin, checks_module.for_effort = stdin, for_effort
+            for key, value in was.items():
+                os.environ.pop(key, None) if value is None else os.environ.update({key: value})
+    said = json.loads(out.getvalue() or "{}").get("hookSpecificOutput", {})
+
+    # 2,700 words, so the ceiling on one check is 25 runs and the session's whole budget is 20 calls.
+    # Handed the ceiling instead of its share, the first check spends the lot and the second never runs
+    # — which is the level's entire purpose, one concern at a time, gone in silence.
+    check("the first check gets a share of the budget, not the ceiling", running[0].asked <= 10, True)
+    check("so the second concern is checked too", running[1].asked > 0, True)
+    check("and both are reported", [c.NAME in str(said.get("additionalContext")) for c in running],
+          [True, True])
+    # Every run said something different, so nothing was confirmed twice. That is the reason pooling
+    # exists, and blocking on `found` rather than on `firm` throws it away: a single run sampling from
+    # what is above the bar holds the message back on its own.
+    check("a finding no second run confirmed does not hold the message back",
+          said.get("permissionDecision"), None)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
