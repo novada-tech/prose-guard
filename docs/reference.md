@@ -1,7 +1,11 @@
 # Reference
 
-Detail that would get in the way of [the README](../README.md). Read it when you
-need it.
+How the tool behaves once you are using it: what counts as sending, what the caps do, where your files
+live, and how to check a draft before you send it. Read it when you need it.
+
+A section belongs here if a reader acts on it. Anything whose subject is a measurement, or a design
+decision that did not survive one, belongs in [design-notes.md](design-notes.md) instead, and this file
+links to it where the two meet.
 
 ## What it does when it disagrees with you
 
@@ -55,7 +59,7 @@ That last rule replaces matching on `.md`. What matters is whether somebody othe
 the file, and "it gets committed" is a deterministic proxy — so your README is checked and your scratch
 notes are not.
 
-Two gaps, stated rather than hidden, and one that used to be a gap.
+Two gaps are stated rather than hidden.
 
 `git commit` with no `-m` opens an editor, and that text never reaches a tool call. Nothing can be done
 about that from here.
@@ -63,11 +67,9 @@ about that from here.
 The plumbing — `git commit-tree`, `filter-branch --msg-filter`, `filter-repo` — is not matched, because
 those rewrite text somebody else wrote, usually in bulk, which is not the act this checks.
 
-`--body "$(...)"` used to pass in silence. The destination matches, the prose is a shell substitution the
-tool call does not contain, and nothing was checked — which reads exactly like a check that passed.
-
-Most of those are now worked out rather than complained about, because asking somebody to restructure a
-command that already works is a poor trade:
+`--body "$(...)"` used to be a third gap. The destination matches, the prose is a shell substitution the
+tool call does not contain, and nothing was checked — which reads exactly like a check that passed. Most
+forms are now worked out rather than complained about:
 
 | written as | what happens |
 |---|---|
@@ -85,14 +87,12 @@ arguments and git rejects them.
 What is held back is held back rather than mentioned, because advice was tried first and was not enough:
 the pull request that introduced the note went out unchecked while the note explained, afterwards, that
 it had. Bounded at two like every other denial, then said as advice, so a caller that cannot comply is
-not stuck. And "resolved but too short to judge" is silent — that is not a gap, and sending someone to
+not stuck. "Resolved but too short to judge" is silent — that is not a gap, and sending someone to
 fix a working command would be noise.
 
 All of it is per destination without naming any: both halves read the destination's own `text_arg`, so
 `git commit -m "$(...)"` and `glab mr note --message "$(...)"` behave the same, and one added later does
-too. And the plumbing — `git commit-tree`,
-`filter-branch --msg-filter`, `filter-repo` — is not matched at all, deliberately: those rewrite text
-somebody else wrote, usually in bulk, which is not the act this checks.
+too.
 
 **Your tools are not mine**, so setup asks rather than assumes. `lib/discover.py` reads four local
 sources — MCP servers you have configured, outbound command-line tools on your `PATH`, how often each
@@ -100,19 +100,16 @@ appears in your **shell history** (much better evidence than "installed"), and a
 already gone out unchecked. Then the agent names the tools it can actually see, proposes destinations,
 and waits for you.
 
-You will install something new next month, and the guard notices on its own: when nothing claims a
-call carrying long prose it records the *shape* — `bash: git commit -m`, `tool: example__post [body]` —
-never the text. It mentions it **once**, on about the third use, and never again. Decline and it is
-declined for good.
+You will install something new next month, and the guard notices on its own. For every call carrying
+outgoing prose that nothing has claimed it records the *shape* — `bash: git commit -m`,
+`tool: example__post [body]` — never the text. It mentions it **once**, on the third use, and never
+again, so nothing can nag you twice about the same thing; decline and it is declined for good. At most
+50 shapes are tracked.
 
 You see these, not just the agent. A hook has two channels — `additionalContext` reaches the model and
 `systemMessage` reaches the person, and the docs are explicit that neither sees the other. Discovery used
 only the first, so a decision that is yours was being made available only to whatever agent happened to be
 running. It goes to both now: you see the notice, and the agent knows enough to offer to act on it.
-
-For every call carrying outgoing prose it records the *shape* — `bash: git commit -m`, `tool: example__post
-[body]` — never the text. It mentions it **once**, on the third use, and never again. Decline and it is
-declined for good, so nothing can nag you twice about the same thing. At most 50 shapes are tracked.
 
 Long is not the same as outgoing, and getting that wrong is expensive: one mention per shape means a
 mention spent on a search pattern is a mention gone. In real use it spent all six of them on nothing —
@@ -120,8 +117,9 @@ mention spent on a search pattern is a mention gone. In real use it spent all si
 file the prose-file destination already decides on. So a candidate now has to read like prose: at least
 25 words, at least two sentences, and at least 70% ordinary words. A regex has words and no sentences; a
 script has punctuation and few real words. Fields that are structurally not outgoing — `old_string`,
-`prompt`, `command`, `pattern` — are skipped whatever they contain, and the file-writing tools are left
-to the destination that already claims prose files.
+`prompt`, `command`, `pattern` — are skipped whatever they contain. Writing a file is not excluded: the
+prose-file destination only claims a file git already tracks, so a document written outside any git
+repository is exactly the case that needs mentioning.
 
 ## Not every destination is worth the same effort
 
@@ -207,14 +205,10 @@ Measured on two real audiences — 268 people on a public data-model repository,
 channel — intersecting costs 103 of the modellers' 220 terms and leaves 117. It does not collapse,
 because both inherit the same baseline and that floors the intersection.
 
-There is deliberately **no subset elimination**. Dropping an audience whose members sit inside another
-looks like a free simplification and is not sound: breadth measured in the larger group does not imply
-every member knows the term, and dropping an audience only ever widens the vocabulary. A test pins it.
-
-Exact overlap between audiences is **not computable**, and the tool says so rather than pretending. A
-chat export names someone "Sam"; a repository names the same person "sam-t". A plain
-intersection reported zero shared members while ten people were in both, so `overlap` prints a
-prefix-matched guess, labelled as one, and nothing depends on it.
+Two things it will not do, both of which looked like free simplifications and are not. An audience whose
+members sit inside another is still combined in, never dropped. And exact overlap between audiences is
+**not computable**, so `overlap` prints a prefix-matched guess, labelled as one, and nothing depends on
+it. Why neither survived: [design-notes.md](design-notes.md).
 
 ## One abbreviation, two meanings
 
