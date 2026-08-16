@@ -44,6 +44,7 @@ host hosts port ports server servers client clients service services
 memory disk cache caches pool pools thread threads process processes
 level levels mode modes flag flags option options config
 logger loggers coin coins kafka broker brokers queue queues topic topics ascii unicode
+id ids ad ads app apps repo repos env envs
 scale scaled limit limits quota quotas rate rates
 plan plans stage stages phase phases cycle cycles
 team teams member members people person

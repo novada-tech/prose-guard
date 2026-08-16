@@ -18,6 +18,7 @@ detection serves any audience. audiences.py decides what is known.
 """
 from __future__ import annotations
 
+import gzip
 import os
 import re
 import sys
@@ -37,24 +38,35 @@ BEFORE = re.compile(r"[^()]{2,}$")
 LOOK_BACK = 120         # how far before a bracket the phrase may start
 
 
-def _system_words() -> set[str]:
-    """The system word list. `is_acronym` uses it to tell an acronym from a capitalised English word.
+WORD_LIST = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "..", "data", "english-words.txt.gz")
 
-    A word list rather than a hand-kept list of exceptions, because the exceptions would grow for ever.
+
+def _english_words() -> set[str]:
+    """The English dictionary, shipped rather than read from the machine.
+
+    `is_acronym` uses it to tell an acronym from a capitalised English word — a word list rather than a
+    hand-kept list of exceptions, because the exceptions would grow for ever.
+
+    It is shipped because reading the machine's own list made the verdict depend on which list the
+    machine happened to have. macOS has `web2`; Ubuntu has `wamerican`, which contains `api`, `amd`,
+    `aws`, `ids` and `ads` — so the same message was held back on one machine and let through on
+    another, and a CI run went red over exactly that. Containers often have no dictionary at all, which
+    is a third answer again. See data/english-words.README.
+
+    Two-letter words are kept, or IS, IT, ON and AS survive as "acronyms" and every message using one is
+    held back. The cost is that IT as in information technology is filtered too, which is the right way
+    round: a message writing IT almost never means that.
     """
-    for path in ("/usr/share/dict/words", "/usr/dict/words"):
-        try:
-            with open(path, encoding="utf-8", errors="ignore") as fh:
-                # Read and split the whole file rather than walking it line by line: the same set,
-                # 21.0 ms instead of 35.8 ms on a 235,976-line web2, because the splitting happens in
-                # C over one buffer instead of in Python per line.
-                # two-letter words included, or IS, IT, ON and AS survive as "acronyms". The cost is
-                # that IT as in information technology is filtered too, which is the right way
-                # round: a message using "IT" is almost never using it as a term to explain.
-                return {w for w in fh.read().lower().split() if len(w) > 1}
-        except OSError:
-            continue
-    return set()
+    try:
+        with gzip.open(WORD_LIST, "rt", encoding="utf-8", errors="ignore") as fh:
+            # Read and split the whole file rather than walking it line by line: the same set, and the
+            # splitting happens in C over one buffer instead of in Python per line. Gzipped costs 2.8ms
+            # more than plain and saves 1.7MB in the repository, on a read that only happens once a
+            # message is actually being checked.
+            return {w for w in fh.read().split() if len(w) > 1}
+    except OSError:
+        return set()
 
 
 def _shipped_words() -> set[str]:
@@ -74,7 +86,7 @@ def _shipped_words() -> set[str]:
         return set()
 
 
-# SHIPPED_WORDS, SYSTEM_WORDS and WORDS are read on first use, not at import. Only is_acronym() ever
+# SHIPPED_WORDS, ENGLISH_WORDS and WORDS are read on first use, not at import. Only is_acronym() ever
 # consults them, and nothing reaches it until a destination has matched and text has been extracted —
 # so every tool call the guard ignores was reading a 2.5 MB file and building three sets from it before
 # main() had looked at stdin. Measured on an ignored Read: 77.3 ms and 59.4 MB of peak RSS as shipped,
@@ -82,7 +94,7 @@ def _shipped_words() -> set[str]:
 # already have, so the second read is a plain dictionary lookup, and a caller that assigns its own set
 # (the tests do, to test the floor on its own) keeps it. Two sets rather than one, because the floor has
 # to be usable alone: SHIPPED_WORDS is what a machine with no system dictionary is left with.
-_LAZY = ("SHIPPED_WORDS", "SYSTEM_WORDS", "WORDS")
+_LAZY = ("SHIPPED_WORDS", "ENGLISH_WORDS", "WORDS")
 
 
 def __getattr__(name: str) -> set[str]:
@@ -91,10 +103,10 @@ def __getattr__(name: str) -> set[str]:
     g = globals()
     if "SHIPPED_WORDS" not in g:
         g["SHIPPED_WORDS"] = _shipped_words()
-    if "SYSTEM_WORDS" not in g:
-        g["SYSTEM_WORDS"] = _system_words()
+    if "ENGLISH_WORDS" not in g:
+        g["ENGLISH_WORDS"] = _english_words()
     if "WORDS" not in g:
-        g["WORDS"] = g["SYSTEM_WORDS"] | g["SHIPPED_WORDS"]
+        g["WORDS"] = g["ENGLISH_WORDS"] | g["SHIPPED_WORDS"]
     return g[name]
 
 

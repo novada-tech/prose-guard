@@ -254,10 +254,12 @@ def test_detection():
 
 
 # --------------------------------------------------------------------- audiences
-def test_it_survives_a_machine_with_no_dictionary():
-    """Many Linux containers have no /usr/share/dict/words, and the filter that tells an acronym from
-    a capitalised English word depends on it. Without a floor, THE, WAS and WITH are reported as
-    unexplained jargon and the tool is noise — silently, which is the worst part.
+def test_the_same_machine_is_not_needed_for_the_same_verdict():
+    """The dictionary is shipped, so a verdict does not depend on which list a machine happens to have.
+
+    It used to. macOS has `web2` and Ubuntu has `wamerican`, which contains `api`, `amd`, `aws`, `ids`
+    and `ads` — so the same message was held back on one machine and let through on another, and a CI
+    run went red over exactly that. A container with no dictionary at all was a third answer again.
     """
     import audiences
     import jargon
@@ -266,13 +268,18 @@ def test_it_survives_a_machine_with_no_dictionary():
     # filtered too, which is the right way round: a message writing IT almost never means that.
     check("the shipped floor keeps two-letter words",
           any(len(w) == 2 for w in jargon.SHIPPED_WORDS), True)
-    # Ask jargon what it found rather than the filesystem what exists. The two can disagree — a
-    # dictionary present but unreadable, or a path this build does not look at — and when they do, the
-    # guard passes while the assertion is about an empty set.
-    system = jargon._system_words()
-    if system:                                      # empty on a bare container, which is the point
-        check("and so does the system word list, where there is one",
-              any(len(w) == 2 for w in system), True)
+    check("and so does the dictionary that ships with it",
+          any(len(w) == 2 for w in jargon.ENGLISH_WORDS), True)
+    check("which is present whatever the machine has",
+          len(jargon.ENGLISH_WORDS) > 200000, True)
+    # The five that used to differ between the two system lists. What they are now is what they are
+    # everywhere, and it is the answer macOS already gave: an acronym is not an English word.
+    check("the terms the two system lists disagreed about now have one answer",
+          [t for t in ("API", "AMD", "AWS") if not jargon.is_acronym(t)], [])
+    # IDS and ADS are ordinary plurals rather than acronyms, and nothing covered them until pinning
+    # the dictionary made Linux agree with macOS about them.
+    check("and the ordinary plurals among them are words",
+          [t for t in ("IDS", "ADS") if jargon.is_acronym(t)], [])
     real, jargon.WORDS = jargon.WORDS, jargon.SHIPPED_WORDS
     try:
         check("a floor ships with the tool", len(jargon.SHIPPED_WORDS) > 300, True)
@@ -3814,8 +3821,8 @@ def test_a_long_document_cannot_spend_the_whole_session_on_its_first_check():
           said.get("permissionDecision"), None)
 
 
-def test_the_shipped_floor_carries_what_the_system_dictionary_would():
-    """A machine with no `/usr/share/dict/words` must not report ordinary words as jargon.
+def test_the_shipped_floor_carries_what_the_dictionary_does_not():
+    """A 1934 dictionary does not have `email`, and the floor beside it is what does.
 
     That is the whole reason `data/common-words.txt` exists, and four words were missing from it:
     `logger`, `coin`, `kafka` and `as`. On any container without a dictionary — which the CI workflow

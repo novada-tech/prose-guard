@@ -275,8 +275,9 @@ it in a subprocess with the per-plugin variable set and asserts it is ignored.
 
 ## The word list is from 1913
 
-`/usr/share/dict/words` is the web2 dictionary. It has no modern computing vocabulary, so the filter
-that tells an acronym from a capitalised English word passes THE and WAS and flags INLINE.
+The dictionary is web2, Webster's Second International of 1934, and it now ships with the plugin
+rather than being read from the machine. It has no modern computing vocabulary, so the filter that
+tells an acronym from a capitalised English word passes THE and WAS and flags INLINE.
 
 Someone ran the checker on a real draft and the only thing it reported was `INLINE` — from their own
 scaffolding header, not from the text they were about to post. Probing 44 common technical terms found
@@ -387,6 +388,30 @@ top of this file as carrying no information.
 So the first cost of structure work is **negatives at 200 to 800 words, from real messages judged well
 built rather than written for the purpose**. Until those exist, a structure check cannot be shown to
 pass good prose, and this repository does not ship a rule on an argument.
+
+## The dictionary is shipped, because two machines gave two answers
+
+The filter that tells an acronym from a capitalised English word read the machine's own word list, and
+which list that was decided the verdict. macOS ships `web2`; Ubuntu ships `wamerican`, which contains
+`api`, `amd`, `aws`, `ids` and `ads`. So the same message was held back on one machine and let through
+on another, a CI run went red over exactly that, and a container with no dictionary at all was a third
+answer again — one that reported THE and WAS as unexplained jargon until `common-words.txt` was written
+to stop it.
+
+web2 now ships in `data/english-words.txt.gz`: 234,428 words, 0.70MB gzipped, 21ms to read on first
+use and never read at all unless a message is being checked. Its 1934 copyright has lapsed.
+
+Pinning it makes every machine give the answer macOS already gave, which is also the correct one — API
+and AWS are acronyms, and Ubuntu was wrong to treat them as English words. Two ordinary plurals came
+out of that, `IDS` and `ADS`, and went into the floor beside `id` and `ad`.
+
+`common-words.txt` is still there and is not a fallback: measured, it contributes 190 terms web2 does
+not have, and dropping it makes 38 of 42 everyday terms report as jargon **on a machine that has a
+dictionary** — `email`, `www`, `config`, `todo`, `usd`, and the inflections `has` and `using`, which
+web2 omits because it lists headwords.
+
+The `english-words` package was measured rather than assumed: it ships this same list, at 17MB
+installed, and would add a `pip` step to a plugin whose install is one command.
 
 ## Thresholds
 

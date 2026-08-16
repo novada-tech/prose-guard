@@ -1,0 +1,23 @@
+# english-words.txt.gz
+
+Webster's Second International, 1934, whose copyright has lapsed. This copy is the FreeBSD `web2`
+list as it ships on macOS at `/usr/share/dict/words`, lowercased, deduplicated, sorted, and with
+one-letter and non-alphabetic entries dropped.
+
+## Why it is here rather than read from the machine
+
+`jargon.py` uses it to tell an acronym from a capitalised English word, and reading the machine's own
+list made that verdict depend on which list the machine happened to have. macOS ships `web2`; Ubuntu
+ships `wamerican`, which contains `api`, `amd`, `aws`, `ids` and `ads` — so the same message was held
+back on one machine and let through on the other, and a CI run went red over exactly that. Containers
+often ship no dictionary at all.
+
+Pinning it makes every machine agree. `common-words.txt` beside this is still needed and is not a
+fallback: it carries the everyday terms a 1934 dictionary does not have — `email`, `www`, `config`,
+`todo`, `usd`, and the inflections `has` and `using`, which web2 omits because it lists headwords.
+
+## Why not a package
+
+`english-words` on PyPI ships this same list at 17MB installed, and would add a `pip` step to a plugin
+whose install is one command. Gzipped here it is 0.7MB and costs 2.8ms more to read than plain, on a
+read that only happens once a message is being checked.

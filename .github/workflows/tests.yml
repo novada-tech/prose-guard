@@ -18,17 +18,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The filter that tells an acronym from a capitalised English word prefers the system word
-      # list. A bare Ubuntu image has none, and the shipped floor in data/common-words.txt covers
-      # that case — but the tests should exercise the path a developer machine actually takes.
-      - name: install a system word list
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq wamerican
-
-      - name: word list present
+      # No system word list is installed, and that is the point: the dictionary ships with the
+      # plugin, so a verdict does not depend on which list a machine happens to have. Ubuntu's
+      # `wamerican` and macOS's `web2` disagree about api, amd, aws, ids and ads, and this job used to
+      # install one so the tests could exercise "the path a developer machine takes". There is one path
+      # now. See plugins/prose-guard/data/english-words.README.
+      - name: no system dictionary is used
         run: |
-          test -f /usr/share/dict/words && wc -l < /usr/share/dict/words \
-            || echo "no system word list; the shipped floor is what is being tested"
+          python3 - <<'CHECK'
+          import sys
+          sys.path.insert(0, "plugins/prose-guard/lib")
+          import jargon
+          assert len(jargon.ENGLISH_WORDS) > 200000, "the shipped dictionary did not load"
+          assert jargon.is_acronym("AWS"), "AWS should be an acronym on every machine"
+          assert not jargon.is_acronym("THE"), "THE is an English word on every machine"
+          print(f"{len(jargon.ENGLISH_WORDS):,} words, shipped")
+          CHECK
 
       - run: python3 tests/test_prose_guard.py
       - run: python3 tests/test_docs_match_code.py
@@ -38,18 +43,6 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/nobin"
           PATH="/usr/bin:/bin:/usr/sbin:/sbin" python3 tests/test_prose_guard.py
-
-      # The case data/common-words.txt exists for, and the one no developer machine can show: a
-      # container with no dictionary at all. Four ordinary words were missing from that floor —
-      # logger, coin, kafka, as — and on such a machine each was reported to every audience as jargon
-      # nobody had explained. The word list is the only thing standing between that machine and noise,
-      # so it is tested where it is actually load-bearing.
-      - name: no system dictionary
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo rm -f /usr/share/dict/words /usr/dict/words
-          test ! -f /usr/share/dict/words
-          python3 tests/test_prose_guard.py
 
   version:
     # Nobody's installed copy moves unless the version does: `claude plugin install` is a no-op when
