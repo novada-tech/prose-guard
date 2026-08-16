@@ -33,7 +33,7 @@ with no main verb, and it needs the sentence understood, not pattern-matched. As
 sentence on its own, the existing checks find it: `structure` in three runs of three and `sentence` in
 two of three, all pointing at the same sentence. It got through because it was one sentence inside 370
 words — so this adds no sixth model call to re-find what two checks already find. Splitting the document
-to sharpen those checks was measured and dropped; see docs/reference.md.
+to sharpen those checks was measured and dropped; see docs/design-notes.md.
 """
 import re
 

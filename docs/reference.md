@@ -3,78 +3,48 @@
 Detail that would get in the way of [the README](../README.md). Read it when you
 need it.
 
-## Spelling and grammar
-
-Two mechanical rules run at every level, free and instant: a word typed twice, and `a` where `an`
-belongs. Measured on 3,000 real messages they produce 62 findings, about 2%, and nothing at all on the
-five documents already judged well built. Both are objective and both are a one-word fix, so they hold a
-message back rather than mentioning it.
-
-Four more rules were tried and dropped, with the numbers: space before punctuation (1,131 hits, almost
-every one a line break before a full stop), stray punctuation (592), no space after punctuation (512,
-mostly URLs and version numbers), unbalanced brackets (498, mostly brackets spanning lines). Together
-they flagged a third of everything written.
-
-Grammar in general is not checked, and a third-party checker was measured rather than dismissed.
-LanguageTool 6.6 locally: 240MB to download, 390MB unpacked, Java, 1.6 seconds a run. It found nothing on
-the sentence that prompted the question — a fragment with no main verb — nor on three other fragments
-tried. It caught word repeats and `a`/`an`, which are already here, plus subject-verb agreement, which is
-one rule more. On prose judged well built it flagged four documents of six, mostly its spell checker
-firing on technical terms, which is the noise a measured vocabulary exists to prevent.
-
-The fragment class is caught by the checks that already exist, when the text is short enough. Asked about
-that sentence on its own, `structure` found it in three runs of three and `sentence` in two of three. It
-got through inside 370 words.
-
-Checking long text one paragraph at a time was the obvious fix, and it was measured and dropped. Pooled
-over eight runs of a 371-word document with that fragment planted in it, the whole document caught it
-twice in eight and so did paragraph-at-a-time — no difference in what was found, nine times the model
-calls, and a complaint about prose already judged well built in nearly every pass instead of one pass in
-five. Reproduce it with:
-
-```
-python3 measure/measure_splitting.py --reps 5
-```
-
-The reason is worth knowing, because it explains the instability above as well. These checks are
-comparative: asked about a piece of text they report the worst thing in it, so a smaller piece does not
-sharpen them, it lowers the bar for what counts as worst. Asked about one paragraph the same check found
-nothing wrong 3 times in 3, and asked about the paragraph plus everything before it, `reference` found
-something 3 times in 5.
-
-The split that matters is not how much text a check sees. It is whether the check is **absolute** or
-**comparative**.
-
-`mechanics` is absolute. A word typed twice is wrong whatever surrounds it, so the size of the text makes
-no difference to the verdict — it runs on whatever it is given and finds every instance, not the worst
-one. That is also why it is stable enough to hold a message back on its own.
-
-Everything else is comparative: each reports the worst instance of its concern in what it was shown. That
-is why they need the whole document, and why a smaller piece does not sharpen them.
-
-A rule for missing spaces between sentences was tried on the same evidence and is not here. Tightened to
-a real sentence boundary — lowercase, full stop, capital, lowercase — it hit 21 times in 3,000 messages,
-and every hit was machine text: GitHub notification footers ("mentioned.Message ID:"), a Java import
-path, a filename with dots. Not one was a person's missing space. The looser version hit 494 times, all
-of them filenames and abbreviations.
-
 ## What it does when it disagrees with you
 
 It names one problem and hands the message back. It does not rewrite: a check that rewrites cannot
 tell you what it disagreed with.
+
+Two mechanical rules run at every level, free and instant: a word typed twice, and `a` where `an`
+belongs. Both are objective and both are a one-word fix, so they hold a message back rather than
+mentioning it. Grammar in general is not checked; a third-party checker was measured and is not here,
+along with four more mechanical rules that flagged a third of everything written
+([design-notes.md](design-notes.md)).
+
+Which checks can be trusted to hold a message back turns on one distinction. `mechanics` is
+**absolute**: a word typed twice is wrong whatever surrounds it, so it reports every instance rather
+than the worst one and the size of the input makes no difference to the verdict — which is also why it
+is stable enough to hold a message back on its own. Every other check is **comparative**: asked about a
+piece of text it reports the worst instance of its concern in that text. So a smaller piece does not
+sharpen a comparative check, it lowers the bar for what counts as worst. Measured: asked about one
+paragraph the same check found nothing wrong 3 times in 3, and asked about that paragraph plus
+everything before it, `reference` found something 3 times in 5. Splitting a long document to sharpen
+those checks was measured and dropped: [design-notes.md](design-notes.md).
+
+Every finding a model-based check reports is put back to the same check, and only a finding that
+objects to the same sentence twice can hold a message back. Unconfirmed findings are still printed,
+marked `consider` rather than `must fix`, because a finding only one run raised is either a real defect
+that run happened to reach first or a near-tie between two candidates — and which of those it is cannot
+be told from the finding. Nothing is filtered away, so there is no filter to turn off: what confirmation
+decides is whether a message can be held back, not whether you get to read the finding. What it was for,
+and what it cost: [design-notes.md](design-notes.md).
 
 And it stops insisting when it is probably the one that is wrong. Severity depends on the **share** of
 the terms you used that are unknown to your reader, not the count — three unknown out of twenty in a
 long document is an oversight worth fixing, fifteen out of twenty means the tool has the wrong reader
 in mind. Above a third it says so instead of demanding twenty explanations. That threshold is the 90th
 percentile of the share seen when a message *is* scored against the audience it was written for,
-measured both directions on 3,170 real messages: [docs/thresholds.md](docs/thresholds.md), including
+measured both directions on 3,170 real messages: [thresholds.md](thresholds.md), including
 what the measurement fails to show.
 
 Three limits keep that bounded. Each check gets two attempts, and a session gets six holds in total.
 Model calls are capped per message rather than per session — twenty of them, and a check that cannot be
-paid for is skipped for that message. So two checks that genuinely disagree make one message expensive
-and then let it through, rather than hanging your turn.
+paid for is skipped for that message; a check that may run twenty times makes "one call per check"
+false. So two checks that genuinely disagree make one message expensive and then let it through, rather
+than hanging your turn.
 
 ## What counts as sending
 

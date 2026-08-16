@@ -37,6 +37,53 @@ What the numbers say, and this has held across every run: the checks that report
 paragraph are the weak ones, they are the ones that disagree with themselves most, and they are advisory.
 That is the right severity for a check at that reliability, and it is why only the arithmetic one blocks.
 
+## Four more mechanical rules flagged a third of everything written
+
+Two mechanical rules ship: a word typed twice, and `a` where `an` belongs. Measured on 3,000 real
+messages they produce 62 findings, about 2%, and nothing at all on the five documents already judged
+well built. That rate is what makes them safe to hold a message back on.
+
+Four more were tried and dropped, with the numbers: space before punctuation (1,131 hits, almost every
+one a line break before a full stop), stray punctuation (592), no space after punctuation (512, mostly
+URLs and version numbers), unbalanced brackets (498, mostly brackets spanning lines). Together they
+flagged a third of everything written.
+
+A rule for missing spaces between sentences was tried on the same evidence and is not here. Tightened to
+a real sentence boundary — lowercase, full stop, capital, lowercase — it hit 21 times in 3,000 messages,
+and every hit was machine text: GitHub notification footers ("mentioned.Message ID:"), a Java import
+path, a filename with dots. Not one was a person's missing space. The looser version hit 494 times, all
+of them filenames and abbreviations.
+
+## A grammar checker was measured, not dismissed
+
+Grammar in general is not checked, and a third-party checker was measured rather than assumed to be the
+answer. LanguageTool 6.6 locally: 240MB to download, 390MB unpacked, Java, 1.6 seconds a run. It found
+nothing on the sentence that prompted the question — a fragment with no main verb — nor on three other
+fragments tried. It caught word repeats and `a`/`an`, which are already here, plus subject-verb
+agreement, which is one rule more. On prose judged well built it flagged four documents of six, mostly
+its spell checker firing on technical terms, which is the noise a measured vocabulary exists to prevent.
+
+The fragment class is caught by the checks that already exist, when the text is short enough. Asked about
+that sentence on its own, `structure` found it in three runs of three and `sentence` in two of three. It
+got through inside 370 words.
+
+## Splitting a long document finds no more, at nine times the calls
+
+Checking long text one paragraph at a time was the obvious fix for a fragment that got through inside
+370 words, and it was measured and dropped. Pooled over eight runs of a 371-word document with that
+fragment planted in it, the whole document caught it twice in eight and so did paragraph-at-a-time — no
+difference in what was found, nine times the model calls, and a complaint about prose already judged
+well built in nearly every pass instead of one pass in five. Reproduce it with:
+
+```
+python3 measure/measure_splitting.py --reps 5
+```
+
+The reason is that every check except `mechanics` is comparative: asked about a piece of text it reports
+the worst instance of its concern in that text, so a smaller piece does not sharpen it, it lowers the
+bar for what counts as worst. That distinction decides which checks can be trusted to block, so it is
+stated where a reader using the tool will meet it: [reference.md](reference.md).
+
 ## Freezing a passed check loses nothing measurable
 
 Zero checks passed during a walk and then failed on the message's own final text, across 20 sessions.
