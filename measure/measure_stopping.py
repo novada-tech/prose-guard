@@ -32,7 +32,7 @@ sys.path.insert(0, LIB)
 
 import audiences  # noqa: E402
 import checks as checks_module  # noqa: E402
-from checks import Context, sequence  # noqa: E402
+from checks import Context, pooling, sequence  # noqa: E402
 
 WHO = "Engineers on this team, reading a message about a change to their own tooling."
 
@@ -48,15 +48,17 @@ def pass_over(text: str, ctx: Context) -> tuple[list[str], list[str]]:
     confirmed, loose = [], []
     for check in sequence.phases():
         try:
-            finding = check.run(text, ctx)
+            # `checks.confirms(check, text, ctx, finding)` — run it a second time and see whether it
+            # agrees — no longer exists. Pooling absorbed it: running a check twice to see whether it
+            # says the same thing is `pooled` with a ceiling of two, which is what `passes=2` asks for.
+            # `firm` is the subset more than one run pointed at, so a finding in it is what `confirms`
+            # used to return True for.
+            got = pooling.pooled(check, text, ctx, passes=2)
         except Exception:
             continue
-        if finding is None:
+        if not got.findings:
             continue
-        if checks_module.confirms(check, text, ctx, finding):
-            confirmed.append(check.NAME)
-        else:
-            loose.append(check.NAME)
+        (confirmed if got.firm else loose).append(check.NAME)
     return confirmed, loose
 
 

@@ -10,6 +10,7 @@ not sound.
 
 Mutation-checked rather than trusted on a green run; the mutations are listed in the README.
 """
+import ast
 import importlib
 import json
 import os
@@ -21,6 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.abspath(os.path.join(HERE, "..", "plugins", "prose-guard"))
 LIB = os.path.join(PLUGIN, "lib")
 GUARD = os.path.join(PLUGIN, "hooks", "scripts", "guard-outgoing-prose.sh")
+MEASURE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "measure")
 sys.path.insert(0, LIB)
 
 # Before anything is imported, and never unset. Several modules read config files at import, so a test
@@ -168,6 +170,56 @@ def test_a_command_it_cannot_read_is_never_allowed_in_silence():
     said = (out or {}).get("permissionDecisionReason", "") + (out or {}).get("systemMessage", "")
     check("an unreadable command produces output at all", out is not None, True)
     check("and says it could not be read", "could not be read as shell words" in said, True)
+
+
+def test_the_measure_harnesses_call_names_that_exist():
+    """The harnesses are not run by CI — they spend real tokens — so nothing noticed them rot.
+
+    Two had been calling names that were deleted: `checks._points_at`, which moved to
+    `checks.placing.points_at` when the module was split, and `checks.confirms`, which pooling absorbed
+    entirely. Both raise only after `pass_over` has already spent a model call per phase, so the harness
+    paid and then died — the most expensive way to find out.
+
+    This checks every attribute a harness reads off a library module, statically. No model call, no
+    network, and it fails on the rename rather than on the next person's token budget.
+    """
+    lib = os.path.abspath(LIB)
+    missing = []
+    for name in sorted(os.listdir(MEASURE)):
+        if not name.endswith(".py"):
+            continue
+        tree = ast.parse(open(os.path.join(MEASURE, name)).read())
+        # local alias -> module actually imported, for `import checks as checks_module` and
+        # `from checks import placing`.
+        def ours(dotted):
+            """Is this a module in lib/ — as a file, or as a package directory?
+
+            The first version asked only about `<name>.py`, so `import checks as checks_module` bound
+            nothing, because `checks` is a package. That silently made the whole check vacuous: it
+            passed while the two names it exists to catch were both restored.
+            """
+            base = os.path.join(lib, *dotted.split("."))
+            return os.path.exists(base + ".py") or os.path.exists(os.path.join(base, "__init__.py"))
+
+        bound = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for al in node.names:
+                    if ours(al.name):
+                        bound[al.asname or al.name] = al.name
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                for al in node.names:
+                    sub = f"{node.module}.{al.name}"
+                    if ours(sub):
+                        bound[al.asname or al.name] = sub
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                    and node.value.id in bound):
+                module = importlib.import_module(bound[node.value.id])
+                if not hasattr(module, node.attr):
+                    missing.append(f"{name}:{node.lineno} calls {bound[node.value.id]}.{node.attr}, "
+                                   f"which does not exist")
+    check("no harness calls a name that was deleted", missing, [])
 
 
 def teardown_function(_fn):

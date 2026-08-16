@@ -31,7 +31,8 @@ from typing import Any, Callable, Iterable, Iterator, NamedTuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audiences  # noqa: E402
 import jargon  # noqa: E402
-import paths  # noqa: E402
+import paths
+import settings  # noqa: E402
 
 # One document from any source: who wrote it, what they wrote, and when if the source says. Every
 # `from_*` below yields these, so `tally` can read them all the same way.
@@ -458,8 +459,16 @@ def cmd_create(a: argparse.Namespace) -> None:
         raise SystemExit(f"{a.name!r} cannot be an audience name: it becomes a filename, so it starts "
                          f"with a letter or digit and holds only letters, digits, dot, dash and "
                          f"underscore, up to 64 characters")
-    with open(a.candidates) as fh:
-        cand = json.load(fh)
+    # The last hand-editable file with no declaration, and the one place a hand edit still answered
+    # with a stack trace instead of a sentence: `/prose-guard:audiences` walks somebody through the
+    # borderline pile, so this file gets edited. Loud and on a command just typed, unlike the audience
+    # crash — but there is no reason for it to be the exception.
+    cand, said = settings.read(a.candidates, settings.CANDIDATES, os.path.basename(a.candidates))
+    for line in said:
+        print(f"warning: {line}")
+    if not cand:
+        raise SystemExit(f"{a.candidates} holds nothing this can build an audience from. It is the "
+                         f"file `learn.py scan --out` writes.")
     counts = cand.get("counts") or {}
     cut = audiences.MIN_AUTHORS
     vocab = {t: counts.get(t, {}).get("authors", cut) for t in cand.get("known") or []}

@@ -34,7 +34,7 @@ sys.path.insert(0, LIB)
 
 import audiences  # noqa: E402
 import checks as checks_module  # noqa: E402
-from checks import Context, Finding, sequence  # noqa: E402
+from checks import Context, Finding, placing, sequence  # noqa: E402
 
 ONE = "Reply with exactly one line and no reasoning: PASS, or FAIL: <what to change, quoting the span>."
 MANY = ("Reply with PASS, or with one line for each failing span, worst first, up to five:\n"
@@ -56,7 +56,7 @@ def items(message: str) -> list[str]:
 
 
 def where(text: str, part: str) -> int | None:
-    return checks_module._points_at(text, Finding("advise", part))
+    return placing.points_at(text, Finding("advise", part))
 
 
 def main() -> int:

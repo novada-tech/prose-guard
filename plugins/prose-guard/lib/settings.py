@@ -144,6 +144,14 @@ AUDIENCE: dict[str, Rule] = {
     "members": each(text), "assumptions": mapping,
     "_meta": anything, "_note": anything}
 
+# What `learn.py scan --out` writes and `learn.py create` reads back. A person edits this one: the
+# audiences skill walks them through the borderline pile, and taking a term out of `known` by hand is
+# the expected way to answer. So it gets a declaration like every other file somebody types into.
+CANDIDATES: dict[str, Rule] = {
+    "known": each(text), "borderline": each(text), "needs_explaining": each(text),
+    "members": each(text), "counts": mapping, "expansions": mapping,
+    "_meta": anything}
+
 ASSUMPTIONS: dict[str, Rule] = {"shared_context": one_of(*CONTEXTS)}
 
 
@@ -180,13 +188,18 @@ def read(path: str, shape: dict[str, Rule],
     Silent because a file that is not there is the ordinary case — nobody has a destinations.json until
     they write one — while a file that IS there and is wrong is the case worth a sentence.
     """
+    # One name for the file, used by every branch. These two used to interpolate the full path while
+    # `checked` used `where`, so the same audience file answered "team.json holds list where it should
+    # hold key/value pairs" for a bad shape and "/var/folders/vl/0mhb…/audiences/team.json is not valid
+    # JSON" for a bad parse. A caller that says what to call a file means it for all of its complaints.
+    name = where or path
     try:
         with open(path) as fh:
             raw = json.load(fh)
     except FileNotFoundError:
         return {}, []
     except OSError as exc:
-        return {}, [f"{path} could not be read ({exc.strerror})"]
+        return {}, [f"{name} could not be read ({exc.strerror})"]
     except ValueError as exc:
-        return {}, [f"{path} is not valid JSON ({exc}), so nothing in it was used"]
-    return checked(raw, shape, where or path)
+        return {}, [f"{name} is not valid JSON ({exc}), so nothing in it was used"]
+    return checked(raw, shape, name)
