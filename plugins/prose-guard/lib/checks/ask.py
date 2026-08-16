@@ -14,6 +14,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import host  # noqa: E402
+import telling  # noqa: E402
 
 MODEL = os.environ.get("CHECKER_MODEL", "claude-sonnet-5")
 EFFORT = os.environ.get("CHECKER_EFFORT", "medium")
@@ -132,7 +133,21 @@ def ask(name, prompt, text, ctx=None):
                 capture_output=True, text=True, timeout=180, cwd=elsewhere)
         blob = json.loads(r.stdout)
         out = (blob.get("result") or "").strip()
-    except Exception:
+    except subprocess.TimeoutExpired:
+        telling.could_not_run(f"the {name} check timed out waiting for `{host.CLI}`, so it passed "
+                              f"without an answer")
+        return True, ""
+    except Exception as exc:
+        # A pass, because a writing check that cannot reach a model must never hold up work — and a
+        # notice, because until now this was the one failure here that was invisible. Five flags and two
+        # response keys below belong to a tool that ships weekly; when one of them stops working, every
+        # model-backed check silently answers "fine" and a level nobody changed quietly becomes `low`.
+        # Considered and rejected: adopting the official SDK so that tracking those flags is somebody
+        # else's job. It is 294MB and thirty packages for ten lines, on a plugin whose install story is
+        # one command. Saying so once is the cheaper half of the same protection.
+        telling.could_not_run(f"`{host.CLI}` could not be asked ({type(exc).__name__}), so the "
+                              f"{name} check passed without looking — the command or its flags may "
+                              f"have changed")
         return True, ""
     _log_usage(name, blob.get("usage") or {}, time.time() - t0)
     return read_verdict(out)

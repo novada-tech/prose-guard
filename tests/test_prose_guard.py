@@ -50,6 +50,23 @@ def check(label, got, want):
         FAILS.append(f"FAIL {label}: got {got!r}, wanted {want!r}")
 
 
+def teardown_function(_fn):
+    """Make pytest as honest as running this file directly.
+
+    `check` records rather than raises, so one test reports every one of its failures instead of
+    stopping at the first. That also means a test function returns normally when it has failed, so
+    under pytest all of these passed unconditionally — including three that were mutation-tested
+    against broken code and never noticed. pytest calls this after each test.
+
+    Beside `check` because it is the other half of it. It sat four thousand lines down with five tests
+    below it, which is where it was written rather than where it belongs, and down there it read as the
+    end of the file to anyone adding a test.
+    """
+    if FAILS:
+        recorded, FAILS[:] = list(FAILS), []
+        raise AssertionError("\n" + "\n".join(recorded))
+
+
 def hook_reply(payload, environment, timeout=300):
     """The hook's parsed output, plus the assertion that it did not crash on the way to it.
 
@@ -2827,6 +2844,18 @@ def test_a_scan_leaves_no_names_in_the_working_tree():
         check("both paths are printed, so nobody has to guess",
               os.path.join(home, "candidates.json") in r.stdout
               and os.path.join(home, "corpus.jsonl") in r.stdout, True)
+
+
+# --------------------------------------------------------- and here the sections stop being true
+# "what a message may not reach" describes the eleven cases above and nothing below: the next test is
+# about a doubled word, and further down are the `a`/`an` rule, the shape of config.json and the call
+# budget. Tests are appended, so from here the order is when each was written, and for a long time
+# nothing said so — a reader trusting the banner would have concluded there is no test for the article
+# rule. Grouping what follows would mean reordering some sixty tests to fix six comment lines.
+#
+# So the index is `grep -n '^def test_'`: 97 names, each with a docstring saying which decision it
+# pins. That list is derived from the tests and cannot drift away from them, which is more than the
+# banners above manage.
 def test_stripping_code_out_of_prose_does_not_invent_a_doubled_word():
     """Both of these sentences are correct, and both were held back.
 
@@ -4100,17 +4129,32 @@ def test_a_term_can_be_taken_out_of_a_vocabulary_as_well_as_put_in():
           [t for t in ("HMR", "SSR") if shipped.is_known(t)], [])
 
 
-def teardown_function(_fn):
-    """Make pytest as honest as running this file directly.
+def test_a_checker_that_cannot_be_asked_says_so_rather_than_passing_quietly():
+    """`ask` returns a pass on any exception, which is right and was the last silent failure here.
 
-    `check` records rather than raises, so one test reports every one of its failures instead of
-    stopping at the first. That also means a test function returns normally when it has failed, so
-    under pytest all of these passed unconditionally — including three that were mutation-tested
-    against broken code and never noticed. pytest calls this after each test.
+    Five command flags and two response keys belong to a tool that ships weekly. When one stops
+    working, every model-backed check answers "fine" and the level somebody chose quietly becomes
+    `low`. It still passes — a writing check that cannot reach a model must never hold up work — but it
+    now says it could not look, through the same ledger that reports an unreadable phases directory.
+
+    This is the cheaper half of adopting the official SDK, which was measured and rejected: 294MB and
+    thirty packages to have somebody else track those flags, for ten lines of subprocess.
     """
-    if FAILS:
-        recorded, FAILS[:] = list(FAILS), []
-        raise AssertionError("\n" + "\n".join(recorded))
+    import telling
+    from checks import ask
+
+    telling.ran_everything()
+    was = os.environ["PATH"]
+    os.environ["PATH"] = "/nonexistent-so-the-checker-cannot-be-found"
+    try:
+        verdict = ask.ask("relevance", "a prompt", "some text")
+    finally:
+        os.environ["PATH"] = was
+    check("it still passes, because a broken check must not block work", verdict, (True, ""))
+    said = telling.never_ran()
+    check("but it says the check did not look", any("relevance" in n for n in said), True)
+    check("and names what could not be reached", any("claude" in n for n in said), True)
+    telling.ran_everything()
 
 
 def test_nothing_a_substitution_runs_can_change_the_repository():
