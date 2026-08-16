@@ -19,7 +19,7 @@ NAME = "judgement"
 # narrow concern, because two runs then pick differently and the difference is coverage. This is one
 # combined verdict over every concern at once, so it has nothing to pick between — repeated runs restate
 # the same broad objection. `high` is the level that separates the concerns, and pooling is what makes
-# that separation worth its calls. The same measurement is in docs/reference.md, which is the copy
+# that separation worth its calls. The same measurement is in docs/design-notes.md, which is the copy
 # to edit if the number changes.
 MODE = VERDICT
 

@@ -216,37 +216,6 @@ chat export names someone "Sam"; a repository names the same person "sam-t". A p
 intersection reported zero shared members while ten people were in both, so `overlap` prints a
 prefix-matched guess, labelled as one, and nothing depends on it.
 
-## Findings have to reproduce
-
-Every finding from a model-based check is put back to the same check, and kept only if it objects to the
-same sentence. One extra call for a check that fired, nothing for one that did not.
-
-This exists because the rewrite loop did not terminate. On one 370-word document already through six
-rounds of editing, ten runs of the five model-based checks gave one clean result and nine findings, with
-no finding raised twice — `reference` objected on every run and to a different sentence almost every
-time. Past the substantive problems, the checks generate nits, and chasing nits is work with no end. With
-confirmation, four runs of that same document reported nothing to act on.
-
-Unconfirmed findings are still printed, marked `consider` rather than `must fix`, because a finding
-only one run raised is either a real defect that run happened to reach first or a near-tie between two
-candidates — and which of those it is cannot be told from the finding. Nothing is filtered away, so
-there is no filter to turn off: what confirmation decides is whether a message can be held back, not
-whether you get to read the finding.
-
-Confirmation filters the symptom. The cause is that two runs choose differently between near-equal
-candidates, and the checks that point at a span now say to quote the earliest failing one rather than the
-most interesting. On the document that produced no repeated finding at all in ten runs, that took
-agreement between two runs from nothing to about two in five — so a real finding survives confirmation
-instead of being filtered with the nits.
-
-That instruction is deliberately not on `relevance` or `address`. Neither reports a span — one asks what
-is missing and the other who is being spoken to — and telling them to quote the earliest failing span
-changed what they looked for, which showed up immediately as findings on fixtures that had been quiet.
-
-Three of five well-built fixtures produce a finding on a single run of all five checks. With confirmation,
-two of those three report nothing to change, and the third reproduces — which is the point: what survives
-is worth reading.
-
 ## One abbreviation, two meanings
 
 An audience records what each term was **written out as**, and by how many people, alongside the count of
@@ -268,69 +237,30 @@ audience has it as application default credential."
 What is deliberately not attempted: deciding which sense a message means where it never says. That is not
 decidable from the text, and guessing would be worse than saying nothing.
 
-## One finding at a time, and what to do about it
+## How many times a check runs
 
-A check returns exactly one item, and that is not a contract that can be widened. Asked for up to five
-items on a 295-word document with about ten known defects, every check returned one — the same as asking
-for one:
+A check returns exactly one item per run, and each run picks one item from those above its bar — so runs
+sample findings rather than enumerate them, and asking a check for a list instead does not work.
 
-```
-python3 measure/measure_batching.py --reps 3
-```
+**A check keeps running while its runs keep finding something new, and stops when two runs in a row add
+nothing.** How many runs that takes is decided by the text and not by a flag, so a document with ten real
+defects is not cut off at the same point as a clean one. Every item you are shown says how often it came
+up.
 
-So the objection holds: a 100-word document and a 1,000-word one both get one item per check per pass, and
-the long one is held to a lower bar for the same number of passes. And each pass costs a round trip, which
-is an agent turn spent reading a finding and editing — dearer than the check's own call.
-
-What varies between runs is WHICH item, and that is the fix. Each run picks one item from those above the
-bar, so runs sample items — and how many runs is decided by the text, not by a flag.
-
-**A check keeps running while its runs keep finding something new, and stops when a run adds nothing.** One
-run that adds nothing is tolerated, because a run repeating itself does not prove the well is dry and
-stopping at the first repeat loses whatever came after it. Two in a row stops it. So a document with ten
-real defects is not cut off at the same point as a clean one — which a fixed number of runs did.
-
-The ceiling is linear in length above a base of six, because a longer document has more places to be wrong:
-6 runs up to 600 words, 9 at 800, 21 at 2,000, and 25 as a hard bound so one pathological file cannot spend
-a session. The base is on the ceiling and not on the runs — a 44-word message capped at two runs could
-never be observed to run dry, so length decided everything and quality decided nothing.
-
-What that costs, measured per document over every check:
-
-| document | words | calls | items found |
-|---|---|---|---|
-| badly written | 295 | 14 | 5 |
-| well edited | 371 | 8 | 2 |
-| agent-written | 68 | 11 | 3 |
-| human-edited | 44 | 10 | 3 |
-
-The badly written document spends most and the well edited one least, at a similar length. A check that
-passes on its first run costs one call, so the extra calls are paid only where something was found.
-
-`medium` is exempt, and asking that question is what caught it: adding pooling had quietly turned the level
-documented as "one advisory call" into three. Pooling pays where a check picks one item from many candidates
-of one narrow concern, because two runs then pick differently and the difference is coverage. `medium` is one
-combined verdict over every concern at once, so it has nothing to pick between — measured, three runs cost
-three calls and 16 seconds against one call and 4, and found the same single item. So the ladder is: `low`
-costs no call, `medium` costs one, and `high` separates the concerns and works each until its runs stop
-finding anything, which is what makes the separation worth its calls.
+The ceiling is linear in length above a base of six, because a longer document has more places to be
+wrong: 6 runs up to 600 words, 9 at 800, 21 at 2,000, and 25 as a hard bound so one pathological file
+cannot spend a session.
 
 The hook and a deliberate run call the same function on the same text, so they cannot drift apart: one bar
-per effort level, whichever way the text is going out. The hook adds a budget of 20 calls for one message,
-because a check that may run twenty times makes "one call per check" false — measured on a badly written
-1,475-word document at `high`, one denial cost 16 calls and 147 seconds. `medium` is one judgement check
-rather than five, and is the level the measurements support. On that same document, one pass found two findings and three pooled runs found
-six across four checks, including two checks that were silent in the single pass. Every item says how
-often it came up.
+per effort level, whichever way the text is going out. What differs is what they do with the runs, because
+the two callers want opposite things. The hook blocks, so it needs precision: one item, confirmed by
+reproducing. A rewrite pass wants coverage, so it pools — and on a document with real defects "seen once in
+three runs" means the check sampled a different real defect that run, not that the item is noise.
+Confirmation would throw those away. `medium` pools nothing, because one combined verdict over every
+concern has nothing to pick between.
 
-Which mode is right depends on the caller, and they want opposite things. The hook blocks, so it needs
-precision: one item, confirmed by reproducing. A rewrite pass wants coverage, so it pools — and on a
-document with real defects "seen once in three runs" means the check sampled a different real defect that
-run, not that the item is noise. Confirmation would throw those away.
-
-Splitting the document was the other candidate for scaling and it stays refuted: measured, it finds no more
-than the whole document does and costs nine times the calls, because a smaller piece lowers the bar for
-what counts as its worst sentence rather than sharpening the aim.
+What the run rule costs per document, and the two ways of scaling it replaced:
+[design-notes.md](design-notes.md).
 
 ## When is a text finished
 
