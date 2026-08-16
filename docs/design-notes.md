@@ -190,6 +190,38 @@ name people differently — a chat export gives "Sam", a repository gives "sam-t
 intersection reported **zero shared members while ten people were in both**. `overlap` now prints a
 prefix-matched guess, labelled as one, and nothing depends on it.
 
+## When is a text finished: no honest answer yet
+
+This is the gap in the design rather than in the documentation.
+
+```
+python3 measure/measure_stopping.py --reps 3
+```
+
+That runs every comparative check over three real documents: a message an agent wrote, the same content
+after a senior engineer rewrote it that day, and a long document already taken through six rounds of this
+tool. Confirmed findings per pass, five passes each:
+
+| document | words | checks with something to say, per pass |
+|---|---|---|
+| agent-written | 68 | 2.2 — `[2, 1, 4, 2, 2]` |
+| human-edited | 44 | 1.2 — `[1, 2, 1, 1, 1]` |
+| heavily edited | 371 | 0.2 — `[0, 0, 0, 0, 1]` |
+
+Three passes gave 2.0, 1.3 and 0.7, and a single pass in isolation once put the human-edited version above
+the agent-written one — the spread is about ±1, so one pass is not a measurement. At five passes the order
+holds, so the count measures relative quality, and zero IS reachable: the document taken through six rounds
+scored zero in four passes of five.
+
+One finding a pass is where a senior engineer's own rewrite landed. That is a reference point and not a
+target: his writing is not perfect either, and the bar here is allowed to be higher than it. What the
+number is for is the trend — the stopping rule is that the count has stopped falling, and a reader who
+disagrees with what is left is allowed to be right.
+
+Calibrating it means tuning the bar until the human-edited version passes and the agent-written one does
+not. That needs more pairs than the one in `measure/fixtures/gold`, and from more than one author —
+tuning five prompts against a single pair would fit the pair rather than the bar.
+
 ## The tests were checked by breaking things
 
 A green test run proves nothing on its own. Each of these mutations breaks at least one case, which is

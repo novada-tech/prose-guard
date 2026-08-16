@@ -59,7 +59,7 @@ def context_for(audience, who=None):
 
 # What a person's own writing scores here, measured on one message a senior engineer rewrote himself:
 # 1.3 confirmed findings a pass, and never zero. So zero is not the target and pretending otherwise
-# sends someone chasing a bar that good prose does not clear. See docs/reference.md and
+# sends someone chasing a bar that good prose does not clear. See docs/design-notes.md and
 # measure/measure_stopping.py.
 HUMAN_BASELINE = 2
 

@@ -55,7 +55,7 @@ is noise. Fix everything you agree with in one edit rather than one per finding.
 Then run it again on the rewrite, and stop when the number of checks with something to say has stopped
 falling. One finding a pass is roughly what a good writer's own draft scores here, so disagreeing with
 what is left is allowed — chasing zero is chasing something a good writer does not reach. The
-measurements behind all of that are in [docs/reference.md](../../../../docs/reference.md).
+measurements behind all of that are in [docs/design-notes.md](../../../../docs/design-notes.md).
 
 ## What you hand back
 

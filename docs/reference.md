@@ -262,40 +262,6 @@ concern has nothing to pick between.
 What the run rule costs per document, and the two ways of scaling it replaced:
 [design-notes.md](design-notes.md).
 
-## When is a text finished
-
-There is no honest answer yet, and this is the gap in the design rather than in the documentation.
-
-```
-python3 measure/measure_stopping.py --reps 3
-```
-
-That runs every comparative check over three real documents: a message an agent
-wrote, the same content after a senior engineer rewrote it that day, and a long document already taken
-through six rounds of this tool. Confirmed findings per pass, three passes each:
-
-| document | words | checks with something to say, per pass |
-|---|---|---|
-| agent-written | 68 | 2.2 — `[2, 1, 4, 2, 2]` |
-| human-edited | 44 | 1.2 — `[1, 2, 1, 1, 1]` |
-| heavily edited | 371 | 0.2 — `[0, 0, 0, 0, 1]` |
-
-Five passes each. Three passes gave 2.0, 1.3 and 0.7, and a single pass in isolation once put the
-human-edited version above the agent-written one — the spread is about ±1, so one pass is not a
-measurement.
-
-At five passes each the numbers are 2.2, 1.2 and 0.2. The order holds, so the count measures relative
-quality, and zero IS reachable — the document taken through six rounds scored zero in four passes of five.
-
-One finding a pass is where a senior engineer's own rewrite landed. That is a reference point and not a
-target: his writing is not perfect either, and the bar here is allowed to be higher than it. What the
-number is for is the trend — the stopping rule is that the count has stopped falling, and a reader who
-disagrees with what is left is allowed to be right.
-
-Calibrating it means tuning the bar until the human-edited version passes and the agent-written one does
-not. That needs more pairs than the one in `measure/fixtures/gold`, and from more than one author —
-tuning five prompts against a single pair would fit the pair rather than the bar.
-
 ## Managing destinations
 
 The same verbs as audiences, on the same three layers:
@@ -391,3 +357,8 @@ python3 lib/check_prose.py draft.md --who "the ops rota, who did not see the inc
 
 Same checks and prompts as the hook, defaulting to `high` because one deliberate run can afford what
 every message cannot. `/prose-guard:rewrite-for-audience` runs it first and then works outside in.
+
+It records how many findings each pass confirmed and tells you when to stop, which is the count having
+stopped falling rather than the count reaching zero. Zero is not the target and there is no calibrated
+bar yet — what is and is not known about when a text is finished is in
+[design-notes.md](design-notes.md).
