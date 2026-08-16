@@ -258,6 +258,11 @@ how the cases are known to be load-bearing:
 - declining a suggested destination not being permanent
 - the acronym filter dropped, so capitalised English words are reported as jargon
 - the rule symlinked instead of copied
+- `capped` given its own copy of the levels with one missing, so a destination whose `max_effort`
+  names that level runs at full effort with nothing said
+- a second `def` reusing an existing test name, which replaces the first in `globals()` and leaves the
+  count unchanged. The runner's own guard could not see this one until it counted definitions instead
+  of comparing two sets of names, so the mutation was green before it was red
 
 ## One config directory, not two
 
