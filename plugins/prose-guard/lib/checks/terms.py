@@ -76,7 +76,7 @@ def run(text, ctx):
     # Terms the previous version already used are not terms this text introduces. Rewriting a
     # published commit message to remove a client's name should not require also explaining the
     # original author's shorthand, and demanding it produces a block nobody can clear.
-    before = getattr(ctx, "previous", "") or ""
+    before = ctx.previous
     if before and bad:
         inherited = [t for t in bad if jargon.uses(before, t)]
         bad = [t for t in bad if t not in inherited]

@@ -39,11 +39,12 @@ MANY = ("Reply with PASS, or with one line for each failing span, worst first, u
         "FAIL: <what to change, quoting the span>")
 
 
-class Ctx:
-    def __init__(self):
-        self.audience = audiences.Resolved([], "engineers")
-        self.situation = {"who": "Engineers on this team reading a pull request description.",
-                          "situation": "a pull request description"}
+def Ctx():
+    """The shipped Context, so a harness cannot measure a shape nothing runs."""
+    return checks_module.Context(
+        audiences.Resolved([], "engineers"),
+        {"who": "Engineers on this team reading a pull request description.",
+         "situation": "a pull request description"})
 
 
 def items(message):

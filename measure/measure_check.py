@@ -35,7 +35,7 @@ sys.path.insert(0, LIB)
 
 import audiences  # noqa: E402
 from checks import ask as _ask  # noqa: E402
-from checks import for_effort  # noqa: E402
+from checks import Context, for_effort  # noqa: E402
 
 PAD = (" This has been in place since the start of the month and nobody has reported anything else "
        "unusual on the affected hosts.")
@@ -116,12 +116,12 @@ POSITIVES = {
 DEFAULT_NEGATIVES = os.path.join(HERE, "fixtures", "well-built", "*.md")
 
 
-class Ctx:
-    def __init__(self, audience, who=None):
-        self.audience = audience
-        self.situation = {"destination": "a draft being measured, not sent"}
-        if who:
-            self.situation["who reads this"] = who
+def Ctx(audience, who=None):
+    """The shipped Context, so a harness cannot measure a shape nothing runs."""
+    situation = {"destination": "a draft being measured, not sent"}
+    if who:
+        situation["who reads this"] = who
+    return Context(audience, situation)
 
 
 def cell(job):

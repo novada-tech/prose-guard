@@ -74,10 +74,15 @@ def write_audience(home, name, **kw):
         json.dump(data, fh)
 
 
-class Ctx:
-    def __init__(self, audience, situation=None):
-        self.audience = audience
-        self.situation = situation or {}
+def Ctx(audience, situation=None, previous="", mine=None):
+    """The same Context both callers build, so a test cannot pass against a shape nothing ships.
+
+    This was a class of its own setting two of the five fields, which is exactly the duck-typing the
+    real callers had — and a rule reading a field it did not set was inert here too, so no test could
+    have caught that.
+    """
+    from checks import Context
+    return Context(audience, situation, previous, mine)
 
 
 # --------------------------------------------------------------------- detection
@@ -1860,11 +1865,8 @@ def test_an_abbreviation_can_mean_two_things():
         check("both senses are on the audience", len(resolved.meanings("LF")), 2)
         check("and a term with one sense has one", len(resolved.meanings("ADC")), 1)
 
-        class Ctx:
-            audience = resolved
-
         def said(text):
-            got = terms.run(text, Ctx())
+            got = terms.run(text, Ctx(resolved))
             return got.message if got else ""
 
         # Used with no expansion, and the audience uses it for two things: the reader cannot pick.

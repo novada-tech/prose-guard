@@ -34,7 +34,7 @@ LIB = os.path.join(os.path.dirname(HERE), "plugins", "prose-guard", "lib")
 sys.path.insert(0, LIB)
 
 import audiences  # noqa: E402
-from checks import sequence  # noqa: E402
+from checks import Context, sequence  # noqa: E402
 
 WHO = ("Engineers on this team reading a pull request description for a plugin they use but did not "
        "write. They know git and the shell.")
@@ -46,10 +46,10 @@ WHOLE = ("Every command-line destination gets this. Extraction and the complaint
          "destination's own list of text-carrying flags, rather than a list hard-coded in one place.")
 
 
-class Ctx:
-    def __init__(self, who):
-        self.audience = audiences.Resolved([], "engineers")
-        self.situation = {"who": who, "situation": "a pull request description"}
+def Ctx(who):
+    """The shipped Context, so a harness cannot measure a shape nothing runs."""
+    return Context(audiences.Resolved([], "engineers"),
+                   {"who": who, "situation": "a pull request description"})
 
 
 def paragraphs(text):

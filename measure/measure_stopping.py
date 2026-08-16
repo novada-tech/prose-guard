@@ -35,10 +35,10 @@ from checks import sequence  # noqa: E402
 WHO = "Engineers on this team, reading a message about a change to their own tooling."
 
 
-class Ctx:
-    def __init__(self):
-        self.audience = audiences.Resolved([], "engineers")
-        self.situation = {"who": WHO, "situation": "a chat message read once"}
+def Ctx():
+    """The shipped Context, so a harness cannot measure a shape nothing runs."""
+    return checks_module.Context(audiences.Resolved([], "engineers"),
+                                 {"who": WHO, "situation": "a chat message read once"})
 
 
 def pass_over(text, ctx):

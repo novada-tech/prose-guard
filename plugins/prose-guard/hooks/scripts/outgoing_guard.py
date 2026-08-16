@@ -32,8 +32,8 @@ import audiences  # noqa: E402
 import paths  # noqa: E402
 import destinations  # noqa: E402
 import checks as checks_module  # noqa: E402
-from checks import (BLOCK, EFFORT, IN_ORDER as CHECKS, ceiling_for, costs_a_call, pooled,
-                    written_here, wrote_which)  # noqa: E402
+from checks import (BLOCK, EFFORT, IN_ORDER as CHECKS, Context, ceiling_for,  # noqa: E402
+                    costs_a_call, pooled, written_here, wrote_which)
 
 MAX_PER_CHECK = 2      # one complaint, then one more if the fix did not land
 MAX_DENIALS = 6        # a ceiling across all of them, so one message cannot eat a session
@@ -41,27 +41,32 @@ MAX_CALLS = 20         # calls one message may cost, across every check and ever
 MAX_UNREADABLE = 2     # times a session is asked to make its text visible before it is let through
 
 
-class Context:
-    """What the checks are told. Assembled once, read-only, and never inferred from the prose."""
+def context_for(dest, tool, tool_input, cwd):
+    """What the checks are told. Assembled once, read-only, and never inferred from the prose.
 
-    def __init__(self, dest, tool, tool_input, cwd):
-        self.destination = dest
-        ids = destinations.identifiers(dest, tool, tool_input, cwd)
-        self.audience = audiences.resolve(ids, unresolved_default=default_audience())
-        self.situation = destinations.situation(dest, tool, tool_input)
+    The type is checks.Context, shared with check_prose.py. Two classes of the same name used to set
+    different fields — five here and two there — so a rule reading one of them through `getattr` was
+    silently inert in the deliberate path, and nothing said so.
+    """
+    ids = destinations.identifiers(dest, tool, tool_input, cwd)
+    situation = destinations.situation(dest, tool, tool_input)
+    # Which sentences of the document this call actually wrote. None means all of them — a new file, a
+    # message, a commit. A finding outside them is about text that was already there.
+    whole, fresh = destinations.resulting(dest, tool, tool_input, cwd)
+    ctx = Context(
+        audiences.resolve(ids, unresolved_default=default_audience()),
+        situation=situation,
         # The version this text replaces, where one exists. A term already in it is not one this
         # message introduces, and holding a message back over words somebody else wrote is a demand
         # nobody can satisfy.
-        self.previous = destinations.previous(dest, tool, tool_input, cwd)
-        # Which sentences of the document this call actually wrote. None means all of them — a new file, a
-        # message, a commit. A finding outside them is about text that was already there.
-        whole, fresh = destinations.resulting(dest, tool, tool_input, cwd)
-        self.mine = wrote_which(whole, fresh) if whole else None
-        # A destination can say the readers are better informed than the audience assumes, e.g. a
-        # direct message inside a channel-wide audience. Never the other way round.
-        override = self.situation.pop("_shared_context", None)
-        if override:
-            self.audience.shared_context = override
+        previous=destinations.previous(dest, tool, tool_input, cwd),
+        mine=wrote_which(whole, fresh) if whole else None)
+    # A destination can say the readers are better informed than the audience assumes, e.g. a direct
+    # message inside a channel-wide audience. Never the other way round.
+    override = ctx.situation.pop("_shared_context", None)
+    if override:
+        ctx.audience.shared_context = override
+    return ctx
 
 
 # One command, not one session. A global off switch is the thing to avoid: someone turns it off for a
@@ -235,7 +240,7 @@ def main():
     session = str(payload.get("session_id") or "no-session")
     digest = hashlib.sha1(text.encode()).hexdigest()[:16]
     path, state = load_state(session)
-    ctx = Context(dest, tool, tool_input, cwd)
+    ctx = context_for(dest, tool, tool_input, cwd)
 
     # Walk the checks in order, skipping the ones this exact text already satisfied. A pass belongs
     # to the text that earned it, so an edit made for a later check puts the earlier ones back in
