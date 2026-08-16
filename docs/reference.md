@@ -57,10 +57,16 @@ per check is what good prose costs at any length. The cap only binds on a docume
 
 ## What counts as sending
 
-Chat, GitHub and GitLab comments and descriptions, documentation pages, issue trackers, **`git commit`
-and `git tag -m`**, and prose files inside a git working tree that are not ignored.
+Out of the box: **`git commit` and `git tag -m`**, `gh pr` and `gh issue` comments and descriptions, and
+prose files inside a git working tree that are not ignored. Those are the ones worth shipping — on
+essentially every developer machine, and each carrying something a tool schema does not show: which flag
+holds the body, that a commit message has no addressee, that a tracked file is one somebody will read.
 
-That last rule replaces matching on `.md`. What matters is whether somebody other than you will read
+Everything else is yours and is found rather than assumed. Chat, issue trackers, wikis and vendor
+command-line tools go in at `/prose-guard:setup`, which reads the tool list `data/destinations.json`
+cannot see. See [Managing destinations](#managing-destinations) for adding one by hand.
+
+The rule about prose files replaces matching on `.md`. What matters is whether somebody other than you will read
 the file, and "it gets committed" is a deterministic proxy — so your README is checked and your scratch
 notes are not.
 
@@ -96,8 +102,8 @@ not stuck. "Resolved but too short to judge" is silent — that is not a gap, an
 fix a working command would be noise.
 
 All of it is per destination without naming any: both halves read the destination's own `text_arg`, so
-`git commit -m "$(...)"` and `glab mr note --message "$(...)"` behave the same, and one added later does
-too.
+`git commit -m "$(...)"` and the `--message` of a command-line destination setup added for you — `glab
+mr note`, say — behave the same, and one added later does too.
 
 **Your tools are not mine**, so setup asks rather than assumes. `lib/discover.py` reads four local
 sources — MCP servers you have configured, outbound command-line tools on your `PATH`, how often each
@@ -179,9 +185,9 @@ repository is exactly the case that needs mentioning.
 A destination can cap two things, for two different reasons.
 
 **`max_effort` — the questions do not apply here.** The commit message caps at `low`: the term check
-only, whatever you have configured. Not because it is expensive. Measured across all eight destinations
-on the same 77 words of well-built prose, three runs each, every one costs about 15 seconds and 5 model
-calls — the cost is in the phases and the phases do not care where the text is going. There is no such
+only, whatever you have configured. Not because it is expensive. Measured across the eight destinations
+that shipped then, on the same 77 words of well-built prose, three runs each, every one costs about 15
+seconds and 5 model calls — the cost is in the phases and the phases do not care where the text is going. There is no such
 thing as an expensive destination.
 
 What varies is whether the questions apply. The phases ask whether this reader will care and whether the
@@ -191,9 +197,9 @@ exactly as unhelpful in a permanent record as anywhere, and it costs no model ca
 second.
 
 **`max_severity` — nothing is about to reach anyone unreviewed.** A draft is its own destination and
-caps at `advise`. Blocking is justified by text being about to reach a reader with nobody in between;
-`slack_send_message_draft` lands in your own compose box, so it has a reader already, and holding it
-back spends a turn arguing about text you were about to read. The finding is identical either way — the
+caps at `advise`. Blocking is justified by text being about to reach a reader with nobody in between; a
+draft tool — `slack_send_message_draft`, if setup added it for you — lands in your own compose box, so
+it has a reader already, and holding it back spends a turn arguing about text you were about to read. The finding is identical either way — the
 destination changes what is done about it, never whether the tool noticed.
 
 Reproduce the cost table with:
@@ -317,8 +323,8 @@ The same verbs as audiences, on the same three layers:
 python3 lib/destinations.py list                      # every one, and which layer it came from
 python3 lib/destinations.py show "commit message"
 python3 lib/destinations.py add "our wiki" --tool wiki_create --text-field content
-python3 lib/destinations.py off "gitlab cli"          # stop checking one here, whatever layer it is from
-python3 lib/destinations.py on "gitlab cli"
+python3 lib/destinations.py off "github cli"          # stop checking one here, whatever layer it is from
+python3 lib/destinations.py on "github cli"
 python3 lib/destinations.py rm "my wiki"              # delete one of your own
 python3 lib/destinations.py share --to DIR --only "our chat" --with-off
 ```

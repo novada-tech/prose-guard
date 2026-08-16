@@ -119,9 +119,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/destinations.py" add "our chat" \
 Yours are read before the shipped set, so giving one the same name overrides it. To stop checking a
 shipped one entirely, `destinations.py off "<name>"`.
 
-Already covered without asking: chat messages, GitHub and GitLab comments and PR descriptions,
-documentation pages, issue trackers, `git commit` and `git tag -m`, and prose files that are inside
-a git working tree and not ignored.
+Already covered without asking: `git commit` and `git tag -m`, `gh pr` and `gh issue` comments and
+descriptions, and prose files that are inside a git working tree and not ignored. Chat, issue trackers
+and the rest are what this step is for — they are not in the shipped file because it cannot see the tool
+list, and you can.
 
 One known gap worth stating rather than hiding: `git commit` with no `-m` opens an editor, and that text
 never reaches a tool call.
