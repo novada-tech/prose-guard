@@ -142,10 +142,13 @@ def test_detection():
         # count as explained, passing a message that never explained it
         ("short words are not an expansion", "We ran a docker container, then ADC failed.",
          ["ADC"]),
-        # Only the parenthetical pair can pass this one: "of" is two letters, so the running-prose
-        # expansion never matches it. Without a case like this the Schwartz-Hearst extraction the
-        # module opens by citing is redundant — every other pair here is caught by the prose test too.
-        ("a pair whose phrase holds a short word", "The bill of materials (BOM) was wrong.", []),
+        # Only the parenthetical pair can pass this one: the phrase holds a two-letter word, so the
+        # running-prose expansion never matches it, and without a case like this the Schwartz-Hearst
+        # extraction the module opens by citing is redundant — every other pair here is also caught by
+        # the prose test. Invented, like ZZQ below, because a real one turns on the local dictionary:
+        # `bom` and `pos` are English words on one platform and acronyms on another.
+        ("a pair whose phrase holds a short word",
+         "We moved to the zebra of quality tools (ZQT) last week.", []),
         ("a real three-word expansion", "It reads application default credentials. ADC is next.",
          []),
         ("known terms pass", "The CLI calls the API twice.", []),
@@ -1115,6 +1118,11 @@ def test_session_ledger_bounds_the_argument():
         seq = [verdict == "deny" for verdict, _ in said]
         check("a session is blocked at most MAX_DENIALS times", sum(seq), 6)
         check("and stops blocking once the ledger is spent", any(seq[-2:]), False)
+        # Two denials per check, then it says its piece and hands over. The session total alone cannot
+        # see that bound: one check spending the whole ledger on its own reaches the same six, and the
+        # checks that would have run after it never speak at all.
+        check("one check gets two denials, then it has to let the message go",
+              seq[:3], [True, True, False])
 
         # The escape hatch is named on the last denial a check gets and not before. Naming it in every
         # denial teaches the cheaper move before the correct one, and the correct one is almost always
