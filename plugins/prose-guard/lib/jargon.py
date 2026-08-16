@@ -16,9 +16,12 @@ detection serves any audience. audiences.py decides what is known.
     python3 lib/jargon.py <file>
     cat draft.md | python3 lib/jargon.py
 """
+from __future__ import annotations
+
 import os
 import re
 import sys
+from typing import Callable, Iterator
 
 FENCE = re.compile(r"```.*?```", re.S)
 INLINE = re.compile(r"`[^`]+`")
@@ -34,7 +37,7 @@ BEFORE = re.compile(r"[^()]{2,}$")
 LOOK_BACK = 120         # how far before a bracket the phrase may start
 
 
-def _system_words():
+def _system_words() -> set[str]:
     """The system word list. `is_acronym` uses it to tell an acronym from a capitalised English word.
 
     A word list rather than a hand-kept list of exceptions, because the exceptions would grow for ever.
@@ -54,7 +57,7 @@ def _system_words():
     return set()
 
 
-def _shipped_words():
+def _shipped_words() -> set[str]:
     """The floor, for a machine with no system dictionary at all.
 
     Many Linux containers have none. Without this the filter never fires and every capitalised
@@ -82,7 +85,7 @@ def _shipped_words():
 _LAZY = ("SHIPPED_WORDS", "SYSTEM_WORDS", "WORDS")
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> set[str]:
     if name not in _LAZY:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     g = globals()
@@ -95,7 +98,7 @@ def __getattr__(name):
     return g[name]
 
 
-def _words():
+def _words() -> set[str]:
     """The word list. Read through the module so __getattr__ can fill it in, since a plain global
     reference from inside a function would not reach it."""
     return getattr(sys.modules[__name__], "WORDS")
@@ -119,7 +122,7 @@ _SHORTEST_STEM = 3
 _Y_BEFORE = ("ed", "es")
 
 
-def _base_forms(low):
+def _base_forms(low: str) -> Iterator[str]:
     """The base forms this word could be an inflection of, for the word list to be asked about."""
     for sfx in _SUFFIXES:
         if low.endswith(sfx) and len(low) - len(sfx) >= _SHORTEST_STEM:
@@ -129,7 +132,7 @@ def _base_forms(low):
                 yield stem[:-1] + "y"
 
 
-def is_acronym(token):
+def is_acronym(token: str) -> bool:
     """False when this is a capitalised English word rather than an acronym.
 
     An acronym is by definition not a word, so this belongs here rather than in any audience: THE,
@@ -140,16 +143,16 @@ def is_acronym(token):
     return low not in words and not any(base in words for base in _base_forms(low))
 
 
-def prose(text):
+def prose(text: str | None) -> str:
     return INLINE.sub(" ", QUOTE.sub(" ", FENCE.sub(" ", text or "")))
 
 
-def _valid_short(s):
+def _valid_short(s: str) -> bool:
     return 2 <= len(s) <= 10 and len(s.split()) <= 2 and bool(re.search(r"[A-Za-z]", s)) \
         and s[0].isalnum()
 
 
-def _best_long(short, candidate):
+def _best_long(short: str, candidate: str) -> str | None:
     """Schwartz-Hearst right-to-left match. Returns the matched long form, or None."""
     s, l = short.lower(), candidate.lower()
     si, li = len(s) - 1, len(l) - 1
@@ -173,7 +176,7 @@ def _best_long(short, candidate):
     return candidate[li + 1:].strip() if li + 1 < len(candidate) else candidate
 
 
-def pairs(text):
+def pairs(text: str) -> dict[str, str]:
     """(short, long) pairs written as 'Long Form (SF)' or 'SF (Long Form)'.
 
     Anchored on the bracket, and the phrase read backwards from it. Written the other way round —
@@ -213,7 +216,7 @@ def pairs(text):
     return out
 
 
-def expanded_in_prose(short, text):
+def expanded_in_prose(short: str, text: str) -> bool:
     """Also count it as expanded when a phrase whose initials match appears anywhere, e.g.
     'Application Default Credentials' with '(ADC)' never written. Schwartz-Hearst sees only
     parenthetical pairs, and writers often expand in running prose instead.
@@ -230,7 +233,7 @@ def expanded_in_prose(short, text):
     return re.search(pat, text, re.I) is not None
 
 
-def uses(text, term):
+def uses(text: str, term: str) -> bool:
     """Whether this text already contains that term.
 
     Deliberately the scan's own machinery rather than a substring test or a second regex: the question
@@ -240,7 +243,7 @@ def uses(text, term):
     return term in set(ACRONYM.findall(prose(text)))
 
 
-def scan(text, is_known):
+def scan(text: str, is_known: Callable[[str], bool]) -> tuple[list[str], list[str]]:
     """(unexplained, considered). `considered` is every acronym-shaped term the reader had to
     handle, known or not — the denominator for asking whether the audience model is wrong.
     """
@@ -248,7 +251,8 @@ def scan(text, is_known):
     return unexplained, considered
 
 
-def examine(text, is_known):
+def examine(text: str,
+            is_known: Callable[[str], bool]) -> tuple[list[str], list[str], dict[str, str]]:
     """scan(), and also what each term was written out as here.
 
     Two callers want the expansions: the scan itself, to decide what counts as explained, and
@@ -269,7 +273,7 @@ def examine(text, is_known):
     return unexplained, considered, written
 
 
-def main():
+def main() -> None:
     sys.path.insert(0, __file__.rsplit("/", 1)[0])
     import audiences
     text = open(sys.argv[1]).read() if len(sys.argv) > 1 else sys.stdin.read()

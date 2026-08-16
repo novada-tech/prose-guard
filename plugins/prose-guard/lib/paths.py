@@ -13,9 +13,12 @@ uninstall. This one survives updates too, and it can be read, diffed and edited 
 `layers()` below is the other half of the same job: which places are read, in which order, and what
 each of them holds. That belongs here because the alternative was each mechanism working it out again.
 """
+from __future__ import annotations
+
 import glob
 import json
 import os
+from typing import Any
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 # The data that ships inside the plugin. Relative to this file, like every other shipped path, so no
@@ -23,18 +26,18 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 SHIPPED = os.path.join(_HERE, "..", "data")
 
 
-def home():
+def home() -> str:
     return (os.environ.get("PROSE_GUARD_HOME")
             or os.path.join(os.environ.get("XDG_CONFIG_HOME")
                             or os.path.join(os.path.expanduser("~"), ".config"),
                             "prose-guard"))
 
 
-def at(*parts):
+def at(*parts: str) -> str:
     return os.path.join(home(), *parts)
 
 
-def config():
+def config() -> dict[str, Any]:
     """Your choices: the effort level, the directories a team shares, the audience to assume when
     nothing matches. One file, read one way, so no two callers can disagree about its shape.
 
@@ -52,17 +55,17 @@ def config():
     return _config()[0]
 
 
-def config_complaints():
+def config_complaints() -> list[str]:
     """What is wrong with config.json, in sentences. Empty when there is nothing to say."""
     return _config()[1]
 
 
-def _config():
+def _config() -> tuple[dict[str, Any], list[str]]:
     import settings
     return settings.read(at("config.json"), settings.CONFIG, "config.json")
 
 
-def update_config(**values):
+def update_config(**values: Any) -> str:
     """Merge keys into config.json and leave the rest of it alone. Returns where it was written.
 
     The one writer, for the same reason there is one reader: `indent=` and the trailing newline are
@@ -77,7 +80,7 @@ def update_config(**values):
     return at("config.json")
 
 
-def shared():
+def shared() -> list[str]:
     """Directories a team keeps audiences in, read in addition to your own.
 
     A checkout, usually — put the directory in a repository your colleagues already clone and they get
@@ -96,7 +99,7 @@ def shared():
     return out
 
 
-def ensure():
+def ensure() -> str:
     os.makedirs(home(), exist_ok=True)
     return home()
 
@@ -115,24 +118,24 @@ class Layer:
     called `destinations` — a baseline with no terms that every audience could inherit.
     """
 
-    def __init__(self, origin, directory, audiences):
+    def __init__(self, origin: str, directory: str, audiences: str) -> None:
         self.origin = origin
         self.directory = directory
         self.audiences = audiences
 
     @property
-    def destinations(self):
+    def destinations(self) -> str:
         return os.path.join(self.directory, "destinations.json")
 
-    def audience_files(self):
+    def audience_files(self) -> list[str]:
         return [p for p in sorted(glob.glob(os.path.join(self.audiences, "*.json")))
                 if p != self.destinations]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Layer {self.origin} {self.directory}>"
 
 
-def layers():
+def layers() -> list[Layer]:
     """Every place data comes from, nearest first: yours, then each directory your team keeps, then
     the set that ships with the plugin.
 
@@ -153,6 +156,6 @@ def layers():
     return out
 
 
-def mine():
+def mine() -> Layer:
     """Your own layer — the only one anything writes to."""
     return layers()[0]

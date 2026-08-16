@@ -15,6 +15,8 @@ What is NOT here, deliberately: `${CLAUDE_PLUGIN_ROOT}`, which a skill expands f
 Python ever needs, and `CLAUDE_PLUGIN_DATA`, whose story is in paths.py — it reaches a hook and not a
 skill, so resolving state through it split the config in two.
 """
+from __future__ import annotations
+
 import glob
 import json
 import os
@@ -27,29 +29,29 @@ EFFORT_VAR = "CLAUDE_PLUGIN_OPTION_EFFORT"
 CLI = "claude"
 
 
-def dot_dir():
+def dot_dir() -> str:
     """`~/.claude` — rules, plugin cache, settings."""
     return os.path.join(os.path.expanduser("~"), ".claude")
 
 
-def rules_dir():
+def rules_dir() -> str:
     """Where a rule has to be for every session to load it. A plugin cannot ship one, so the rule this
     plugin carries is COPIED here — which is why an upgrade does not refresh it."""
     return os.path.join(dot_dir(), "rules")
 
 
-def user_config():
+def user_config() -> str:
     """`~/.claude.json` — the user's own Claude Code configuration, including MCP servers."""
     return os.path.join(os.path.expanduser("~"), ".claude.json")
 
 
-def plugin_manifests():
+def plugin_manifests() -> list[str]:
     """Every installed plugin's manifest, from the plugin cache."""
     return sorted(glob.glob(os.path.join(dot_dir(), "plugins", "cache", "*", "*", "*",
                                          ".claude-plugin", "plugin.json")))
 
 
-def declared_servers():
+def declared_servers() -> list[str]:
     """MCP server names every installed plugin declares, wherever it declares them.
 
     Two places, because plugins use both: inside `plugin.json` under `mcpServers`, and in a sibling
@@ -71,7 +73,7 @@ def declared_servers():
     return sorted(names)
 
 
-def missing():
+def missing() -> list[str]:
     """What this plugin expects of its host and cannot find, in sentences.
 
     Empty on a healthy install. Not empty means a layout changed or this is not Claude Code, and either

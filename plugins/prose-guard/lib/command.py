@@ -29,11 +29,14 @@ Chaining is prevented by something stronger than a check: a command is run as a 
 no shell, so `;` and `&&` reach git as arguments and git rejects them. CHAINS is redundancy for anything
 that later runs this through a shell - removing it changes no behaviour today, which a test cannot show.
 """
+from __future__ import annotations
+
 import os
 import re
 import shlex
 import stat
 import subprocess
+from typing import Any, Iterator
 
 # A flag whose value is exactly `-` means "the text arrives on stdin", and for these commands stdin is
 # the heredoc sitting in the same tool call. `git commit -F -` is how a long commit message is really
@@ -51,7 +54,7 @@ HEREDOC = re.compile(r"<<-?[ \t]*['\"]?(\w+)['\"]?[^\n]*\r?\n(.*?)^[ \t]*\1[ \t]
                      re.S | re.M)
 
 
-def heredoc_body(cmd):
+def heredoc_body(cmd: str) -> str | None:
     """The body of the heredoc this command feeds itself, or None.
 
     Only ever the command's OWN heredoc. `command_itself` strips heredocs before routing, because a
@@ -76,7 +79,7 @@ UNSEEN = "something"
 _SUBSTITUTION = re.compile(r"\$\([^()]*\)|\$\{[^{}]*\}|`[^`]*`")
 
 
-def visible(value):
+def visible(value: str) -> tuple[str, int]:
     """The literal part of a text argument, with each span this tool cannot see standing in as a word.
 
     A message is rarely all substitution. Measured across 4,154 local transcripts, the text arguments
@@ -92,7 +95,7 @@ def visible(value):
     return seen, len(_SUBSTITUTION.findall(value))
 
 
-def command_itself(cmd):
+def command_itself(cmd: str) -> str:
     """A command with its heredoc bodies removed, so what it DOES is read and not what it carries.
 
     Everything about routing keys off the command string, and a heredoc body is not part of the command:
@@ -114,7 +117,7 @@ def command_itself(cmd):
 MOST_BYTES = 400_000
 
 
-def read_prose_file(path, cwd=None, inside=True):
+def read_prose_file(path: str, cwd: str | None = None, inside: bool = True) -> str | None:
     """The contents of a file whose prose is about to be published, or None.
 
     Three conditions, and the first is the one doing the work. `inside` means the path came from text the
@@ -145,8 +148,9 @@ def read_prose_file(path, cwd=None, inside=True):
     except OSError:
         return None
 
-def flag_values(cmd):
-    """Every (flag, value) the command itself passes, or None when it cannot be read as words.
+def flag_values(cmd: str) -> Iterator[tuple[str, str]]:
+    """Every (flag, value) the command itself passes, and nothing at all when it cannot be read as
+    words.
 
     Token-level, and that is the whole point of it. It is the difference between a command that
     publishes prose and a command that merely mentions one: in `echo 'run: gh pr create --body "$(cat
@@ -189,7 +193,7 @@ _FLAG = re.compile(r"^(--?[A-Za-z][-\w]*)(=.*)?$", re.S)
 _PLAIN = re.compile(r"^[A-Za-z0-9][\w./^~@{}+-]*$")
 
 
-def _only_reports(words):
+def _only_reports(words: list[str]) -> bool:
     """Whether every argument of a git invocation is one this tool recognises as reporting."""
     allowed = REPORTS.get(words[1])
     if allowed is None:
@@ -211,10 +215,10 @@ def _only_reports(words):
 # side effect the whitelist was there to prevent. Making a second call free is smaller than coordinating
 # two call sites, and it holds for a third caller nobody has written yet. The process lives for one tool
 # call, so the cache cannot go stale.
-_RESOLVED = {}
+_RESOLVED: dict[tuple[str, str], str | None] = {}
 
 
-def resolve(value, cwd=None):
+def resolve(value: str, cwd: str | None = None) -> str | None:
     """The text behind a substitution, where it can be had without risking a side effect.
 
     Returns None when it cannot, which is the honest answer for `${SUMMARY}` — the hook is a separate
@@ -226,7 +230,7 @@ def resolve(value, cwd=None):
     return _RESOLVED[key]
 
 
-def _resolve(value, cwd):
+def _resolve(value: str, cwd: str) -> str | None:
     m = READS_A_FILE.match(value)
     if m:
         return read_prose_file(m.group(1), cwd)

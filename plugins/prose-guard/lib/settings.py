@@ -26,18 +26,26 @@ A complaint is a sentence for the person who wrote the file, naming the file, th
 expected. Reading never raises: a bad value falls back to the safe end and the complaint travels
 alongside, because a tool that refuses to start is a tool somebody switches off.
 """
+from __future__ import annotations
+
 import difflib
 import json
+from typing import Any, Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Never evaluated: `str | None` inside a runtime expression would raise before Python 3.10, and
+    # this runs on whatever python3 the machine has. A checker reads it; the interpreter never does.
+    Rule = Callable[[Any], tuple[Any, str | None]]
 
 # ------------------------------------------------------------------ what a value may be
 # A rule takes the value found and returns (usable_value, complaint). Either may be None: None for the
 # value means "nothing usable here, fall back", and None for the complaint means "nothing to say".
 
 
-def one_of(*allowed):
+def one_of(*allowed: str) -> Rule:
     """One of a short list. Compared without case or surrounding space, because a person typing into a
     free-text box types `Low `, and refusing that would be pedantry rather than safety."""
-    def rule(value):
+    def rule(value: Any) -> tuple[str | None, str | None]:
         if value is None:
             return None, None
         text = str(value).strip().lower()
@@ -47,32 +55,32 @@ def one_of(*allowed):
     return rule
 
 
-def text(value):
+def text(value: Any) -> tuple[str | None, str | None]:
     if value is None or isinstance(value, str):
         return value, None
     return None, f"is {type(value).__name__}, which should be text"
 
 
-def flag(value):
+def flag(value: Any) -> tuple[bool | None, str | None]:
     if value is None or isinstance(value, bool):
         return value, None
     return None, f"is {value!r}, which should be true or false"
 
 
-def whole_number(value):
+def whole_number(value: Any) -> tuple[int | None, str | None]:
     if value is None or (isinstance(value, int) and not isinstance(value, bool)):
         return value, None
     return None, f"is {value!r}, which should be a whole number"
 
 
-def each(rule):
+def each(rule: Rule) -> Rule:
     """A list of things, every one of which follows `rule`.
 
     One name written without brackets is read as a list holding that one name, because that is what
     somebody who writes `"off": "chat message"` means, and iterating it as twelve one-letter names
     switched nothing off and said nothing about it.
     """
-    def check(value):
+    def check(value: Any) -> tuple[list[Any] | None, str | None]:
         if value is None:
             return None, None
         items = [value] if isinstance(value, (str, bytes)) else value
@@ -80,7 +88,8 @@ def each(rule):
             items = list(items)
         except TypeError:
             return None, f"is {type(value).__name__}, which should be a list"
-        out, wrong = [], []
+        out: list[Any] = []
+        wrong: list[str] = []
         for item in items:
             got, complaint = rule(item)
             if complaint:
@@ -91,13 +100,13 @@ def each(rule):
     return check
 
 
-def mapping(value):
+def mapping(value: Any) -> tuple[dict[str, Any] | None, str | None]:
     if value is None or isinstance(value, dict):
         return value, None
     return None, f"is {type(value).__name__}, which should be a set of key/value pairs"
 
 
-def anything(value):
+def anything(value: Any) -> tuple[Any, None]:
     return value, None
 
 
@@ -106,7 +115,7 @@ LEVELS = ("disabled", "low", "medium", "high")
 SEVERITIES = ("block", "advise")
 CONTEXTS = ("low", "medium", "high")
 
-CONFIG = {"effort": one_of(*LEVELS),
+CONFIG: dict[str, Rule] = {"effort": one_of(*LEVELS),
           "shared": each(text),
           "unresolved_audience": text,
           # Terms never assumed known, whichever audience applies. See audiences.never_known.
@@ -115,7 +124,7 @@ CONFIG = {"effort": one_of(*LEVELS),
 # A destination: which tool calls carry prose to which readers, and how hard to look. `max_effort` and
 # `max_severity` are the two that exist to make the guard LESS aggressive, which is why a typo in
 # either is the one that must not pass.
-DESTINATION = {"name": text, "note": text, "caveat": text,
+DESTINATION: dict[str, Rule] = {"name": text, "note": text, "caveat": text,
                "tool": each(text), "bash": text, "file": text,
                "text_fields": each(text), "text_arg": each(text),
                "identifiers": mapping, "when": mapping, "context_from": mapping,
@@ -123,18 +132,18 @@ DESTINATION = {"name": text, "note": text, "caveat": text,
                "max_effort": one_of(*LEVELS),
                "max_severity": one_of(*SEVERITIES)}
 
-DESTINATIONS_FILE = {"destinations": anything, "public_owners": each(text), "off": each(text),
+DESTINATIONS_FILE: dict[str, Rule] = {"destinations": anything, "public_owners": each(text), "off": each(text),
                      "_meta": anything, "public_owners_help": anything}
 
-AUDIENCE = {"name": text, "who": text, "inherits": each(text),
+AUDIENCE: dict[str, Rule] = {"name": text, "who": text, "inherits": each(text),
             "matches": mapping, "vocabulary": mapping, "expansions": mapping,
             "members": each(text), "assumptions": mapping,
             "_meta": anything, "_note": anything}
 
-ASSUMPTIONS = {"shared_context": one_of(*CONTEXTS)}
+ASSUMPTIONS: dict[str, Rule] = {"shared_context": one_of(*CONTEXTS)}
 
 
-def checked(data, shape, where):
+def checked(data: Any, shape: dict[str, Rule], where: str) -> tuple[dict[str, Any], list[str]]:
     """A copy of `data` holding only values that follow `shape`, and a complaint for each that did not.
 
     An unknown key is a complaint too. `max_effot: "low"` is the same mistake as `max_effort: "lo"` and
@@ -143,7 +152,8 @@ def checked(data, shape, where):
     if not isinstance(data, dict):
         kind = type(data).__name__
         return {}, [f"{where} holds {kind} where it should hold key/value pairs, so it was not read"]
-    clean, complaints = {}, []
+    clean: dict[str, Any] = {}
+    complaints: list[str] = []
     for key, value in data.items():
         rule = shape.get(key)
         if rule is None:
@@ -159,7 +169,8 @@ def checked(data, shape, where):
     return clean, complaints
 
 
-def read(path, shape, where=None):
+def read(path: str, shape: dict[str, Rule],
+         where: str | None = None) -> tuple[dict[str, Any], list[str]]:
     """One JSON file, checked against its declaration. Missing or unreadable is empty and silent.
 
     Silent because a file that is not there is the ordinary case — nobody has a destinations.json until
