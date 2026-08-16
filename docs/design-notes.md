@@ -179,8 +179,11 @@ own context, which is dearer than the small call `medium` adds.
 `high` satisfied every concern on every message measured, and so did `medium`. That is a judge at its
 ceiling, not evidence they are equal.
 
-The wall clock was measured when `high` ran four checks; the fifth was added afterwards and has not been
-measured again, so `high`'s figure is a floor. Refresh the whole table with:
+The wall clock was measured when `high` ran four model-backed checks. It runs six now — a fifth and
+then a sixth were added afterwards and neither has been measured, so `high`'s figure is a floor. Rather
+than restating a count that keeps moving, ask the code: `python3 -c "import sys;
+sys.path.insert(0, 'plugins/prose-guard/lib'); from checks import for_effort, costs_a_call;
+print(sum(1 for c in for_effort('high') if costs_a_call(c)))"`. Refresh the whole table with:
 
 ```
 python3 measure/measure_cost.py --levels disabled,high --reps 5

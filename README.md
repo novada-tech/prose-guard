@@ -110,9 +110,9 @@ already has.
 | `disabled` | nothing | — |
 | `low` | the two arithmetic checks only, no model call | +12s |
 | `medium` | plus one advisory judgement call over the five concerns | +19s |
-| `high` | five separate checks, re-verified after each edit | +75s |
+| `high` | one separate check per concern, re-verified after each edit | +75s |
 
-The seconds were measured when `high` ran four checks, so `high`'s is a floor.
+The seconds were measured when `high` ran four model-backed checks. It runs six now, so its figure is a floor.
 
 **Pick `medium`.** `/prose-guard:setup` asks and writes the answer for you. `low` is not the cheap
 option and `high` is not measurably better, which is less obvious than it looks — the numbers, the
