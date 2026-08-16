@@ -16,8 +16,13 @@ These are the same checks prose-guard runs on a message you send, so what it
 says here is what the hook would say. It runs the most thorough level whatever the hook is set
 to, because this is one deliberate run rather than every message someone sends: the deterministic
 term check, the deterministic mechanics check, then five model-based checks: relevance, structure,
-sentences, reference, and how it addresses the reader. At least five model calls of a few seconds each,
-and more where a check keeps finding something new — the ceiling is below.
+sentences, reference, and how it addresses the reader.
+
+**What it costs, before you run it.** Five model calls if nothing is wrong — one per check. More where
+a check keeps finding something new, up to a ceiling that grows with the document: about 30 calls for a
+short one, 85 for 1,600 words, 125 for 2,400 and above. The command prints the ceiling before it starts
+and what it actually spent when it finishes. A long document with real problems is meant to cost more
+than a short clean one; that is the design, not an overrun.
 
 The two flags do different jobs. **`--for` sets the vocabulary** — run
 `python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" list` to see what exists. **`--who` describes the

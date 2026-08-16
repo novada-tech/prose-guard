@@ -35,12 +35,19 @@ from checks import (BLOCK, Context, ceiling_for, config, costs_a_call,  # noqa: 
                     for_effort, pooled)
 
 
-# The budget a deliberate run may spend, in model calls. There was none: five pooled checks each free
-# to run to their own ceiling cost 125 calls and about half a million input tokens on a 3,200-word
-# document — on the path /prose-guard:rewrite-for-audience opens with, which tells the agent it costs
-# five calls and then says to run it again. Higher than the hook's twenty because this is one
-# deliberate run rather than every message someone sends.
-MAX_CALLS = 40
+# What a deliberate run may cost is decided by `ceiling_for` and by how much is wrong, and there is no
+# separate budget here on purpose.
+#
+# A flat cap was tried and reverted, because of what it did rather than what it saved: at 40 calls it
+# bound above 800 words, so a 5,000-word document got the same 8 runs a check as an 800-word one, and
+# the whole point of scaling runs with length is that a long document deserves more care. This is the
+# path somebody chose to run on one document, not something paid on every message.
+#
+# It was never unbounded — MOST_RUNS caps each check at 25, so the worst case is 25 x the model-backed
+# checks, and reaching it needs every single run to surface something new. The real defect the review
+# found was a claim: the rewrite skill said "four model calls" and then said to run it again. What
+# needed fixing was the sentence, and `worst_case()` below now says the number out loud before
+# anything is spent.
 
 
 def context_for(audience, who=None):
@@ -166,18 +173,14 @@ def main():
     if a.who:
         print(f'reader described as:  "{a.who}"  (read by the model-based checks, not by terms)')
     running = for_effort(a.effort)
-    # A share each, so the first check cannot spend the run. Same rule as the hook, one line different:
-    # a deliberate run may spend more of them.
-    paying = max(1, sum(1 for c in running if costs_a_call(c)))
-    passes = min(ceiling_for(text), max(1, MAX_CALLS // paying))
-    print(f"up to {passes} runs of each check, stopping when a run adds nothing")
+    passes = ceiling_for(text)
+    paying = sum(1 for c in running if costs_a_call(c))
+    print(f"up to {passes} runs of each check, stopping when a run adds nothing "
+          f"— at most {passes * paying} model calls, and one per check if nothing is wrong")
     problems, loose, spent = 0, 0, 0
     for check in running:
-        left = max(1, (MAX_CALLS - spent) // max(1, paying))
-        found, firm, cost = pooled(check, text, ctx, min(passes, left))
+        found, firm, cost = pooled(check, text, ctx, passes)
         spent += cost
-        if costs_a_call(check):
-            paying = max(1, paying - 1)
         if not found:
             print(f"  {check.NAME:10s} ok")
             continue
@@ -192,6 +195,7 @@ def main():
         # A check that never ran reads exactly like a check that passed, so it is said out loud rather
         # than left to be inferred from a clean report.
         print(f"  NOT CHECKED: {missed}")
+    print(f"{spent} model call(s) spent.")
     print(verdict(a.file, problems, passes))
     return 0
 
