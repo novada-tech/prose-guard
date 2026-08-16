@@ -3871,6 +3871,27 @@ def test_the_argument_before_a_message_goes_out_can_be_read_back():
         check("and its text is nowhere on disk", on_disk, [])
 
 
+def test_the_article_rule_leaves_words_that_only_look_like_vowels():
+    """`mechanics` blocks, so a false positive here costs a whole turn.
+
+    "a usage line" is correct — usage is said with a y — and the rule reported it as wrong. Measured on
+    1,911 real commit messages it produced exactly two findings: that one, and a genuine "an rule". The
+    prefix list is inherently incomplete because there is no pronunciation data here, so it grows when
+    something fires rather than when somebody imagines a word.
+    """
+    from checks import mechanics
+
+    correct = ("a usage line", "a usable result", "a user", "a unique case", "a union", "a euro",
+               "a university", "a utility", "a useful note", "a one-word fix", "an hour", "an heir",
+               "an honest answer", "an API", "an FPGA")
+    check("nothing correct is reported",
+          [p for p in correct if mechanics.scan(p)], [])
+
+    wrong = ("an rule", "an deploy", "a error", "a index")
+    check("and every genuine slip still is",
+          [p for p in wrong if not mechanics.scan(p)], [])
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 

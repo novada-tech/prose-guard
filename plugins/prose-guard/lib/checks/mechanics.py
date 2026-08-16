@@ -54,8 +54,12 @@ NEEDS_AN = re.compile(r"\ba ([aeiou][a-z]{2,})\b")
 # writers, which is a judgement about pronunciation this rule cannot make. A SILENT_H exclusion list
 # used to sit here for a case that could never reach it.
 NEEDS_A = re.compile(r"\ban ([bcdfgjklmnpqrstvwxyz][a-z]{2,})\b")
-# Vowel letter, consonant sound.
-SOUNDS_LIKE_YOU = ("one", "uni", "una", "use", "usu", "uti", "eu", "ubi", "ufo", "ewe")
+# Vowel letter, consonant sound. A prefix list is inherently incomplete — the rule is about how a word
+# is said and there is no pronunciation data here — so it grows by measurement rather than by guessing:
+# `usa` was added after "a usage line" was reported as wrong on 1 of 1,911 real commit messages, which
+# is also the only false positive this rule has produced on that corpus. Add a prefix when one fires,
+# not when one is imagined.
+SOUNDS_LIKE_YOU = ("one", "uni", "una", "usa", "use", "usu", "uti", "eu", "ubi", "ufo", "ewe")
 # A word that cannot follow an article at all means the text is broken somewhere else, and there is
 # nothing useful to say about the article.
 FUNCTION_WORDS = ("and", "the", "in", "on", "of", "to", "for", "with", "through", "or", "is", "are",
