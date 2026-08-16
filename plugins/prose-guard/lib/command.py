@@ -35,6 +35,40 @@ import shlex
 import stat
 import subprocess
 
+# A flag whose value is exactly `-` means "the text arrives on stdin", and for these commands stdin is
+# the heredoc sitting in the same tool call. `git commit -F -` is how a long commit message is really
+# written, and `gh pr create --body-file -` is the same idea.
+STDIN = "-"
+
+# One pattern for both halves of the heredoc question, because they must agree: what `command_itself`
+# strips out of the command is exactly what `heredoc_body` may read back, and a form one accepted and
+# the other did not would be a body that routes as part of a command while never being read as prose.
+#
+# The body starts on the NEXT line, whatever else follows the redirect on this one — and what usually
+# follows is the rest of a chain, `git commit -F - <<'EOF' && git push`. The terminator may be indented,
+# since `<<-` strips tabs and a heredoc inside an `if` is indented whether bash requires it or not.
+HEREDOC = re.compile(r"<<-?[ \t]*['\"]?(\w+)['\"]?[^\n]*\r?\n(.*?)^[ \t]*\1[ \t]*$",
+                     re.S | re.M)
+
+
+def heredoc_body(cmd):
+    """The body of the heredoc this command feeds itself, or None.
+
+    Only ever the command's OWN heredoc. `command_itself` strips heredocs before routing, because a
+    document that quotes a publishing command is not one — and that stays true: this is read only after
+    the stripped command has been found to carry a text flag whose value is stdin, which the attack
+    shape (`cat > runbook.md <<EOF ... gh pr create ... EOF`) cannot produce, since the command left
+    after stripping is `cat` and no destination claims it.
+    """
+    # The body starts on the NEXT line, whatever else follows the redirect on this one — and what
+    # usually follows is the rest of a chain: `git commit -F - <<'EOF' && git push`. Demanding a newline
+    # straight after the delimiter missed 22 of 151 real cases, every one of them that shape. The
+    # terminator may be indented, since `<<-` strips tabs and a heredoc inside an `if` is indented
+    # whether bash requires it or not.
+    m = HEREDOC.search(cmd)
+    return m.group(2) if m else None
+
+
 def command_itself(cmd):
     """A command with its heredoc bodies removed, so what it DOES is read and not what it carries.
 
@@ -49,7 +83,7 @@ def command_itself(cmd):
     noticed. The shape that would have recorded is `bash: cat`, which is not worth acting on, and heredocs
     carrying scripts are far more common than heredocs writing documents.
     """
-    return re.sub(r"<<-?\s*['\"]?(\w+)['\"]?.*?^\1", " ", cmd, flags=re.S | re.M)
+    return HEREDOC.sub(" ", cmd)
 
 
 # A message is at most this long. Past it the thing being read is not a message, and the checks cannot

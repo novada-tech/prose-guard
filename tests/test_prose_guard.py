@@ -120,6 +120,10 @@ def test_detection():
         # count as explained, passing a message that never explained it
         ("short words are not an expansion", "We ran a docker container, then ADC failed.",
          ["ADC"]),
+        # Only the parenthetical pair can pass this one: "of" is two letters, so the running-prose
+        # expansion never matches it. Without a case like this the Schwartz-Hearst extraction the
+        # module opens by citing is redundant — every other pair here is caught by the prose test too.
+        ("a pair whose phrase holds a short word", "The bill of materials (BOM) was wrong.", []),
         ("a real three-word expansion", "It reads application default credentials. ADC is next.",
          []),
         ("known terms pass", "The CLI calls the API twice.", []),
@@ -140,14 +144,41 @@ def test_detection():
     # The denominator: every acronym-shaped term the reader met, known or not. A known term counts
     # even where the local dictionary happens to contain it — otherwise this number, and the share
     # threshold computed from it, differ between Linux and macOS.
-    check("considered counts known terms too",
-          jargon.scan("The CLI hit the API and then ADC failed." + PAD, is_known)[1],
-          ["ADC", "API", "CLI"])
-    check("and excludes things that are not acronyms at all",
+    #
+    # Asked with ERROR rather than with CLI and API. Ubuntu's wamerican holds `api` and `cli` and
+    # macOS's web2 does not, so on macOS both are acronyms anyway and the clause under test does
+    # nothing: deleting `is_known(t) or` from the scan passed here and failed on Linux. ERROR is a word
+    # in every dictionary and in the shipped floor, so only the clause can put it in the denominator.
+    def knows_error(term):
+        return term.upper() == "ERROR"
+
+    check("considered counts a known term the word list also holds",
+          jargon.scan("The ERROR came out of ADC again." + PAD, knows_error)[1], ["ADC", "ERROR"])
+    check("and excludes the same word when nobody claims it",
+          jargon.scan("The ERROR came out of ADC again." + PAD, lambda t: False)[1], ["ADC"])
+    check("and things that are not acronyms at all",
           jargon.scan("THE ERROR was in the CLI." + PAD, is_known)[1], ["CLI"])
     # ZZQ is in no dictionary on any platform, so this case cannot drift with the word list
     check("an unknown non-word always counts",
           jargon.scan("The ZZQ pipeline broke." + PAD, is_known)[1], ["ZZQ"])
+    # Six characters is the cap, and it is what keeps a long capitalised run out of the count. Seven
+    # is the case that says so; nothing else here is longer than five.
+    check("a seven-character capitalised run is not an acronym",
+          jargon.scan("The ABCDEFG job failed." + PAD, is_known)[1], [])
+
+    # The floor on what may stand in for an initial, from both sides. Every initial has to begin a word
+    # of at least three letters: with a one-letter word allowed, "we ran a docker container" counted ADC
+    # as explained and the check passed a message that never explained it. Two letters is the case that
+    # says the floor is three and not one — weakened to two, everything above still passes.
+    check("a one-letter word cannot stand in for an initial",
+          jargon.expanded_in_prose("ADC", "we ran a docker container"), False)
+    check("nor a two-letter one", jargon.expanded_in_prose("ADC", "we ran an at dc cache"), False)
+    check("three-letter words are an expansion",
+          jargon.expanded_in_prose("ADC", "the application default credential"), True)
+    # Two initials is enough to be worth matching: LF is the term the whole expansions mechanism was
+    # built for, and a floor of three would never expand it.
+    check("and two initials are enough to look for",
+          jargon.expanded_in_prose("LF", "the linux foundation said so"), True)
 
 
 # --------------------------------------------------------------------- audiences
@@ -302,6 +333,24 @@ def test_combination():
         check("the description names both", "several groups" in r.describe(), True)
 
 
+def test_a_term_is_known_at_four_people_and_not_at_three():
+    """The one number in audiences.py with a story behind it, pinned from below as well as above.
+
+    The comment beside it: "4 rather than 3 because on the corpus this was calibrated against, a term
+    the team lead said plainly needed explaining reached exactly 3." Every other fixture in this file
+    counts 5, 6 or 9 people, so nothing sat at the boundary from below — raising it to 5 failed a test,
+    and lowering it to 3, the value the comment exists to rule out, passed everything.
+    """
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "team", matches={"channels": ["C1"]},
+                       vocabulary={"ONEP": 1, "THREEP": 3, "FOURP": 4})
+        A, _ = fresh(home)
+        r = A.resolve({"channel": "C1"})
+        check("one person having used a term proves nothing", r.is_known("ONEP"), False)
+        check("nor do three", r.is_known("THREEP"), False)
+        check("four is the cut, and it is inclusive", r.is_known("FOURP"), True)
+
+
 def test_no_subset_elimination():
     """Dropping an audience contained in another looks free and is not sound.
 
@@ -407,6 +456,19 @@ def test_routing():
         got = D.extract(dest, "Bash", {"command": f'git commit -m "Subject line here" -m "{long}"'})
         check("both -m parts are joined", got.startswith("Subject line here"), True)
 
+        # Where the floor sits, from both sides. Every fixture above is far longer than 25 words, so the
+        # number said nothing about them: 25 to 10 puts a model call behind every one-line message, and
+        # tightening the comparison to `>` moves the boundary by one with nothing to notice.
+        words = ("The exporter line went because nothing on a laptop reads that variable, and plans "
+                 "had started failing in any shell older than an hour today, so access uses the "
+                 "credential.").split()
+        chat = D.match("mcp__slack__slack_send_message", {"channel_id": "C1", "message": long})
+        def sent(n):
+            return D.extract(chat, "mcp__slack__slack_send_message",
+                             {"channel_id": "C1", "message": " ".join(words[:n])})
+        check("25 words is enough to be worth judging", bool(sent(25)), True)
+        check("and 24 is not", sent(24), None)
+
 
 def test_prose_files_must_be_tracked():
     """The line between a document colleagues will read and a scratch file is whether it gets
@@ -431,6 +493,65 @@ def test_prose_files_must_be_tracked():
         ):
             dest = D.match("Write", {"file_path": path, "content": long})
             check(f"prose file/{label}", (dest or {}).get("name"), want)
+
+
+def test_what_the_call_says_about_the_moment_reaches_the_checks():
+    """`situation()` had no test at all, and three separate decisions inside it were free.
+
+    It is what tells a check that this is a direct message rather than a whole channel, a reply inside a
+    thread rather than an opening, or a repository outsiders can read. Each one changes what a reader
+    can be assumed to have in front of them, and all of it is derived from the tool call — so getting it
+    wrong is silent and applies to every message that destination carries.
+    """
+    with tempfile.TemporaryDirectory() as home:
+        with open(os.path.join(home, "destinations.json"), "w") as fh:
+            json.dump({"public_owners": ["acme-open"], "destinations": [
+                {"name": "our chat", "tool": ["chat_post"], "text_fields": ["message"],
+                 "identifiers": {"channel": "channel_id", "repo": ["owner", "repo"]},
+                 "context_from": {"field": "channel_id",
+                                  "map": {"C": {"shared_context": "low",
+                                                "note": "a whole channel, arriving cold"},
+                                          "CX": {"shared_context": "high",
+                                                 "note": "the team's own channel"}}},
+                 "when": {"thread_ts": "a reply inside an existing thread"}}]}, fh)
+        _, D = fresh(home)
+        dest = D.find("our chat")
+
+        # Two prefixes match `CX9` and only one can win. The longest is the specific one, and the
+        # shipped map cannot tell you which rule is in force: every key in it is a single letter.
+        specific = D.situation(dest, "chat_post", {"channel_id": "CX9"})
+        check("the most specific prefix decides", specific.get("situation"), "the team's own channel")
+        check("and says how much the reader already has", specific.get("_shared_context"), "high")
+        check("while a channel it does not name falls to the general case",
+              D.situation(dest, "chat_post", {"channel_id": "C9"}).get("situation"),
+              "a whole channel, arriving cold")
+
+        # A composite identifier is only worth having when every field it names is there. Built from
+        # what happened to be set, `{"repo": ["owner", "repo"]}` on a call carrying only the owner
+        # resolves the audience for `your-org/` — a repository nobody has.
+        check("half a composite identifier names nothing",
+              D.identifiers(dest, "chat_post", {"owner": "acme-open"}), {})
+        check("and both halves name the repository",
+              D.identifiers(dest, "chat_post", {"owner": "acme-open", "repo": "infra"}),
+              {"repo": "acme-open/infra"})
+
+        # Who can read it. Only the owners a team listed are public, and the direction matters: told a
+        # private repository is public, the checks ask for internal links to be spelled out for nobody;
+        # told the reverse, they let internal shorthand out to readers who cannot resolve it.
+        check("an owner the team listed is public",
+              D.situation(dest, "chat_post", {"owner": "acme-open"})["reach"].startswith("PUBLIC"),
+              True)
+        check("and any other owner is not",
+              D.situation(dest, "chat_post", {"owner": "acme-closed"})["reach"].startswith("private"),
+              True)
+        check("a call naming no owner says nothing either way",
+              "reach" in D.situation(dest, "chat_post", {"channel_id": "C9"}), False)
+
+        check("a reply in a thread is a different moment from an opening",
+              D.situation(dest, "chat_post", {"thread_ts": "1700.1"}).get("situation"),
+              "a reply inside an existing thread")
+        check("and the destination names itself, because a check is told where this is going",
+              D.situation(dest, "chat_post", {})["destination"], "our chat")
 
 
 def test_user_destinations_win():
@@ -495,11 +616,13 @@ def test_passive_discovery():
         entry = telling.everything()["unclaimed: bash: my-cli notify --text"]
         check("and stops being counted", entry["seen"], 1)
 
-        # and the remembered set is bounded
-        for i in range(telling.MOST_REMEMBERED + 30):
+        # And the remembered set is bounded. The number is written out: read off the module it bounds,
+        # this passes whatever that number is, and 200 to 1000 is a ledger five times the size on a
+        # session that touches a thousand shapes. 230 shapes offered, 200 the most that may be kept.
+        for i in range(230):
             V.record_candidate(f"mcp__example__tool{i}", {"body": secret})
-        check("the remembered set is bounded",
-              len(telling.everything()) <= telling.MOST_REMEMBERED, True)
+        check("the remembered set is bounded", len(telling.everything()) <= 200, True)
+        check("and it did stop rather than never filling up", len(telling.everything()), 200)
 
 
 def test_discovery_proposes_how_hard_to_check_a_new_destination():
@@ -523,8 +646,12 @@ def test_discovery_proposes_how_hard_to_check_a_new_destination():
           V.suggest_caps("bash: glab mr note --message"), {})
     check("and an ordinary send gets no suggestion",
           V.suggest_caps("tool: mcp__example__post_update [body]"), {})
-    for field, (value, why) in V.suggest_caps("bash: git commit -m").items():
-        check("a suggestion carries a reason to agree or disagree with", len(why) > 30, True)
+    # Counted first, then read. Written as a bare loop over the suggestions, the body never ran if
+    # suggest_caps returned nothing at all and the assertion recorded nothing — a test that passes by
+    # the feature being gone is the one shape to keep out of this file.
+    reasons = [why for _, why in V.suggest_caps("bash: git commit -m").values()]
+    check("one suggestion, carrying a reason to agree or disagree with", len(reasons), 1)
+    check("and the reason says why, not just what", len(reasons[0].split()) > 8, True)
 
 
 def test_the_mechanical_errors_are_found_without_a_model():
@@ -885,9 +1012,18 @@ def test_the_hook_surfaces_a_candidate_once():
                 "application default credential now. Continuous integration sets it itself.")
         payload = {"tool_name": "mcp__example__post_update", "session_id": "pd", "cwd": tmp,
                    "tool_input": {"body": long}}
-        verdicts = [run_guard(payload, home, state)[0] for _ in range(5)]
+        replies = [hook_reply(payload, env(home, state)) for _ in range(5)]
         check("the hook mentions an unclaimed destination exactly once",
-              verdicts, ["allow", "allow", "advise", "allow", "allow"])
+              [("advise" if r else "allow") for r in replies],
+              ["allow", "allow", "advise", "allow", "allow"])
+        # Both channels, and which is which matters. `additionalContext` reaches the model and not the
+        # person; `systemMessage` reaches the person and not the model. Whether to check a tool in
+        # future is the person's decision, so they have to see it — and the model needs to know enough
+        # to offer to do it. Dropping the systemMessage leaves the note reaching nobody who can act.
+        note = replies[2]
+        check("the note reaches the person", "post_update" in (note.get("systemMessage") or ""), True)
+        check("and the model, so it can offer to add it",
+              "post_update" in (note.get("additionalContext") or ""), True)
 
 
 # ------------------------------------------------------------------- the hook
@@ -913,7 +1049,10 @@ def test_hook_end_to_end():
         home = os.path.join(tmp, "home")
         write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"],
                        vocabulary={"GKE": 9})
-        text = "We moved the kubectl configuration onto GKE this week." + PAD
+        # REDIS, CIDR and OOM are in the shipped `engineers` baseline; GKE is not. So the same sentence
+        # says two different things depending on whether a baseline is assumed at all.
+        text = ("We moved the kubectl configuration onto GKE this week, and the REDIS pod hit an OOM "
+                "inside the old CIDR range." + PAD)
         send = {"tool_name": "mcp__slack__slack_send_message", "session_id": "h1", "cwd": tmp,
                 "tool_input": {"channel_id": "C1", "message": text}}
         check("a resolved audience that knows the term allows",
@@ -923,6 +1062,11 @@ def test_hook_end_to_end():
         verdict, why = run_guard(elsewhere, home, os.path.join(tmp, "s2"))
         check("an unknown destination advises", verdict, "advise")
         check("and names the term", "GKE" in why, True)
+        # With no audience configured there is still a baseline, and it is what makes the zero-setup
+        # case usable: without one, every one of these is reported to somebody who has set nothing up,
+        # and a first message that flags five ordinary words is a tool people switch off.
+        check("and only the term that baseline does not already cover",
+              [t for t in ("REDIS", "CIDR", "OOM") if t in why], [])
         check("disabled does nothing",
               run_guard(elsewhere, home, os.path.join(tmp, "s3"), "disabled")[0], "allow")
 
@@ -932,15 +1076,86 @@ def test_session_ledger_bounds_the_argument():
         home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
         write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"],
                        vocabulary={"KUBECTL": 9})
-        seq = []
+        said = []
         for n in range(10):
             payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": "ledger",
                        "cwd": tmp,
                        "tool_input": {"channel_id": "C1",
                                       "message": f"Draft {n} still talks about GKE." + PAD}}
-            seq.append(run_guard(payload, home, state)[0] == "deny")
+            said.append(run_guard(payload, home, state))
+        seq = [verdict == "deny" for verdict, _ in said]
         check("a session is blocked at most MAX_DENIALS times", sum(seq), 6)
         check("and stops blocking once the ledger is spent", any(seq[-2:]), False)
+
+        # The escape hatch is named on the last denial a check gets and not before. Naming it in every
+        # denial teaches the cheaper move before the correct one, and the correct one is almost always
+        # to edit the text; an agent that has already tried twice is a different situation.
+        denials = [why for verdict, why in said if verdict == "deny"]
+        check("the first denial does not mention the escape hatch",
+              "PROSE_GUARD_SKIP" in denials[0], False)
+        check("and the second one does", "PROSE_GUARD_SKIP" in denials[1], True)
+
+        # A check that denied has to pass on the NEXT text, not this one. Left marked as passed, the
+        # second attempt at the same draft is skipped entirely — so an edit made for a later check is
+        # never re-verified against the earlier one, which is the whole reason a pass belongs to a text.
+        again = os.path.join(tmp, "again")
+        same = {"tool_name": "mcp__slack__slack_send_message", "session_id": "resend", "cwd": tmp,
+                "tool_input": {"channel_id": "C1", "message": "One draft about GKE." + PAD}}
+        check("the same unfixed draft is refused twice, not waved through the second time",
+              [run_guard(same, home, again)[0] for _ in range(2)], ["deny", "deny"])
+
+
+def path_without_the_checker(tmp):
+    """A PATH carrying what the hook needs and no `claude`, so a level above `low` can be driven
+    without a model call. A test that reaches for the real binary costs money and depends on whoever
+    is logged in; with the binary absent, every model-backed check answers "could not run" — which is
+    still enough to see WHETHER it was asked."""
+    import shutil as _shutil
+    where = os.path.join(tmp, "bin")
+    os.makedirs(where, exist_ok=True)
+    needs = ("bash", "sh", "git", "env", "grep", "mkdir", "dirname", "basename", "cat", "uname")
+    for name, real in [("python3", sys.executable)] + [(n, _shutil.which(n)) for n in needs]:
+        if real and not os.path.exists(os.path.join(where, name)):
+            os.symlink(real, os.path.join(where, name))
+    assert _shutil.which("claude", path=where) is None, "the stripped PATH still finds a checker"
+    return where
+
+
+def test_a_session_stops_paying_for_model_checks_once_its_budget_is_spent():
+    """MAX_CALLS is what stops one message costing a session, and nothing above `low` was ever run.
+
+    So the number bounded nothing a test could see: dropped from 20 to 2, the guard stops checking
+    after the second call of a session and says nothing about having stopped. It is only visible from
+    outside the check, which is why this drives the hook itself — at `medium`, with no checker on PATH,
+    so no model call happens. Whether the check was ASKED is still visible: a check that could not run
+    is recorded and read out to the person, and a check that was skipped for budget is not.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
+        write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"])
+        os.makedirs(home, exist_ok=True)
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"effort": "medium"}, fh)
+        # No acronym anybody could be missing, and nothing mechanical to find, so the two free checks
+        # pass and the combined verdict is the next thing to be asked for.
+        clean = ("The rollout finished last night and the dashboard has been quiet since then, so "
+                 "there is nothing else to do before the review meeting tomorrow morning.")
+
+        def asked_after(spent):
+            session = f"budget{spent}"
+            os.makedirs(os.path.join(state, "sessions"), exist_ok=True)
+            with open(os.path.join(state, "sessions", session + ".json"), "w") as fh:
+                json.dump({"passed": {}, "denials": {}, "total_denials": 0, "calls": spent,
+                           "advised": []}, fh)
+            payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": session,
+                       "cwd": tmp, "tool_input": {"channel_id": "C1", "message": clean}}
+            out = hook_reply(payload, {**env(home, state, "medium"),
+                                       "PATH": path_without_the_checker(tmp)})
+            return "not on PATH" in ((out or {}).get("systemMessage") or "")
+
+        check("five calls into a budget of twenty, the next check is still asked", asked_after(5),
+              True)
+        check("and once twenty are spent it is not", asked_after(20), False)
 
 
 def test_state_stays_out_of_the_plugin():
@@ -1494,6 +1709,11 @@ def test_a_destination_can_cap_effort_and_severity():
         # whether the tool noticed.
         check("and the finding is the same either way",
               "SFTR" in said_sent and "SFTR" in said_draft, True)
+        # Said once per text. The message went out, so the per-message bookkeeping resets and every
+        # check runs again on the next call — but what has already been said about these exact words
+        # survives that reset, because repeating it is a second interruption buying nothing.
+        check("and the same draft is not argued about twice",
+              ask("mcp__slack__slack_send_message_draft")[0], "allowed")
 
 
 def test_words_already_there_are_not_words_you_wrote():
@@ -1745,10 +1965,13 @@ def test_how_hard_a_check_works_follows_the_text():
         check(f"ceiling at {words} words", checks.ceiling_for(" ".join(["word"] * words)), expected)
     # The base is on the ceiling, not on the runs: a short message capped at two could never be observed to
     # run dry, so length decided everything and quality decided nothing.
-    check("a short message still has room to keep going",
-          checks.ceiling_for("a short one"), checks.BASE_CEILING)
+    #
+    # Both numbers are written out rather than read back off the module. `ceiling_for(anything) ==
+    # checks.MOST_RUNS` holds for every value MOST_RUNS could take, so the digit — which is the whole of
+    # the protection — was pinned by nothing: 25 to 100 quadruples what one file may cost, and passed.
+    check("a short message still has room to keep going", checks.ceiling_for("a short one"), 6)
     # A bound, not a target: one pathological file must not spend a session.
-    check("and bounded", checks.ceiling_for(" ".join(["word"] * 100000)), checks.MOST_RUNS)
+    check("and bounded", checks.ceiling_for(" ".join(["word"] * 100000)), 25)
 
     text = " ".join(f"Sentence number {n} sits here on its own." for n in range(40))
 
@@ -1790,6 +2013,32 @@ def test_how_hard_a_check_works_follows_the_text():
     quiet = Stub([None, about(1), about(2)])
     check("a clean check is asked once", checks.pooled(quiet, text, None)[:2], ([], []))
     check("and pays for one call", quiet.asked, 1)
+
+    # A check that only ever repeats itself. `dries` above cannot see this: its two consecutive Nones
+    # stop the loop at five runs whether or not a repeat counts as dry, so the clause that stops a check
+    # being asked again when it just said the same thing was pinned by nothing. Removing it cost seven
+    # times the model calls on a 2,000-word document — the check runs to the ceiling, however emphatic.
+    repeats = Stub([about(1)] * 30)
+    found, firm, spent = checks.pooled(repeats, text, None)
+    check("a check that keeps naming one sentence stops after the second repeat", repeats.asked, 3)
+    check("and is charged for exactly the runs it made", spent, 3)
+    check("with the repeat reported once", len(found), 1)
+    check("and firm, since more than one run pointed at it", len(firm), 1)
+    long_text = " ".join(f"Sentence number {n} sits here on its own." for n in range(250))
+    repeats_long = Stub([about(1)] * 40)
+    checks.pooled(repeats_long, long_text, None)
+    check("and a long document does not buy it more runs", repeats_long.asked, 3)
+    check("though the ceiling would have allowed 21", checks.ceiling_for(long_text), 21)
+
+    # What a run costs is decided by the mode, before anything runs. Counted after the pass test
+    # instead, a check that spends no model call was billed one when it passed and none when it fired.
+    class Cheap(Stub):
+        MODE = checks.EXACT
+    check("a deterministic check that finds something is charged nothing",
+          checks.pooled(Cheap([about(1)]), text, None)[2], 0)
+    check("and neither is one that passes", checks.pooled(Cheap([None]), text, None)[2], 0)
+    check("while a check that costs a call pays for its one run even when it passes",
+          checks.pooled(Stub([None]), text, None)[2], 1)
 
 
 def test_an_edit_is_judged_inside_its_document():
@@ -1839,6 +2088,67 @@ def test_an_edit_is_judged_inside_its_document():
               D.extract(dest, "Write", written, repo), written["content"])
         check("and every sentence counts as written here", checks.wrote_which(opening, ""), None)
 
+        # An edit whose old text is not in the file at all cannot say which part of the document it
+        # wrote, and guessing is the unsafe direction: `replace` finds nothing, returns the file
+        # unchanged, and every sentence in it becomes this call's doing.
+        stale = {"file_path": path, "old_string": "a line that was never in this file",
+                 "new_string": fresh}
+        check("an edit that does not match the file locates nothing",
+              D.resulting(dest, "Edit", stale, repo), (None, ""))
+
+
+def test_an_edit_is_not_refused_over_a_defect_it_did_not_touch():
+    """The half `wrote_which` exists for, driven through the hook rather than checked in isolation.
+
+    A complaint about a paragraph the edit never touched is worth saying and is not grounds for
+    refusing the edit — the agent cannot act on it while it is mid-edit, and there may be nothing wrong
+    with it at all. Nothing drove the hook with an Edit payload, so `written_here` was free: fail it
+    open and every pre-existing typo in a long document blocks every edit to that document.
+
+    The two shapes below are the same finding from the same check. What separates them is which
+    sentence it points at, which is the only thing deciding whether this edit is refused.
+    """
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as repo:
+        home = os.path.join(tmp, "home")
+        write_audience(home, "team", matches={"paths": ["*"]}, inherits=["engineers"],
+                       members=["a", "b", "c", "d"])
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"effort": "low"}, fh)
+        subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True, timeout=60)
+        path = os.path.join(repo, "notes.md")
+        # Two defects already on disk, quoted at two different lengths. "a a" is three characters, which
+        # is the shortest span a finding can be placed by and the reason that floor is three: raise it
+        # and every mechanics finding becomes unplaceable, which fails to whoever is editing.
+        opening = ("This file lists every term the checker treats as shared vocabulary for this team. "
+                   "It exists so a a reader can see what was measured rather than trusting a count. "
+                   "Everything in the the list below was measured the same way.")
+        replaced = "The shared file store is mounted on every host."
+        with open(path, "w") as fh:
+            fh.write(opening + "\n\n" + replaced + "\n")
+        subprocess.run(["git", "-C", repo, "add", "notes.md"], capture_output=True, timeout=60)
+
+        def edit(new_text, session):
+            payload = {"tool_name": "Edit", "session_id": session, "cwd": repo,
+                       "tool_input": {"file_path": path, "old_string": replaced,
+                                      "new_string": new_text}}
+            out = hook_reply(payload, {**os.environ, "PROSE_GUARD_HOME": home}, 120)
+            if out is None:
+                return "allowed", ""
+            if out.get("permissionDecision") == "deny":
+                return "deny", out["permissionDecisionReason"]
+            return "advise", str(out.get("additionalContext") or "")
+
+        verdict, said = edit("The shared file store is mounted on every host in the cluster now, and "
+                             "nothing else on the machine reads it.", "untouched")
+        check("an edit is not refused over defects it did not touch", verdict, "advise")
+        check("but they are still said", ['"a a"' in said, '"the the"' in said], [True, True])
+        check("and marked as somebody else's work", "(already in the file)" in said, True)
+
+        verdict, said = edit("The shared file store is is mounted on every host in the cluster now, "
+                             "and nothing else on the machine reads it.", "introduced")
+        check("a defect the edit introduces is refused", verdict, "deny")
+        check("naming the one this call wrote", '"is is"' in said, True)
+
 
 def test_an_audience_without_expansions_says_it_needs_a_rescan():
     """No compatibility shim, because there is no user base to be compatible with.
@@ -1873,8 +2183,10 @@ def test_an_abbreviation_can_mean_two_things():
     from checks import terms
     with tempfile.TemporaryDirectory() as home:
         write_audience(home, "team", matches={"paths": ["*"]}, inherits=["engineers"],
-                       members=["a", "b", "c", "d"], vocabulary={"LF": 5, "ADC": 6, "BSP": 9},
+                       members=["a", "b", "c", "d"],
+                       vocabulary={"LF": 5, "SF": 5, "ADC": 6, "BSP": 9},
                        expansions={"LF": {"Linux Foundation": 3, "line feed": 2},
+                                   "SF": {"short form": 4, "San Francisco": 2},
                                    "ADC": {"application default credential": 6}})
         A, _ = fresh(home)
         resolved = A.resolve({"path": "x.md"})
@@ -1896,12 +2208,28 @@ def test_an_abbreviation_can_mean_two_things():
         check("saying which sense silences it",
               said("The Linux Foundation (LF) has not replied and the BSP job is blocked."), "")
 
+        # One recorded meaning is not an ambiguity. A term the audience writes out one way is the
+        # ordinary case — most of the vocabulary — and calling it overloaded would put a note on almost
+        # every message, which is the shape of noise this check was narrowed to avoid.
+        check("a term this audience uses for one thing is not called out",
+              said("The ADC path is blocked until the BSP job finishes running again today."), "")
+
+        # Two overloaded terms in one message are both named. Reporting only the first leaves the reader
+        # fixing one of two things they cannot tell apart, and the second one looks accepted.
+        both = said("The LF review and the SF cut are both blocked until the BSP job finishes.")
+        check("two overloaded terms are both named",
+              "Linux Foundation" in both and "San Francisco" in both, True)
+
         # Expanded against the sense this audience records: two terms wearing one abbreviation.
         message = said("An air data computer (ADC) reading was wrong again here this morning.")
         check("a different expansion is reported", "air data computer" in message, True)
         check("against the one on record", "application default credential" in message, True)
         check("and expanding it as recorded says nothing",
               said("The application default credential (ADC) expired and the BSP job stalled."), "")
+        # Part of the recorded phrase is the same term, written shorter. Two ways of saying one thing
+        # is not two terms, and a note about it sends someone to fix prose that is already clear.
+        check("nor does writing out part of the recorded phrase",
+              said("The default credential (ADC) expired and the BSP job stalled here today."), "")
 
 
 def test_rule_installer():
@@ -2579,9 +2907,18 @@ def test_writing_about_the_escape_hatch_does_not_use_it():
               f'gh pr create PROSE_GUARD_SKIP="{reason}"')], [None, None, None])
     # A reason is required because writing one is a sentence somebody reads later. Refused rather than
     # ignored, so nobody believes they switched something off when they did not.
+    #
+    # Three shapes, and only the first was tried: `=1` is refused by the length test alone, so the two
+    # halves of "long enough, and not just a number" were pinned by nothing. A long number is what
+    # somebody types when they want a switch and have been told a value is needed, and seven characters
+    # is the case that says where "long enough" sits.
     check("a reason that says nothing is refused, not ignored",
-          [said("PROSE_GUARD_SKIP=1 gh pr create"), said('PROSE_GUARD_SKIP="meh" gh pr create')],
-          ["", ""])
+          [said("PROSE_GUARD_SKIP=1 gh pr create"), said('PROSE_GUARD_SKIP="meh" gh pr create'),
+           said("PROSE_GUARD_SKIP=123456789 gh pr create"),
+           said('PROSE_GUARD_SKIP="no time" gh pr create')],
+          ["", "", "", ""])
+    check("and eight characters of English is a reason",
+          said('PROSE_GUARD_SKIP="verbatim" gh pr create'), "verbatim")
 
 
 def test_a_bad_value_in_a_hand_written_file_is_reported_not_ignored():
@@ -2935,6 +3272,57 @@ def test_a_scan_that_read_nothing_cannot_become_an_audience_that_blocks_everythi
                            capture_output=True, text=True, env=env, timeout=180)
         check("but naming them yourself is allowed",
               os.path.exists(os.path.join(home, "audiences", "byhand.json")), True)
+
+
+def test_a_heredoc_feeding_a_text_flag_is_the_message():
+    """`git commit -F - <<EOF` is how a long commit message is really written, and it went out unchecked.
+
+    Measured on 4,154 local transcripts: of 817 Bash calls carrying prose to a destination, 151 were
+    this idiom — the second most common way prose is passed — and every one was allowed through with
+    nothing said, because `-` is not a filename and nothing looked further. Not held back, not
+    mentioned: silent, which is the one outcome indistinguishable from a check that passed.
+
+    The security property this must not break: `command_itself` strips heredocs BEFORE routing, because
+    a document that quotes a publishing command is not one. That still holds — the body is read only
+    after the stripped command is found to carry a text flag whose value is stdin, and the attack shape
+    leaves `cat` as the command, which no destination claims.
+    """
+    import command as C
+    import destinations as D
+
+    body = ("Rebuild the payload index after the migration\n\nThis needed the whole index rewritten "
+            "and then verified against last week figures before anyone could sign it off, which took "
+            "most of Thursday afternoon.\n")
+
+    def read(cmd):
+        dest = D.match("Bash", {"command": cmd})
+        return dest and D.extract(dest, "Bash", {"command": cmd}, os.getcwd())
+
+    shapes = {
+        "plain": "git commit -F - <<'EOF'\n" + body + "EOF",
+        # The rest of a chain follows the redirect on the same line, and the body starts on the next.
+        # 22 of the 151 were this, and anchoring on a newline after the delimiter missed every one.
+        "chained": "git commit -F - <<'EOF' && git push -q origin main\n" + body + "EOF",
+        "indented terminator": "git commit -F - <<-EOF\n" + body + "\tEOF",
+        "gh": "gh pr create --title T --body-file - <<'EOF'\n" + body + "EOF",
+    }
+    for label, cmd in shapes.items():
+        check(f"the body is the message ({label})",
+              (read(cmd) or "").startswith("Rebuild the payload index"), True)
+
+    # A document that merely quotes a publishing command is not one, however deep the quoting goes.
+    carrying = ("cat > runbook.md <<'OUTER'\nTo publish it, run:\n"
+                "  gh pr create --title T --body-file - <<'INNER'\n" + body + "INNER\nOUTER")
+    check("a document quoting the command is not the command", read(carrying), None)
+    check("and it routes as what it actually does",
+          C.command_itself(carrying).split()[0], "cat")
+
+    # One pattern for both halves, because they have to agree: what routing strips is exactly what may
+    # be read back. A form one accepted and the other did not would be a body that routes as part of a
+    # command while never being read as prose.
+    for label, cmd in shapes.items():
+        check(f"routing strips what reading returns ({label})",
+              "Rebuild" in C.command_itself(cmd), False)
 
 
 def teardown_function(_fn):

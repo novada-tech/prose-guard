@@ -192,6 +192,15 @@ def _from_bash(dest, cmd, cwd=None):
         # command's own argument, so a hidden one is the caller's choice.
         if flag.endswith("-file") or flag in ("-F", "--file"):
             for value in values:
+                # `-F -` is stdin, and stdin is the heredoc in this same tool call. Measured on 4,154
+                # local transcripts: 151 of 817 prose-carrying commands are that idiom — the second
+                # most common way prose is passed, and every one of them went out unchecked AND
+                # unmentioned, because `-` is not a filename and nothing looked further.
+                if value == command.STDIN:
+                    got = command.heredoc_body(cmd)
+                    if got is not None:
+                        return got
+                    continue
                 got = command.read_prose_file(value, cwd, inside=False)
                 if got is not None:
                     return got
