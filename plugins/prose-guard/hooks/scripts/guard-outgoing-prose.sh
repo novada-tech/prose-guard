@@ -13,19 +13,18 @@ set -u
 CFG_HOME="${PROSE_GUARD_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/prose-guard}"
 if [ -z "${PROSE_GUARD_EFFORT:-}${CLAUDE_PLUGIN_OPTION_EFFORT:-}" ]; then
   if [ ! -f "$CFG_HOME/config.json" ]; then
-    # Installed, restarted, setup never run. Nothing can run, and being silent about it made working
-    # correctly and doing nothing identical: somebody installs this, sends a message, sees nothing and
-    # concludes it is broken — with no wrong output to report, which is why nobody would file it.
+    # Installed, restarted, setup never run — so nothing can run, and saying nothing about that made a
+    # working install and a broken one look identical. Somebody installs this, sends a message, sees
+    # nothing, and concludes it is broken. There is no wrong output to report, which is why nobody
+    # would ever have filed it.
     #
-    # Said here rather than in Python so the empty state still costs nobody the ~25ms this pre-filter
-    # exists to save. Said ONCE, marked by a file, because a notice nobody can dismiss is its own
-    # defect — the same bargain destinations.record_candidate strikes for an unclaimed tool. If the
-    # marker cannot be written, say nothing: repeating it every call is worse than never saying it.
+    # Said here rather than in Python so an unconfigured install still costs nobody the ~25ms this
+    # pre-filter exists to save. Said once, and remembered in told.json with everything else this tool
+    # has already said (lib/telling.py) — a notice nobody can dismiss is its own defect. If that file
+    # cannot be written, say nothing at all: repeating it every call is worse than never saying it.
     #
-    # To the person AND to the model, like every other note about what this tool should check in
-    # future: the person decides, and the model needs to know enough to offer to do it.
-    # Remembered in told.json, the one ledger of what this tool has already said — see lib/telling.py.
-    # A marker of its own was a fifth way of remembering the same kind of fact.
+    # To the person and to the model both. The choice is the person's, and the model needs to know
+    # enough to offer to make it.
     SAID="$CFG_HOME/told.json"
     grep -q '"setup never run"' "$SAID" 2>/dev/null && exit 0
     mkdir -p "$CFG_HOME" 2>/dev/null || exit 0

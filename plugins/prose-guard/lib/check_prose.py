@@ -57,11 +57,17 @@ def context_for(audience, who=None):
     return Context(audience, situation)
 
 
-# What a person's own writing scores here, measured on one message a senior engineer rewrote himself:
-# 1.3 confirmed findings a pass, and never zero. So zero is not the target and pretending otherwise
-# sends someone chasing a bar that good prose does not clear. See docs/design-notes.md and
-# measure/measure_stopping.py.
-HUMAN_BASELINE = 2
+# There is no absolute bar here, and there was one until a reviewer asked what it rested on.
+#
+# It rested on a single message that one engineer rewrote in a hurry — 1.3 confirmed findings a pass —
+# and the tool reported that number back as "what a person's own writing scores", which is a claim one
+# hasty example cannot support. A careful piece may well reach zero, and telling somebody to stop at two
+# because of that sample is telling them to stop short.
+#
+# What survives is the relative signal, which is measured and is the person's own: a count that has
+# stopped falling across their own passes. Whether it stopped at two or at zero is theirs to judge.
+# Making an absolute bar honest would need before-and-after pairs from several authors, deliberately
+# written — see docs/design-notes.md, "When is a text finished: no honest answer yet".
 
 
 def history(path):
@@ -104,10 +110,11 @@ def verdict(path, problems, passes=1):
                 "\nonce is this check sampling from what is above its bar, which on a document with real"
                 "\ndefects means a different real one each run. Fix what you agree with, in one edit, and"
                 "\nrun this again — that is one round trip instead of one per finding.")
-    if problems <= HUMAN_BASELINE and earlier and problems >= min(earlier[-2:] or [problems]):
-        return (line + f"\nIt has stopped falling, and {problems} is what a person's own writing scores "
-                f"here — one message a senior engineer rewrote himself measured 1.3 a pass, never zero. "
-                f"This is done. Disagreeing with what is left is allowed.")
+    if earlier and problems >= min(earlier[-2:] or [problems]):
+        return (line + "\nIt has stopped falling. That is the signal this tool has — a count that keeps "
+                "dropping means the edits are landing, and one that has levelled off means they are not. "
+                "Whether what is left is worth fixing is yours to judge, and disagreeing with it is "
+                "allowed.")
     if not earlier:
         return (line + "\nFix them and run this again. What matters is whether the count falls, not "
                 "whether it reaches zero: good prose does not reach zero here.")
