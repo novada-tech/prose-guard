@@ -35,7 +35,6 @@ vocabulary, which is the unsafe direction. `overlap()` reports shared membership
 look at instead.
 """
 import fnmatch
-import glob
 import itertools
 import json
 import os
@@ -43,9 +42,6 @@ import subprocess
 
 import paths
 import re
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-BUILTIN_DIR = os.path.join(_HERE, "..", "data", "audiences")
 
 # How many distinct people have to have used a term before an audience is assumed to know it.
 # 4 rather than 3 because on the corpus this was calibrated against, a term the team lead said
@@ -60,12 +56,8 @@ CONTEXT_ORDER = ("low", "medium", "high")
 SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
-def config_dir():
-    return paths.home()
-
-
 def user_dir():
-    return os.path.join(config_dir(), "audiences")
+    return paths.mine().audiences
 
 
 def usable_name(name):
@@ -83,12 +75,16 @@ def usable_name(name):
 
 
 class Audience:
-    def __init__(self, data, path, builtin, shared=False):
+    def __init__(self, data, path, origin):
         self.path = path
-        self.builtin = builtin
-        # Shared means it came from a directory a team keeps, so it is not yours to delete: it goes
-        # away when someone removes it from that repository.
-        self.shared = shared
+        # Which layer it came from, in the words `list` prints: yours, shared, built in. One label,
+        # from paths.layers(), so this and destinations.py cannot describe the same layer differently.
+        self.origin = origin
+        # The origin of the audience of the same name that this one displaced, or "". A file that
+        # replaces a shipped baseline replaces a measured 227-term vocabulary that gains terms every
+        # release, and nothing said so — while destinations printed `(shadowed by yours)` for exactly
+        # this event. Set by `load`, which is the only thing in a position to see it happen.
+        self.replaces = ""
         # The file's own name wins over the name inside it, if the inside one could not be a filename.
         # A hostile file must not even be listed under a name that traverses, because everything a
         # person then types that name at writes somewhere.
@@ -146,8 +142,14 @@ class Audience:
         return terms
 
     @property
-    def origin(self):
-        return "built in" if self.builtin else ("shared" if self.shared else "yours")
+    def builtin(self):
+        return self.origin == "built in"
+
+    @property
+    def shared(self):
+        """It came from a directory a team keeps, so it is not yours to delete: it goes away when
+        somebody removes it from that repository."""
+        return self.origin == "shared"
 
     @property
     def rescan_note(self):
@@ -178,22 +180,25 @@ def _read(path):
 def load():
     """Built-ins, then your team's, then yours. Later replaces earlier by name.
 
-    That order is the useful one. A team can correct a shipped baseline for everybody, and you can
-    still override the team's copy locally — to try a change before proposing it, or because your own
-    reading of an audience differs. `list` says which you are looking at.
+    That order is the useful one, and it is `paths.layers()` read backwards — nearest last, because an
+    audience is a measured whole and the nearest one has to be the one that survives. A team can
+    correct a shipped baseline for everybody, and you can still override the team's copy locally, to
+    try a change before proposing it or because your own reading of an audience differs.
+
+    Replacing is not free and is now visible: what a file displaced is recorded on it, so `list` can
+    say that the 227-term shipped baseline is not what is being used.
     """
     found = {}
-    layers = [(BUILTIN_DIR, True, False)]
-    layers += [(d, False, True) for d in paths.shared()]
-    layers.append((user_dir(), False, False))
-    for directory, builtin, shared in layers:
-        for path in sorted(glob.glob(os.path.join(directory, "*.json"))):
+    for layer in reversed(paths.layers()):
+        for path in layer.audience_files():
             data = _read(path)
             if not data:
                 continue
-            a = Audience(data, path, builtin, shared)
+            a = Audience(data, path, layer.origin)
             if not a.name:
                 continue                      # neither its name nor its filename could be a filename
+            if a.name in found:
+                a.replaces = found[a.name].origin
             found[a.name] = a
     return found
 
@@ -503,6 +508,9 @@ def _cli():
             raise SystemExit(str(exc).strip("'"))
         print(f"{a.name} -> {target}")
         print(f"  measured over {people} people, and the file says so")
+        if ALL[a.name].replaces == "built in":
+            print(f"  it has the shipped {a.name} baseline's name, so everyone who pulls it stops "
+                  f"reading the shipped one — including the terms later releases add to it")
         print(f"  written-out forms are not included: each is a phrase from private writing, so an "
               f"abbreviation this audience uses for two things is not told apart by whoever pulls it")
         if a.with_names:
@@ -538,9 +546,14 @@ def _cli():
             kind = "baseline" if not aud.matches_on else "audience"
             known = len(aud.known(BASELINES))
             where = ", ".join(f"{k}={len(v)}" for k, v in aud.matches_on.items()) or "inherit only"
+            # A file of the same name in a nearer layer wins outright — an audience is a measured
+            # whole, so there is no merging — and the one it displaced may be a shipped baseline that
+            # gains terms every release. Silence about that is how a 227-term vocabulary becomes a
+            # 1-term one without anybody deciding to.
+            notes = [f"replaces the {aud.replaces} one" if aud.replaces else "", aud.rescan_note]
             print(f"{name:24s} {kind:9s} {aud.origin:9s} {known:4d} terms  "
                   f"{len(aud.members):3d} people  {where}"
-                  + (f"   [{aud.rescan_note}]" if aud.rescan_note else ""))
+                  + (f"   [{'; '.join(n for n in notes if n)}]" if any(notes) else ""))
         print(f"\nyours:  {user_dir()}")
         for directory in paths.shared():
             print(f"shared: {directory}")
@@ -586,7 +599,8 @@ def _cli():
     if aud is None:
         raise SystemExit(f"no audience called {a.name!r}. Try: list")
     print(f"name       {aud.name}")
-    print(f"file       {aud.path}  ({aud.origin})")
+    print(f"file       {aud.path}  ({aud.origin})"
+          + (f", replacing the {aud.replaces} audience of the same name" if aud.replaces else ""))
     print(f"who        {aud.who}")
     print(f"matches    {json.dumps(aud.matches_on)}")
     print(f"inherits   {', '.join(aud.inherits) or 'nothing'}")

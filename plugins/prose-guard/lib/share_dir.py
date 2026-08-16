@@ -71,18 +71,18 @@ def main():
         if not os.path.isdir(real):
             print(f"  {entry}\n      {real}  —  not present on this machine")
             continue
-        names = [f for f in os.listdir(real) if f.endswith(".json")]
-        audiences = [f for f in names if f != "destinations.json"]
-        shared_destinations = 0
-        if "destinations.json" in names:
-            try:
-                with open(os.path.join(real, "destinations.json")) as fh:
-                    shared_destinations = len(json.load(fh).get("destinations") or [])
-            except Exception:
-                shared_destinations = 0
-        held = [f"{len(audiences)} audience(s)"]
-        if shared_destinations:
-            held.append(f"{shared_destinations} destination(s)")
+        # What in a shared directory is an audience and what is the destinations file is
+        # paths.Layer's answer, not this file's. It used to be both, and audiences.py did not agree:
+        # it globbed every .json and listed a phantom audience called `destinations`.
+        layer = paths.Layer("shared", real, real)
+        held = [f"{len(layer.audience_files())} audience(s)"]
+        try:
+            with open(layer.destinations) as fh:
+                rows = len(json.load(fh).get("destinations") or [])
+        except Exception:
+            rows = 0
+        if rows:
+            held.append(f"{rows} destination(s)")
         print(f"  {entry}\n      {real}  —  {', '.join(held)}")
     return 0
 
