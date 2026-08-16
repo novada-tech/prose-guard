@@ -69,6 +69,21 @@ def complaints():
     return out + paths.config_complaints()
 
 
+def capped(level, ceiling):
+    """The lower of what was asked for and what this destination is worth.
+
+    Here rather than beside the ladder because it needs the levels in order, and this module is where
+    the levels are. It kept its own copy of the tuple, and a copy is one addition away from being
+    wrong: `capped` returns the level unchanged when either value is not in its list, so a level added
+    to `settings.LEVELS` and not to that copy would leave every `max_effort` naming it silently
+    uncapped — a destination configured to be checked cheaply, checked at full price, with nothing
+    said.
+    """
+    if not ceiling or ceiling not in LEVELS or level not in LEVELS:
+        return level
+    return level if LEVELS.index(level) <= LEVELS.index(ceiling) else ceiling
+
+
 def save(level):
     """Write the choice. Raises rather than failing quietly, so a setup step can report it."""
     if level not in LEVELS:
