@@ -1241,6 +1241,60 @@ def test_verdict_parsing():
           "coined label" in read_verdict('FAIL: "the silent row" is a coined label')[1], True)
 
 
+def test_a_checker_that_cannot_answer_lets_the_call_through():
+    """Every failure path allows the call — the promise the hook's own header makes about itself.
+
+    It is also the hardest failure to see, because allowing is what clean prose gets too. Three ways it
+    happens, none of them tested: a checker that answers something other than what was asked for, one
+    that fails outright, and a check with no prompt file to ask. With `ask` raising instead, a machine
+    with no `claude` binary blocks outbound work at every level above `low`.
+    """
+    import checks.ask as ask
+    with tempfile.TemporaryDirectory() as tmp:
+        was = os.environ["PATH"]
+        os.environ["PATH"] = tmp + os.pathsep + was
+        try:
+            _stub(tmp, "claude", "echo 'not json at all'\n")
+            check("a reply that is not the shape asked for is a pass",
+                  ask.ask("stub", "Judge this.", "some text"), (True, ""))
+            _stub(tmp, "claude", "exit 3\n")
+            check("and so is a checker that fails outright",
+                  ask.ask("stub", "Judge this.", "some text"), (True, ""))
+        finally:
+            os.environ["PATH"] = was
+    check("a check with no prompt to ask is a pass as well",
+          ask.ask("stub", None, "some text"), (True, ""))
+
+
+def test_what_a_level_does_with_a_verdict_it_disagrees_with():
+    """`medium` may never hold a message back, and `high` is bought precisely so that it can.
+
+    Neither had ever been run: `judgement.run` and `Phase.run` executed zero times across this whole
+    file, so both severities were free. One word makes `medium` — the level the measurements recommend
+    — gate on a check whose own module says it agrees with a provenance-based label 50-70% of the time
+    and disagrees with itself between runs. One word the other way spends `high`'s four model calls on
+    findings nothing can act on, which is the only thing those calls are being bought for.
+
+    Stubbed at `model.verdict`, the seam both checks share, so this costs no model call and needs no
+    checker on the machine.
+    """
+    from checks import ADVISE, BLOCK, judgement, model, sequence
+    was = model.verdict
+    try:
+        model.verdict = lambda name, path, text, ctx: (False, 'the "opening line" names no reader')
+        phases = sequence.phases()
+        check("the combined verdict only ever advises",
+              judgement.run("some text", None).severity, ADVISE)
+        check("while every named concern can hold the message back",
+              {p.run("some text", None).severity for p in phases}, {BLOCK})
+        model.verdict = lambda name, path, text, ctx: (True, "")
+        check("and a verdict nobody objects to is nothing to report",
+              [judgement.run("t", None)] + [p.run("t", None) for p in phases],
+              [None] * (1 + len(phases)))
+    finally:
+        model.verdict = was
+
+
 def test_the_two_check_prose_flags_do_different_jobs():
     """--for sets the vocabulary, --who describes the reader. Neither may be silently ignored.
 
