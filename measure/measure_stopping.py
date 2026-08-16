@@ -20,6 +20,8 @@ findings and the other two carry loose ones or none.
 
 Real calls: three documents times reps times up to ten calls each.
 """
+from __future__ import annotations
+
 import argparse
 import os
 import sys
@@ -30,18 +32,18 @@ sys.path.insert(0, LIB)
 
 import audiences  # noqa: E402
 import checks as checks_module  # noqa: E402
-from checks import sequence  # noqa: E402
+from checks import Context, sequence  # noqa: E402
 
 WHO = "Engineers on this team, reading a message about a change to their own tooling."
 
 
-def Ctx():
+def Ctx() -> Context:
     """The shipped Context, so a harness cannot measure a shape nothing runs."""
     return checks_module.Context(audiences.Resolved([], "engineers"),
                                  {"who": WHO, "situation": "a chat message read once"})
 
 
-def pass_over(text, ctx):
+def pass_over(text: str, ctx: Context) -> tuple[list[str], list[str]]:
     """One pass of every comparative check, each finding put back to the same check."""
     confirmed, loose = [], []
     for check in sequence.phases():
@@ -58,7 +60,7 @@ def pass_over(text, ctx):
     return confirmed, loose
 
 
-def main():
+def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--reps", type=int, default=3)

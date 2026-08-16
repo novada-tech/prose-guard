@@ -23,6 +23,8 @@ check the same way produces the false positives that taxonomy predicts.
 
 Real calls, so real tokens: two documents, two conditions, plus the prefix probe.
 """
+from __future__ import annotations
+
 import argparse
 import collections
 import os
@@ -34,7 +36,7 @@ LIB = os.path.join(os.path.dirname(HERE), "plugins", "prose-guard", "lib")
 sys.path.insert(0, LIB)
 
 import audiences  # noqa: E402
-from checks import Context, sequence  # noqa: E402
+from checks import Check, Context, sequence  # noqa: E402
 
 WHO = ("Engineers on this team reading a pull request description for a plugin they use but did not "
        "write. They know git and the shell.")
@@ -46,21 +48,21 @@ WHOLE = ("Every command-line destination gets this. Extraction and the complaint
          "destination's own list of text-carrying flags, rather than a list hard-coded in one place.")
 
 
-def Ctx(who):
+def Ctx(who: str) -> Context:
     """The shipped Context, so a harness cannot measure a shape nothing runs."""
     return Context(audiences.Resolved([], "engineers"),
                    {"who": who, "situation": "a pull request description"})
 
 
-def paragraphs(text):
+def paragraphs(text: str) -> list[str]:
     return [p.strip() for p in re.split(r"\n\s*\n", text) if len(p.split()) > 12]
 
 
-def phase(name):
+def phase(name: str) -> sequence.Phase:
     return next(p for p in sequence.phases() if p.NAME == name)
 
 
-def ask(check, text, ctx):
+def ask(check: Check, text: str, ctx: Context) -> str | None:
     try:
         finding = check.run(text, ctx)
     except Exception:
@@ -68,12 +70,12 @@ def ask(check, text, ctx):
     return finding.message if finding else None
 
 
-def points_at_fragment(message):
+def points_at_fragment(message: str | None) -> bool:
     return bool(message) and ("Both the part that extracts" in message
                               or "rather than a list kept in the code" in message)
 
 
-def main():
+def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--reps", type=int, default=3)

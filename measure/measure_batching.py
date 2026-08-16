@@ -20,6 +20,8 @@ on a long document known to have many defects, and counts how many items reprodu
 An item counts as reproduced when two runs point at the same sentence. That is the same test the tool
 uses to decide whether to report a finding at all.
 """
+from __future__ import annotations
+
 import argparse
 import collections
 import os
@@ -32,14 +34,14 @@ sys.path.insert(0, LIB)
 
 import audiences  # noqa: E402
 import checks as checks_module  # noqa: E402
-from checks import Finding, sequence  # noqa: E402
+from checks import Context, Finding, sequence  # noqa: E402
 
 ONE = "Reply with exactly one line and no reasoning: PASS, or FAIL: <what to change, quoting the span>."
 MANY = ("Reply with PASS, or with one line for each failing span, worst first, up to five:\n"
         "FAIL: <what to change, quoting the span>")
 
 
-def Ctx():
+def Ctx() -> Context:
     """The shipped Context, so a harness cannot measure a shape nothing runs."""
     return checks_module.Context(
         audiences.Resolved([], "engineers"),
@@ -47,17 +49,17 @@ def Ctx():
          "situation": "a pull request description"})
 
 
-def items(message):
+def items(message: str) -> list[str]:
     """Split a reply into findings. One line each, however the check was asked."""
     parts = [p.strip(" :-") for p in re.split(r"(?:^|\n)\s*(?:FAIL:?)", message) if p.strip(" :-")]
     return parts or [message]
 
 
-def where(text, part):
+def where(text: str, part: str) -> int | None:
     return checks_module._points_at(text, Finding("advise", part))
 
 
-def main():
+def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--reps", type=int, default=3)

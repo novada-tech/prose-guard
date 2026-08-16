@@ -22,20 +22,24 @@ threshold you pick on top of it will help.
 Add your own positives to POSITIVES below when you add a check. Three is enough to catch a check that
 never fires; it is not enough to claim a rate.
 """
+from __future__ import annotations
+
 import argparse
 import concurrent.futures as cf
 import glob
 import os
 import statistics as st
 import sys
+from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB = os.path.abspath(os.path.join(HERE, "..", "plugins", "prose-guard", "lib"))
 sys.path.insert(0, LIB)
 
 import audiences  # noqa: E402
+from audiences import Resolved  # noqa: E402
 from checks import ask as _ask  # noqa: E402
-from checks import Context, for_effort  # noqa: E402
+from checks import Check, Context, for_effort  # noqa: E402
 
 PAD = (" This has been in place since the start of the month and nobody has reported anything else "
        "unusual on the affected hosts.")
@@ -147,7 +151,7 @@ POSITIVES = {
 DEFAULT_NEGATIVES = os.path.join(HERE, "fixtures", "well-built", "*.md")
 
 
-def Ctx(audience, who=None):
+def Ctx(audience: Resolved, who: str | None = None) -> Context:
     """The shipped Context, so a harness cannot measure a shape nothing runs."""
     situation = {"destination": "a draft being measured, not sent"}
     if who:
@@ -155,7 +159,7 @@ def Ctx(audience, who=None):
     return Context(audience, situation)
 
 
-def cell(job):
+def cell(job: tuple[Check, str, str, str, Context, int]) -> dict[str, Any]:
     check, kind, tag, text, ctx, rep = job
     finding = check.run(text, ctx)
     return {"check": check.NAME, "kind": kind, "tag": tag, "rep": rep,
@@ -163,7 +167,7 @@ def cell(job):
             "why": (finding.message[:140] if finding else "")}
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="append", help="check name; repeatable, default all of them")
     ap.add_argument("--negatives", default=DEFAULT_NEGATIVES,

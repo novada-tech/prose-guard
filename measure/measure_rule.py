@@ -24,6 +24,8 @@ one. Two runs of the same arm differ.
 
 This spends real tokens: three arms at six replicates is 54 sessions.
 """
+from __future__ import annotations
+
 import argparse
 import concurrent.futures as cf
 import json
@@ -35,6 +37,7 @@ import statistics as st
 import subprocess
 import sys
 import tempfile
+from typing import Any, Iterable
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB = os.path.abspath(os.path.join(HERE, "..", "plugins", "prose-guard", "lib"))
@@ -42,6 +45,7 @@ sys.path.insert(0, LIB)
 
 import audiences  # noqa: E402
 import jargon  # noqa: E402
+from audiences import Resolved  # noqa: E402
 
 # Three tasks, because a rule that helps an announcement can hurt a one-line comment: pitching the
 # first version at whole messages made review comments worse than no rule at all.
@@ -80,7 +84,7 @@ call goes out with no retry at all. The test asserts three retries and observes 
 }
 
 
-def run_cell(job):
+def run_cell(job: tuple[str, str | None, str, int, str, str, str]) -> dict[str, Any]:
     arm, rule_path, task_name, rep, root, model, effort = job
     tag = f"{task_name}__{arm}__r{rep}"
     work = os.path.join(root, tag)
@@ -99,7 +103,7 @@ def run_cell(job):
     return {"arm": arm, "task": task_name, "rep": rep, "text": text}
 
 
-def score(text, resolved):
+def score(text: str, resolved: Resolved) -> dict[str, Any]:
     bad, considered = jargon.scan(text, resolved.is_known)
     prose = jargon.FENCE.sub(" ", text)
     sentences = [s for s in re.split(r"(?<=[.!?])\s+", prose) if len(s.split()) >= 3]
@@ -110,7 +114,7 @@ def score(text, resolved):
                          if sentences else 0)}
 
 
-def interval(values, draws=6000):
+def interval(values: Iterable[float], draws: int = 6000) -> tuple[float, float]:
     """Bootstrap 90% interval. An earlier round of this work read a three-run swing as a result."""
     values = list(values)
     if len(values) < 2:
@@ -122,7 +126,7 @@ def interval(values, draws=6000):
     return means[int(0.05 * draws)], means[int(0.95 * draws)]
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rule", action="append", required=True,
                     help="path to a rule file, or the word 'none' for an unguarded control")

@@ -23,6 +23,8 @@ unstable check cannot be acted on, and it teaches people to ignore the output.
 
 This spends real tokens. Eight destinations, three reps, at `high` is 24 sessions of the hook.
 """
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -32,6 +34,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.abspath(os.path.join(HERE, "..", "plugins", "prose-guard"))
@@ -39,13 +42,13 @@ GUARD = os.path.join(PLUGIN, "hooks", "scripts", "guard-outgoing-prose.sh")
 FIXTURES = os.path.join(HERE, "fixtures", "well-built")
 
 
-def destinations():
+def destinations() -> list[dict[str, Any]]:
     with open(os.path.join(PLUGIN, "data", "destinations.json")) as fh:
         data = json.load(fh)
     return data if isinstance(data, list) else data["destinations"]
 
 
-def payload_for(dest, text, repo):
+def payload_for(dest: dict[str, Any], text: str, repo: str) -> tuple[str, dict[str, Any], None]:
     """A tool call that this destination will claim, built from its own matcher.
 
     Derived from the destination file rather than hand-written per destination, so a destination added
@@ -78,7 +81,7 @@ def payload_for(dest, text, repo):
     return f"mcp__probe__{tool}", body, None
 
 
-def shim_for_counting():
+def shim_for_counting() -> tuple[str | None, str | None]:
     """A `claude` earlier on PATH that records each invocation and then runs the real one.
 
     The guard's own call counter cannot be read from outside: when a message goes out clean it resets
@@ -98,7 +101,7 @@ def shim_for_counting():
     return directory, log
 
 
-def home_with_audience(effort):
+def home_with_audience(effort: str) -> str:
     home = tempfile.mkdtemp(prefix="pg-dest-")
     os.makedirs(os.path.join(home, "audiences"))
     with open(os.path.join(home, "config.json"), "w") as fh:
@@ -115,7 +118,8 @@ def home_with_audience(effort):
     return home
 
 
-def run_once(dest, text, home, repo, session, shim=None, log=None):
+def run_once(dest: dict[str, Any], text: str, home: str, repo: str, session: str,
+             shim: str | None = None, log: str | None = None) -> tuple[float, int, str]:
     tool, tool_input, _ = payload_for(dest, text, repo)
     payload = {"tool_name": tool, "session_id": session, "cwd": repo, "tool_input": tool_input}
     env = {**os.environ, "PROSE_GUARD_HOME": home}
@@ -141,7 +145,7 @@ def run_once(dest, text, home, repo, session, shim=None, log=None):
     return took, calls, said
 
 
-def main():
+def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--effort", default="high", choices=("low", "medium", "high"))
