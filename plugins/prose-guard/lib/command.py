@@ -148,6 +148,30 @@ def read_prose_file(path: str, cwd: str | None = None, inside: bool = True) -> s
     except OSError:
         return None
 
+def words(cmd: str) -> list[str] | None:
+    """The command as shell words, or None when it cannot be read as any.
+
+    None rather than `[]`, because those are different facts and every caller needs to tell them
+    apart: `[]` is "a command with no flags", None is "this tool does not know what this command is".
+    Collapsing the two is what made a trailing shell comment switch the guard off —
+
+        git commit -m "<a long message>"   # don't forget the tag
+
+    `bash -n` accepts it, the destination matches it, and the apostrophe is an unclosed quote to
+    `shlex`, which raised. The raise was caught and yielded nothing, so the extractor found no message
+    and the branch that exists to say "I could not read this" ran the same split, got the same nothing,
+    and had nothing to report. The whole message went out with not one word said about it.
+
+    `comments=True` removes the common case outright — a `#` outside quotes is a comment to bash and now
+    to us, and one inside quotes is still text, so `-m "fix #123"` is unaffected. What is left is a
+    genuinely unreadable command, which is now reported rather than swallowed.
+    """
+    try:
+        return shlex.split(command_itself(cmd), comments=True)
+    except ValueError:
+        return None
+
+
 def flag_values(cmd: str) -> Iterator[tuple[str, str]]:
     """Every (flag, value) the command itself passes, and nothing at all when it cannot be read as
     words.
@@ -160,19 +184,18 @@ def flag_values(cmd: str) -> Iterator[tuple[str, str]]:
     pages and issue comments, so what they contain is not the agent's own choice.
 
     A command that cannot be parsed as words yields nothing rather than falling back to searching the
-    string: a command this tool cannot read is one it must not claim to have checked.
+    string: a command this tool cannot read is one it must not claim to have checked. Refusing is
+    right; refusing in silence is not, which is why `words` reports the difference and `unreadable`
+    says so — see below.
     """
-    try:
-        words = shlex.split(command_itself(cmd))
-    except ValueError:
-        return
-    for i, word in enumerate(words):
+    parsed = words(cmd) or []
+    for i, word in enumerate(parsed):
         if not word.startswith("-"):
             continue
         if "=" in word:
             yield tuple(word.split("=", 1))
-        elif i + 1 < len(words):
-            yield word, words[i + 1]
+        elif i + 1 < len(parsed):
+            yield word, parsed[i + 1]
 
 READS_A_FILE = re.compile(r"""^\$\(\s*(?:cat|<)\s+['"]?([^'"\s)]+)['"]?\s*\)$""")
 # Subcommand -> the flags whose presence still leaves the invocation a report. A flag that is not listed

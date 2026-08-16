@@ -313,7 +313,15 @@ def unreadable(dest: Dest, tool: str, tool_input: dict[str, Any],
     """
     if tool != "Bash":
         return None
-    passed = list(command.flag_values(str(tool_input.get("command") or "")))
+    cmd = str(tool_input.get("command") or "")
+    # First, because everything below reads the command as words and gets nothing when it cannot be
+    # read as any — so without this, the branch that exists to report a gap is blind for exactly the
+    # same reason as the branch that reads the prose. A trailing shell comment used to land here and
+    # produce not one byte of output. See `command.words`.
+    if command.words(cmd) is None:
+        return ("this command could not be read as shell words, so its message was not checked — "
+                "an unpaired quote is the usual cause")
+    passed = list(command.flag_values(cmd))
     for flag in dest.get("text_arg") or ():
         if flag.endswith("-file") or flag in ("-F", "--file"):
             continue

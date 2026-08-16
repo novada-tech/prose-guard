@@ -126,6 +126,50 @@ def test_no_hand_written_file_can_switch_the_guard_off():
     check("and the whole matrix was actually run", survived, len(files) * len(bodies))
 
 
+def test_a_trailing_shell_comment_does_not_silence_the_guard():
+    """`git commit -m "..."  # don't forget the tag` used to go out with nothing said.
+
+    `bash -n` accepts it and the destination matches it, but the apostrophe is an unclosed quote to
+    `shlex`, which raised. The raise was caught and yielded nothing, so the extractor found no message —
+    and the branch that exists to say "I could not read this" ran the same split, got the same nothing,
+    and had nothing to report either. Zero bytes of output, call allowed.
+
+    Two things are checked here because the fix has two halves and each can regress alone: an ordinary
+    trailing comment is now read like any other command, and a command that genuinely cannot be read is
+    held with a reason instead of passing in silence.
+    """
+    env = {**os.environ, "PROSE_GUARD_EFFORT": "low", "PROSE_GUARD_HOME": tempfile.mkdtemp()}
+    twice = "word " * 60                      # the repeated-word check is arithmetic, so no model call
+
+    with_comment = hook_reply({"session_id": "cmt", "tool_name": "Bash",
+                               "tool_input": {"command": f'git commit -m "{twice}"  # don\'t forget'}},
+                              env, 120)
+    check("a commented command is still checked", with_comment is not None, True)
+    check("and held for what is actually wrong",
+          "typed twice" in (with_comment or {}).get("permissionDecisionReason", ""), True)
+
+    # `#` inside the quotes is text to bash and must stay text here.
+    issue = hook_reply({"session_id": "cmt2", "tool_name": "Bash",
+                        "tool_input": {"command": f'git commit -m "fix #123 {twice}"'}}, env, 120)
+    check("a # inside quotes is not treated as a comment",
+          "typed twice" in (issue or {}).get("permissionDecisionReason", ""), True)
+
+
+def test_a_command_it_cannot_read_is_never_allowed_in_silence():
+    """The refusal is right. The silence was the defect.
+
+    `flag_values` deliberately yields nothing for a command it cannot parse — claiming to have checked
+    a command it could not read would be worse. But it said so nowhere, and the reporting branch was
+    blind for the same reason, so the two failure modes were one.
+    """
+    env = {**os.environ, "PROSE_GUARD_EFFORT": "low", "PROSE_GUARD_HOME": tempfile.mkdtemp()}
+    out = hook_reply({"session_id": "unread", "tool_name": "Bash",
+                      "tool_input": {"command": 'git commit -m "' + ("word " * 60)}}, env, 120)
+    said = (out or {}).get("permissionDecisionReason", "") + (out or {}).get("systemMessage", "")
+    check("an unreadable command produces output at all", out is not None, True)
+    check("and says it could not be read", "could not be read as shell words" in said, True)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
