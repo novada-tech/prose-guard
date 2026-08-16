@@ -28,18 +28,27 @@ import settings  # noqa: E402
 LEVELS = settings.LEVELS
 
 
-def _from_file():
-    return str(paths.config().get("effort") or "").lower()
+# One rule for reading a level, used by both `effort` and `complaints`. They disagreed: this one strips
+# and that one did not, so `PROSE_GUARD_EFFORT="low "` was ignored — falling through to whatever the
+# file said, or to disabled — while the thing whose job is to say a level is wrong stayed quiet, because
+# by its rule the value was fine. A trailing space is what a person leaves in a free-text box.
+_LEVEL = settings.one_of(*LEVELS)
+
+
+def _sources():
+    """Where a level may be set, nearest first, each with a name for saying which one is wrong."""
+    return (("PROSE_GUARD_EFFORT", os.environ.get("PROSE_GUARD_EFFORT")),
+            # Set by Claude Code from the plugin's userConfig. Verified: it reaches a hook's
+            # environment, though not a skill's shell, which is why it cannot be the only path.
+            ("the plugin's effort setting", os.environ.get(host.EFFORT_VAR)),
+            ("config.json", paths.config().get("effort")))
 
 
 def effort():
-    for value in ((os.environ.get("PROSE_GUARD_EFFORT") or "").lower(),
-                  # Set by Claude Code from the plugin's userConfig. Verified: it reaches a hook's
-                  # environment, though not a skill's shell, which is why it cannot be the only path.
-                  (os.environ.get(host.EFFORT_VAR) or "").lower(),
-                  _from_file()):
-        if value in LEVELS:
-            return value
+    for _, value in _sources():
+        level, _ = _LEVEL(value)
+        if level:
+            return level
     return "disabled"
 
 
@@ -51,12 +60,10 @@ def complaints():
     number, boolean, directory and file are the whole list — so `/plugin configure` offers a free-text
     box, and `medim` in it means disabled with nothing said unless somebody looks.
     """
-    rule = settings.one_of(*LEVELS)
     out = []
-    for name, value in (("PROSE_GUARD_EFFORT", os.environ.get("PROSE_GUARD_EFFORT")),
-                        ("the plugin's effort setting", os.environ.get(host.EFFORT_VAR))):
+    for name, value in _sources()[:2]:            # the file's own complaint comes from its declaration
         if (value or "").strip():
-            _, complaint = rule(value)
+            _, complaint = _LEVEL(value)
             if complaint:
                 out.append(f"{name} {complaint}")
     return out + paths.config_complaints()

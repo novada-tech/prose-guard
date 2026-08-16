@@ -39,6 +39,18 @@ jobs:
           mkdir -p "$RUNNER_TEMP/nobin"
           PATH="/usr/bin:/bin:/usr/sbin:/sbin" python3 tests/test_prose_guard.py
 
+      # The case data/common-words.txt exists for, and the one no developer machine can show: a
+      # container with no dictionary at all. Four ordinary words were missing from that floor —
+      # logger, coin, kafka, as — and on such a machine each was reported to every audience as jargon
+      # nobody had explained. The word list is the only thing standing between that machine and noise,
+      # so it is tested where it is actually load-bearing.
+      - name: no system dictionary
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo rm -f /usr/share/dict/words /usr/dict/words
+          test ! -f /usr/share/dict/words
+          python3 tests/test_prose_guard.py
+
   version:
     # Nobody's installed copy moves unless the version does: `claude plugin install` is a no-op when
     # the plugin is already present at any version, and `plugin update` only moves on a version

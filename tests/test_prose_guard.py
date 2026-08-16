@@ -219,9 +219,13 @@ def test_it_survives_a_machine_with_no_dictionary():
     # filtered too, which is the right way round: a message writing IT almost never means that.
     check("the shipped floor keeps two-letter words",
           any(len(w) == 2 for w in jargon.SHIPPED_WORDS), True)
-    if os.path.exists("/usr/share/dict/words"):     # not on a bare container, which is the point
+    # Ask jargon what it found rather than the filesystem what exists. The two can disagree — a
+    # dictionary present but unreadable, or a path this build does not look at — and when they do, the
+    # guard passes while the assertion is about an empty set.
+    system = jargon._system_words()
+    if system:                                      # empty on a bare container, which is the point
         check("and so does the system word list, where there is one",
-              any(len(w) == 2 for w in jargon._system_words()), True)
+              any(len(w) == 2 for w in system), True)
     real, jargon.WORDS = jargon.WORDS, jargon.SHIPPED_WORDS
     try:
         check("a floor ships with the tool", len(jargon.SHIPPED_WORDS) > 300, True)
@@ -1373,8 +1377,14 @@ def test_what_a_level_does_with_a_verdict_it_disagrees_with():
         # A phase that has not been measured to the blocking standard says so in its filename and
         # advises instead, so a new concern can ship and gather evidence rather than blocking on an
         # unproven principle. See test_a_phase_can_declare_that_it_only_advises.
-        check("and one that has not, advises",
-              {p.run("some text", None).severity for p in phases if p.advises} <= {ADVISE}, True)
+        # Named rather than filtered. `{... for p in phases if p.advises} <= {ADVISE}` is vacuously
+        # true when no phase advises, so promoting the last advisory phase would make this assertion
+        # go quiet instead of red — and a test that stops asking anything is the failure this whole
+        # file exists to avoid. Change the name here when the suffix comes off `promise`.
+        advisory = [p for p in phases if p.advises]
+        check("there is an advisory phase to check", [p.NAME for p in advisory], ["promise"])
+        check("and it advises",
+              {p.run("some text", None).severity for p in advisory}, {ADVISE})
         model.verdict = lambda name, path, text, ctx: (True, "")
         check("and a verdict nobody objects to is nothing to report",
               [judgement.run("t", None)] + [p.run("t", None) for p in phases],
@@ -1451,9 +1461,16 @@ def test_levels():
         os.environ["PROSE_GUARD_HOME"] = tmp
         importlib.reload(paths)
         importlib.reload(config)
-        for bad in ("", "nonsense", "LOW "):
+        for bad in ("", "nonsense", "lo", "medim"):
             os.environ["PROSE_GUARD_EFFORT"] = bad
             check(f"an unrecognised level is disabled ({bad!r})", config.effort(), "disabled")
+        # Whitespace and case are what a person leaves in a free-text box, not a mistake to punish.
+        # `"LOW "` used to be unrecognised HERE and recognised by the function whose job is to say a
+        # level is wrong, so it silently fell through to whatever the file said, and nothing objected.
+        for fine in ("LOW ", " low", "low\t", "Medium"):
+            os.environ["PROSE_GUARD_EFFORT"] = fine
+            check(f"but whitespace and case are read as meant ({fine!r})",
+                  (config.effort(), config.complaints()), (fine.strip().lower(), []))
         # ...and disabling is not enough on its own. A setting that silently switches the tool off is
         # the worst failure it has, because working correctly and doing nothing look identical from
         # outside, so the value has to come back as a sentence somebody can act on.
@@ -2922,7 +2939,7 @@ def test_a_config_json_of_the_wrong_shape_is_no_configuration():
         try:
             check("a list is read as no configuration at all", paths.config(), {})
             check("so no shared directory comes out of it", paths.shared(), [])
-            check("and no effort level does either", effort._from_file(), "")
+            check("and no effort level does either", effort.effort(), "disabled")
             # The reader a person meets face to face, rather than through the hook.
             r = subprocess.run([sys.executable, os.path.join(LIB, "share_dir.py")],
                                capture_output=True, text=True,
@@ -3681,6 +3698,37 @@ def test_a_long_document_cannot_spend_the_whole_session_on_its_first_check():
     # what is above the bar holds the message back on its own.
     check("a finding no second run confirmed does not hold the message back",
           said.get("permissionDecision"), None)
+
+
+def test_the_shipped_floor_carries_what_the_system_dictionary_would():
+    """A machine with no `/usr/share/dict/words` must not report ordinary words as jargon.
+
+    That is the whole reason `data/common-words.txt` exists, and four words were missing from it:
+    `logger`, `coin`, `kafka` and `as`. On any container without a dictionary — which the CI workflow
+    names as the case the floor covers — each was reported to every audience as a term nobody had
+    explained. No test could see it, because every developer machine has a dictionary and the system
+    list carried them.
+    """
+    import jargon
+
+    floor = jargon._shipped_words()
+    ordinary = ("logger", "coin", "kafka", "as", "than", "queue", "broker", "the", "was", "with",
+                "error", "null", "level", "config", "team", "issue")
+    check("every ordinary word is in the floor", [w for w in ordinary if w not in floor], [])
+    # INLINE, KUBECTL and the rest are the OTHER mechanism — the `engineers` baseline, not the word
+    # list — so they are deliberately absent here. See design-notes.md; a test that asserted floor
+    # membership for those would pin which mechanism happens to handle a word rather than the outcome.
+
+    # And nothing that should be explained was swallowed to get there. This is the half that a growing
+    # word list breaks: a floor wide enough to be quiet is a floor that starts letting jargon through.
+    was = jargon._words
+    jargon._words = lambda: floor              # pretend there is no system dictionary
+    try:
+        still_jargon = [t for t in ("ADC", "GKE", "SFTR", "CDM", "FQN", "DRR", "ISDA")
+                        if not jargon.is_acronym(t)]
+    finally:
+        jargon._words = was
+    check("and nothing that needs explaining was swallowed", still_jargon, [])
 
 
 def teardown_function(_fn):
