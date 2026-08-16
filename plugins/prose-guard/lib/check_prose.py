@@ -32,7 +32,8 @@ from typing import TYPE_CHECKING
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audiences  # noqa: E402
-import paths  # noqa: E402
+import paths
+import settings  # noqa: E402
 import telling  # noqa: E402
 from checks import (BLOCK, Context, ceiling_for, config, costs_a_call,  # noqa: E402
                     for_effort, pooled)
@@ -83,7 +84,11 @@ def history(path: str | None) -> tuple[list[int], str | None]:
     where = paths.at("passes", hashlib.sha1(os.path.abspath(path).encode()).hexdigest()[:16] + ".json")
     try:
         with open(where) as fh:
-            return list(json.load(fh)), where
+            # Counts only. `list()` of a JSON object gives its keys, which are strings, and every
+            # `except` here would let them past to be compared as numbers. A corrupt file is worth
+            # exactly nothing, not a wrong answer.
+            kept, _ = settings.each(settings.whole_number)(json.load(fh))
+            return kept or [], where
     except Exception:
         return [], where
 

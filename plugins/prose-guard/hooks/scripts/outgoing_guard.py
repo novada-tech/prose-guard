@@ -355,7 +355,8 @@ def main() -> None:
     # Anything wrong with a file somebody hand-wrote, said once a session because they can fix it and
     # it stops being true when they do. Every one of these used to pass silently and in the same
     # direction: the guard more aggressive than asked, or absent while looking present.
-    wrong = checks_module.config.complaints() + destinations.COMPLAINTS
+    wrong = (checks_module.config.complaints() + destinations.COMPLAINTS
+             + audiences.COMPLAINTS)
     if wrong and ledger.worth_saying("bad settings"):
         save_state(path, state)
         emit("advise", "", for_user="prose-guard: " + "; ".join(wrong[:3]) + ".")

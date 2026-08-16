@@ -44,6 +44,7 @@ import subprocess
 from typing import Any
 
 import paths
+import settings
 import re
 
 # How many distinct people have to have used a term before an audience is assumed to know it.
@@ -172,12 +173,25 @@ class Audience:
         return f"<Audience {self.name} {len(self.vocabulary)} terms, {self.origin}>"
 
 
+# What could not be read, in sentences, for whoever can reach a person.
+COMPLAINTS: list[str] = []
+
+
 def _read(path: str) -> Any:
-    try:
-        with open(path) as fh:
-            return json.load(fh)
-    except Exception:
-        return None
+    """One audience file, checked against its declaration, or None when there is nothing usable.
+
+    Shape-checked rather than merely parsed. `[1, 2]` in an audience file is valid JSON and used to
+    reach `data.get("name")`, which raised at import — and a PreToolUse hook that exits non-zero lets
+    the tool call through, so one hand-edited file turned the guard off for every message with nothing
+    said. The same hole was closed for destinations and for config.json; this was the third reader and
+    it was missed.
+
+    Complaints go to COMPLAINTS, which the hook reads once a session, so a file that cannot be used
+    says so instead of being skipped in silence.
+    """
+    got, said = settings.read(path, settings.AUDIENCE, os.path.basename(path))
+    COMPLAINTS.extend(said)
+    return got or None
 
 
 def load() -> dict[str, Audience]:

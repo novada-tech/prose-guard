@@ -10,6 +10,7 @@ not sound.
 
 Mutation-checked rather than trusted on a green run; the mutations are listed in the README.
 """
+import importlib
 import json
 import os
 import subprocess
@@ -48,6 +49,42 @@ FAILS = []
 def check(label, got, want):
     if got != want:
         FAILS.append(f"FAIL {label}: got {got!r}, wanted {want!r}")
+
+
+def test_one_bad_audience_file_does_not_switch_the_guard_off():
+    """Valid JSON of the wrong shape in an audience file took the whole hook down.
+
+    `[1, 2]` reached `data.get("name")` and raised at import — and a PreToolUse hook that exits
+    non-zero lets the tool call through, so one hand-edited file turned the guard off for every message
+    with nothing said anywhere.
+
+    The same hole was closed for `destinations.json` and for `config.json` when the declared shapes
+    landed. Audiences were the third reader and were missed, which is worth recording: a class of
+    defect is not closed until every reader of that class goes through the one door.
+    """
+    with tempfile.TemporaryDirectory() as home:
+        os.makedirs(os.path.join(home, "audiences"))
+        with open(os.path.join(home, "audiences", "broken.json"), "w") as fh:
+            fh.write("[1, 2]")
+        # A good one beside it, because skipping the bad file must not cost the good one.
+        write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"],
+                       members=["a", "b", "c", "d"], vocabulary={"GKE": 9})
+        env = {**os.environ, "PROSE_GUARD_HOME": home, "PROSE_GUARD_EFFORT": "low"}
+        out = hook_reply({"session_id": "bad", "tool_name": "Bash",
+                          "tool_input": {"command": 'git commit -m "' + PAD + PAD + '"'}}, env, 120)
+
+        check("the hook survives it", out is not None, True)
+        check("and says which file it could not read",
+              "broken.json" in (out or {}).get("systemMessage", ""), True)
+
+        # A subprocess rather than importlib.reload, because module-level state read at import does
+        # not come back cleanly and a half-reloaded audiences module fails later tests instead of this
+        # one. The suite uses the same idiom wherever a module reads PROSE_GUARD_HOME at import.
+        listed = subprocess.run(
+            [sys.executable, os.path.join(LIB, "audiences.py"), "list"],
+            capture_output=True, text=True, env=env, timeout=60).stdout
+        check("the good audience beside it still loads", "team" in listed, True)
+        check("and so does the shipped baseline", "engineers" in listed, True)
 
 
 def teardown_function(_fn):
