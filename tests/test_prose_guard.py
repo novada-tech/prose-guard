@@ -214,6 +214,14 @@ def test_it_survives_a_machine_with_no_dictionary():
     """
     import audiences
     import jargon
+    # Both readers keep two-letter words, or IS, IT, ON and AS survive the filter as "acronyms" and
+    # every message using one is held back. The cost is that IT as in information technology is
+    # filtered too, which is the right way round: a message writing IT almost never means that.
+    check("the shipped floor keeps two-letter words",
+          any(len(w) == 2 for w in jargon.SHIPPED_WORDS), True)
+    if os.path.exists("/usr/share/dict/words"):     # not on a bare container, which is the point
+        check("and so does the system word list, where there is one",
+              any(len(w) == 2 for w in jargon._system_words()), True)
     real, jargon.WORDS = jargon.WORDS, jargon.SHIPPED_WORDS
     try:
         check("a floor ships with the tool", len(jargon.SHIPPED_WORDS) > 300, True)
