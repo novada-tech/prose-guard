@@ -44,27 +44,18 @@ command cannot be skipped by accident.
 
 Run it again on the rewrite. The check is on the current wording, not on the draft you started from.
 
-Each check runs more than once, and how many times is decided by the text rather than by a flag. A check
-keeps running while its runs keep finding something new and stops when a run adds nothing, under a ceiling
-that grows with length — six up to 600 words, 21 at 2,000. So a document with real problems is not cut off
-at the same point as a clean one, and a clean check still costs one call. The hook uses the same rule on the
-same text, so a deliberate run and a message going out are held to one bar.
-
-The runs matter because a check returns exactly one item however it is asked — measured on a
-295-word document with about ten defects, asking for up to five items produced one item a run in every
-condition. What varies between runs is WHICH item, so three runs pooled give three items for three calls
-and one round trip. On that document one pass found two findings and three pooled runs found six across
-four checks, including two checks that were silent in the single pass.
+Each check runs more than once, and how many times is decided by the text rather than by a flag: a check
+keeps running while its runs keep finding something new, under a ceiling that grows with length. The hook
+uses the same rule on the same text, so a deliberate run and a message going out are held to one bar.
 
 Each item says how often it came up. Seen more than once means a reader can rely on it. Seen once, on a
 document with real defects, means the check sampled a different real defect that run — not that the item
 is noise. Fix everything you agree with in one edit rather than one per finding.
 
-Then stop. Run it again on the rewrite, and stop when the number of checks with something to say has
-stopped falling. It does reach zero: measured over five passes each, a message an agent wrote scored 2.2
-checks a pass, the same content after a senior engineer rewrote it scored 1.2, and a document already
-through six rounds scored 0.2. So one finding a pass is roughly what a good writer's own draft scores, and
-disagreeing with what is left is allowed.
+Then run it again on the rewrite, and stop when the number of checks with something to say has stopped
+falling. One finding a pass is roughly what a good writer's own draft scores here, so disagreeing with
+what is left is allowed — chasing zero is chasing something a good writer does not reach. The
+measurements behind all of that are in [docs/reference.md](../../../../docs/reference.md).
 
 ## What you hand back
 
