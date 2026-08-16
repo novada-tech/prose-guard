@@ -19,8 +19,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import jargon  # noqa: E402
 
+from . import finding  # noqa: E402
+
 NAME = "terms"
-COSTS_A_CALL = False
+MODE = finding.EXACT
 
 # Above this share of the terms the reader met, the finding is reported rather than enforced.
 # 1/3 is the 90th percentile of the share seen when a message IS scored against the audience it was

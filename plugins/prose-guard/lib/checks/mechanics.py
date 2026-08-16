@@ -37,8 +37,10 @@ to sharpen those checks was measured and dropped; see docs/reference.md.
 """
 import re
 
+from . import finding
+
 NAME = "mechanics"
-COSTS_A_CALL = False
+MODE = finding.EXACT
 
 # Same line and same case. Across a line break, "Meeting\n\nMeeting" is two headings, and "labels
 # Labels" is a heading followed by its text — both were false positives before this narrowed.

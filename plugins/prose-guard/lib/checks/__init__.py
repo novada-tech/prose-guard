@@ -1,16 +1,12 @@
 """One check per module, and one contract between them and the two callers that run them.
 
-    NAME          what to call it in output
-    COSTS_A_CALL  whether running it spends a model call
+    NAME           what to call it in output
+    MODE           exact, verdict or pooled — see checks/finding.py, which is where they are defined
     run(text, ctx) -> Finding or None
 
 A check returns None when it has nothing to say, and otherwise a Finding carrying its own severity.
-Severity belongs to the finding rather than the check, because the same check is sometimes exact
-enough to hold a message back and sometimes only guessing — the term check knows the difference and
-nothing else can.
-
-    block   the complaint is specific, small and evidenced. Hold the message.
-    advise  hand it over and let the message go.
+`ctx` is a checks.Context and carries everything a check is allowed to know about the reader and the
+moment; the Finding type and the two severities are in checks/finding.py, which imports nothing.
 
 `for_effort(level)` gives the checks that level runs, in order: cheapest and most exact first, so a
 message with a plainly wrong term never reaches a model call. A destination may cap its own level:
@@ -19,21 +15,45 @@ ask, and a commit message has neither.
 
     low     terms and mechanics only. No model call.
     medium  those, then one advisory call over the remaining concerns.
-    high    those, then four gating checks, one concern each.
+    high    those, then one gating check per prompt file in phases/.
 
 Adding a check is a file here and a line in for_effort. Both callers pick it up.
 """
-import collections
 import re
 
-from . import config, judgement, mechanics, sequence, terms
+from . import config, judgement, mechanics, notice, sequence, terms
+from .context import Context
+from .finding import ADVISE, BLOCK, EXACT, MODES, POOLED, VERDICT, Finding
 
-Finding = collections.namedtuple("Finding", "severity message")
-BLOCK = "block"
-ADVISE = "advise"
-
+__all__ = ["ADVISE", "BLOCK", "EXACT", "POOLED", "VERDICT", "Context", "Finding", "capped",
+           "ceiling_for", "costs_a_call", "for_effort", "mode_of", "notice", "pooled",
+           "written_here", "wrote_which"]
 
 ORDER = ("disabled", "low", "medium", "high")
+
+
+def mode_of(check):
+    """Which of the three modes this check runs in, or an error naming the check that did not say.
+
+    An error rather than a default. `POOLS` used to be read with `getattr(check, "POOLS", True)`, so
+    the cost of a check that never declared it was decided by which default happened to be written
+    here — up to `ceiling_for(text)` model calls for a check whose author expected one.
+    """
+    mode = getattr(check, "MODE", None)
+    if mode is None and getattr(check, "COSTS_A_CALL", None) is False:
+        # terms.py and mechanics.py still declare the older boolean, and both are EXACT. Translated
+        # rather than defaulted: a check that declares neither attribute is a mistake, not an EXACT
+        # check, and these two lines go when those files name their mode.
+        mode = EXACT
+    if mode not in MODES:
+        raise ValueError(f"check {getattr(check, 'NAME', check)!r} declares no MODE "
+                         f"(one of {', '.join(MODES)})")
+    return mode
+
+
+def costs_a_call(check):
+    """Whether one run of this check spends a model call. The budget is kept in calls."""
+    return mode_of(check) != EXACT
 
 
 def capped(level, ceiling):
@@ -45,21 +65,91 @@ def capped(level, ceiling):
 
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
+# The shortest quoted span that can place a finding. `"a a"` is the shortest thing mechanics quotes, so
+# a floor above three characters makes some of its findings unplaceable. The floor exists so that a
+# quotation is specific enough to name one sentence rather than any sentence; a short span is held to
+# word boundaries below, which is what keeps it specific.
+SHORTEST_SPAN = 3
+# Every style a check quotes in. Straight double quotes were the whole of it, and twelve characters the
+# floor, so `'…'`, a backtick, a curly quote and everything mechanics quotes placed nothing at all.
+_QUOTE_PAIRS = ('""', "''", "``", "“”", "‘’")
+QUOTED = re.compile("|".join(
+    f"{re.escape(open_)}([^{re.escape(close)}]{{{SHORTEST_SPAN},}}){re.escape(close)}"
+    for open_, close in _QUOTE_PAIRS))
+LONGEST_NEEDLE = 40
+
+
+def _spans(finding):
+    """Every span the finding quotes, in the order it quotes them."""
+    out = []
+    for match in QUOTED.finditer(finding.message):
+        span = " ".join(next(g for g in match.groups() if g is not None).split())
+        if len(span) > LONGEST_NEEDLE:
+            # Never half a word: the match below is anchored to word boundaries, so a needle cut
+            # mid-word would match nothing at all.
+            span = span[:LONGEST_NEEDLE].rsplit(" ", 1)[0]
+        out.append(span)
+    return out
+
+
+def _hits(text, finding):
+    """Which sentences of the text this finding quotes, in the order it quotes them.
+
+    Word-anchored, because the floor on a span is three characters: `"a a"` inside `a another` is not
+    the sentence the finding is about.
+    """
+    sentences = SENTENCE_END.split(" ".join(text.split()))
+    out = []
+    for span in _spans(finding):
+        for n, sentence in enumerate(sentences):
+            if re.search(r"(?<!\w)" + re.escape(span) + r"(?!\w)", sentence):
+                out.append(n)
+                break
+    return out
+
+
 def _points_at(text, finding):
-    """Which sentence of the text a finding is about, by the span it quotes.
+    """Which sentence of the text a finding is about, or None when it quotes nothing that is in it.
 
     Findings are compared by where they point rather than by how they are worded: two runs objecting to the
     same sentence in different words are one item, and two runs objecting to different sentences are two,
     however similar the wording.
     """
-    quoted = re.findall(r'"([^"]{12,})"', finding.message)
-    sentences = SENTENCE_END.split(" ".join(text.split()))
-    for span in quoted:
-        needle = " ".join(span.split())[:40]
-        for n, sentence in enumerate(sentences):
-            if needle and needle in sentence:
-                return n
-    return -1                                 # nothing quoted, or quoted nothing in the text
+    hits = _hits(text, finding)
+    return hits[0] if hits else None
+
+
+def _identity(text, finding):
+    """What makes two findings the same item: where it points, or failing that its own words.
+
+    This used to be the sentence number or `-1`, and `-1` was used as a dict key. So every finding that
+    quoted nothing findable collided on one key: two runs objecting to different things counted as one
+    run repeating itself, the second one's text was thrown away, and the item was promoted into `firm`
+    — the one subset the hook may block on. Three runs that agreed on nothing reported 3-of-3
+    agreement. Unplaceable findings now get an identity of their own, so they can confirm themselves
+    and nothing else.
+    """
+    spot = _points_at(text, finding)
+    if spot is not None:
+        return spot
+    return "said: " + " ".join(finding.message.lower().split())
+
+
+def written_here(text, finding, mine):
+    """Whether this finding is about text this call wrote. `mine` is None when all of it is.
+
+    Fails closed. An unplaceable finding used to count as somebody else's, which is what turned every
+    `terms` and `mechanics` finding on an edit into advice labelled "(already in the file)" — and
+    `terms` has already subtracted every term the version on disk contained, so what it reports is by
+    construction what this edit introduced.
+
+    One quoted span landing inside `mine` is enough: a mechanics finding lists up to four typos, and one
+    of them being older than the edit does not make the edit's own typo somebody else's.
+    """
+    if mine is None:
+        return True
+    hits = _hits(text, finding)
+    return not hits or any(n in mine for n in hits)
 
 
 def wrote_which(text, fragment):
@@ -138,18 +228,22 @@ def pooled(check, text, ctx, passes=None, dry_runs=DRY_RUNS):
     real defect, and on a polished one it is a near-tie. Which of those it is cannot be told from the item,
     so the count travels with it and the caller decides.
     """
+    mode = mode_of(check)
+    # What one run costs, decided before anything runs. This used to be counted after the pass test, so a
+    # check that spends no model call was billed one when it passed and none when it fired.
+    cost = 0 if mode == EXACT else 1
     first = check.run(text, ctx)
     if first is None:
-        return [], [], 1
-    if not check.COSTS_A_CALL:
+        return [], [], cost
+    if mode == EXACT:
         return [first], [first], 0            # deterministic: it says the same thing every time
-    if not getattr(check, "POOLS", True):
-        # A check that returns one combined verdict has nothing to pick between, so asking again restates
-        # it. See checks/judgement.py for the measurement.
+    if mode == VERDICT:
+        # One combined verdict has nothing to pick between, so asking again restates it. See
+        # checks/judgement.py for the measurement.
         return [first], [first], 1
     ceiling = passes or ceiling_for(text)
-    seen = {_points_at(text, first): [1, first]}
-    order = [_points_at(text, first)]
+    seen = {_identity(text, first): [1, first]}
+    order = list(seen)
     runs, dry = 1, 0
     while runs < ceiling and dry <= dry_runs:
         again = check.run(text, ctx)
@@ -157,17 +251,20 @@ def pooled(check, text, ctx, passes=None, dry_runs=DRY_RUNS):
         if again is None:
             dry += 1
             continue
-        spot = _points_at(text, again)
-        if spot in seen:
-            seen[spot][0] += 1
+        # By identity, not by place. A finding that quotes nothing findable used to key on the
+        # not-found sentinel, so two runs objecting to different things counted as one run repeating
+        # itself — and an item more than one run "agreed" on is the one subset that may be blocked on.
+        which = _identity(text, again)
+        if which in seen:
+            seen[which][0] += 1
             dry += 1                          # nothing new, however emphatic
             continue
-        seen[spot] = [1, again]
-        order.append(spot)
+        seen[which] = [1, again]
+        order.append(which)
         dry = 0                               # still yielding, so keep going
     findings, firm = [], []
-    for spot in order:
-        times, finding = seen[spot]
+    for which in order:
+        times, finding = seen[which]
         marked = finding._replace(message=f"[{times} of {runs} runs] " + finding.message)
         findings.append(marked)
         if times > 1:
@@ -175,16 +272,18 @@ def pooled(check, text, ctx, passes=None, dry_runs=DRY_RUNS):
     return findings, firm, runs
 
 
+# Each level is the one below it plus what it adds, so a level cannot lose a check the level below it
+# runs. Written out three times before, and a sixth deterministic check added to `low` did not reach
+# `high` — the containment was a thing to remember rather than a thing the code did.
+# `terms` and `mechanics` cost nothing and are exact, so they run at every level that runs anything.
+def _ladder(level):
+    low = (terms, mechanics)
+    return {"low": low, "medium": low + (judgement,),
+            "high": low + tuple(sequence.phases())}.get(level, ())
+
+
 def for_effort(level=None):
-    level = level or config.effort()
-    # mechanics costs nothing and is exact, so it runs at every level that runs anything.
-    if level == "low":
-        return (terms, mechanics)
-    if level == "high":
-        return (terms, mechanics) + tuple(sequence.phases())
-    if level == "medium":
-        return (terms, mechanics, judgement)
-    return ()
+    return _ladder(level or config.effort())
 
 
 EFFORT = config.effort()

@@ -32,8 +32,8 @@ import audiences  # noqa: E402
 import paths  # noqa: E402
 import destinations  # noqa: E402
 import checks as checks_module  # noqa: E402
-from checks import (BLOCK, EFFORT, IN_ORDER as CHECKS, _points_at, ceiling_for, pooled,
-                    wrote_which)  # noqa: E402
+from checks import (BLOCK, EFFORT, IN_ORDER as CHECKS, ceiling_for, costs_a_call, pooled,
+                    written_here, wrote_which)  # noqa: E402
 
 MAX_PER_CHECK = 2      # one complaint, then one more if the fix did not land
 MAX_DENIALS = 6        # a ceiling across all of them, so one message cannot eat a session
@@ -246,21 +246,26 @@ def main():
     # one. Bounded three ways so two checks that genuinely disagree make a message expensive and
     # then let it go, rather than hanging the turn.
     advice = []
+    unpaid = [c for c in running if costs_a_call(c) and state["passed"].get(c.NAME) != digest]
     for check in running:
         if state["passed"].get(check.NAME) == digest:
             continue
-        if check.COSTS_A_CALL and state["calls"] >= MAX_CALLS:
+        if costs_a_call(check) and state["calls"] >= MAX_CALLS:
             state["passed"][check.NAME] = digest
             continue
         try:
             # The same pooling a deliberate run uses, so both apply one bar: passes scale with the
             # length of the text, and an item more than one run pointed at is what can be blocked on.
-            # The budget is in calls, and one call per check stopped being true when a check gained the
-            # right to run until it stops finding things. What is left of the session's budget is the
-            # ceiling for this check, so a long document cannot spend a session on its first paragraph.
-            left = max(1, MAX_CALLS - state["calls"])
-            found, firm, spent = pooled(check, text, ctx, min(ceiling_for(text), left))
+            #
+            # The budget is in calls, and it is divided rather than handed over. Giving each check
+            # whatever was left meant the first one took it: on an edit of one sentence in a 1,960-word
+            # file, all nineteen calls went to `relevance` and four concerns never ran at all. A share
+            # each buys five concerns for the same money, which is what `high` is being paid for.
+            share = max(1, (MAX_CALLS - state["calls"]) // max(1, len(unpaid)))
+            found, firm, spent = pooled(check, text, ctx, min(ceiling_for(text), share))
             state["calls"] += spent
+            if costs_a_call(check):
+                unpaid = [c for c in unpaid if c.NAME != check.NAME]
         except Exception:
             found, firm = [], []             # a broken check is a silent check, never a blocker
         state["passed"][check.NAME] = digest
@@ -271,11 +276,11 @@ def main():
         # things rather than one turn each.
         # Block only on what this call wrote. A complaint about a paragraph the edit never touched is
         # worth saying and is not grounds for refusing the edit.
-        def written_here(f):
-            return ctx.mine is None or _points_at(text, f) in ctx.mine
-        blocking = [f for f in firm if f.severity == BLOCK and written_here(f)]
+        def mine(f):
+            return written_here(text, f, ctx.mine)
+        blocking = [f for f in firm if f.severity == BLOCK and mine(f)]
         finding = found[0]._replace(
-            message="\n".join(f.message + ("" if written_here(f) else "  (already in the file)")
+            message="\n".join(f.message + ("" if mine(f) else "  (already in the file)")
                               for f in found),
             severity=BLOCK if blocking else "advise")
         # A destination can refuse to block at all. Blocking is justified by the text being about to

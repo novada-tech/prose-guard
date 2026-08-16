@@ -32,6 +32,25 @@ def check(label, got, want):
         FAILS.append(f"FAIL {label}: got {got!r}, wanted {want!r}")
 
 
+def hook_reply(payload, environment, timeout=300):
+    """The hook's parsed output, plus the assertion that it did not crash on the way to it.
+
+    `hookSpecificOutput` as a dict, or None when the hook said nothing at all — which is how it allows.
+
+    The assertion is here rather than in each caller because a PreToolUse hook that exits non-zero lets
+    the call through and says nothing, so a traceback is indistinguishable from "allow": every
+    allow-assertion in this file used to be satisfied by one, and `raise RuntimeError` as the first line
+    of the hook's main() left the suite green. The hook's own header promises that every failure path
+    allows the call, and this is what makes that promise a test rather than a sentence.
+    """
+    r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
+                       text=True, env=environment, timeout=timeout)
+    assert r.returncode == 0, f"the hook exited {r.returncode}: {r.stderr.strip()[-1500:]}"
+    assert not r.stderr.strip(), f"the hook wrote to stderr: {r.stderr.strip()[-1500:]}"
+    out = r.stdout.strip()
+    return json.loads(out)["hookSpecificOutput"] if out else None
+
+
 def fresh(home):
     """Reload the modules that cache files at import time, pointed at a temporary home."""
     import importlib
@@ -539,7 +558,8 @@ def test_the_mechanical_errors_are_found_without_a_model():
     check("naming both", "typed twice" in finding.message and 'wants "an"' in finding.message, True)
     check("and says nothing about clean prose",
           mechanics.run("this sentence is entirely fine", ctx), None)
-    check("costing no model call", mechanics.COSTS_A_CALL, False)
+    import checks
+    check("costing no model call", checks.costs_a_call(mechanics), False)
 
 
 def test_destinations_are_managed_the_way_audiences_are():
@@ -750,11 +770,9 @@ def test_prose_behind_a_substitution_still_reaches_the_checks():
         def ask(command, session):
             payload = {"tool_name": "Bash", "session_id": session, "cwd": repo,
                        "tool_input": {"command": command}}
-            r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
-                               text=True, env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=180)
-            if not r.stdout.strip():
+            out = hook_reply(payload, {**os.environ, "PROSE_GUARD_HOME": home}, 180)
+            if out is None:
                 return "silent", ""
-            out = json.loads(r.stdout)["hookSpecificOutput"]
             return ("deny" if out.get("permissionDecision") == "deny" else "advise",
                     out.get("permissionDecisionReason") or str(out.get("additionalContext") or ""))
 
@@ -862,12 +880,9 @@ def env(home, state, effort="low"):
 
 
 def run_guard(payload, home, state, effort="low"):
-    r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
-                       text=True, env=env(home, state, effort), timeout=300)
-    out = r.stdout.strip()
-    if not out:
+    h = hook_reply(payload, env(home, state, effort))
+    if h is None:
         return "allow", ""
-    h = json.loads(out)["hookSpecificOutput"]
     if h.get("permissionDecision") == "deny":
         return "deny", h["permissionDecisionReason"]
     return "advise", h.get("additionalContext", "")
@@ -1046,7 +1061,7 @@ def test_levels():
                                    "reference", "address"])):
         check(f"level/{level}", [c.NAME for c in checks.for_effort(level)], names)
     check("nothing at low costs a call",
-          [c.COSTS_A_CALL for c in checks.for_effort("low")], [False, False])
+          [checks.costs_a_call(c) for c in checks.for_effort("low")], [False, False])
     with tempfile.TemporaryDirectory() as tmp:
         os.environ["PROSE_GUARD_HOME"] = tmp
         importlib.reload(paths)
@@ -1444,11 +1459,9 @@ def test_a_destination_can_cap_effort_and_severity():
         def ask(tool):
             payload = {"tool_name": tool, "session_id": tool[-8:], "cwd": repo,
                        "tool_input": {"channel_id": "C1", "message": body}}
-            r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
-                               text=True, env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=120)
-            if not r.stdout.strip():
+            out = hook_reply(payload, {**os.environ, "PROSE_GUARD_HOME": home}, 120)
+            if out is None:
                 return "allowed", ""
-            out = json.loads(r.stdout)["hookSpecificOutput"]
             if out.get("permissionDecision") == "deny":
                 return "deny", out["permissionDecisionReason"]
             return "advise", str(out.get("additionalContext") or "")
@@ -1498,11 +1511,9 @@ def test_words_already_there_are_not_words_you_wrote():
         def ask(command, session):
             payload = {"tool_name": "Bash", "session_id": session, "cwd": repo,
                        "tool_input": {"command": command}}
-            r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
-                               text=True, env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=120)
-            if not r.stdout.strip():
+            out = hook_reply(payload, {**os.environ, "PROSE_GUARD_HOME": home}, 120)
+            if out is None:
                 return "allowed", ""
-            out = json.loads(r.stdout)["hookSpecificOutput"]
             if out.get("permissionDecision") == "deny":
                 return "deny", out["permissionDecisionReason"]
             return "advise", str(out.get("additionalContext") or "")
@@ -1548,11 +1559,9 @@ def test_one_command_can_be_excused_but_not_a_session():
         def ask(command, session="skip"):
             payload = {"tool_name": "Bash", "session_id": session, "cwd": repo,
                        "tool_input": {"command": command}}
-            r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
-                               text=True, env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=120)
-            if not r.stdout.strip():
+            out = hook_reply(payload, {**os.environ, "PROSE_GUARD_HOME": home}, 120)
+            if out is None:
                 return "allowed", ""
-            out = json.loads(r.stdout)["hookSpecificOutput"]
             if out.get("permissionDecision") == "deny":
                 return "deny", out["permissionDecisionReason"]
             return "advise", str(out.get("additionalContext") or "")
@@ -1606,11 +1615,19 @@ def test_a_check_runs_more_than_once_and_the_runs_are_pooled():
     check("two sentences are two places",
           checks._points_at(text, first) == checks._points_at(text, elsewhere), False)
     check("and a finding quoting nothing in the text points nowhere",
-          checks._points_at(text, checks.Finding("advise", "no quotation at all")), -1)
+          checks._points_at(text, checks.Finding("advise", "no quotation at all")), None)
+    # Nowhere is not a place two findings can share. `-1` was returned here and then used as a dict key,
+    # so every finding that quoted nothing findable landed on one key and confirmed the others.
+    nothing, other = (checks.Finding("advise", "no quotation at all"),
+                      checks.Finding("advise", "a different complaint, also unquoted"))
+    check("two unplaceable findings are two items",
+          checks._identity(text, nothing) == checks._identity(text, other), False)
+    check("but one unplaceable finding is itself",
+          checks._identity(text, nothing), checks._identity(text, nothing))
 
     class Stub:
         NAME = "stub"
-        COSTS_A_CALL = True
+        MODE = checks.POOLED
 
         def __init__(self, replies):
             self.replies = list(replies)
@@ -1644,7 +1661,7 @@ def test_a_check_runs_more_than_once_and_the_runs_are_pooled():
 
     # A deterministic check says the same thing every time, so it is never asked twice.
     class Cheap(Stub):
-        COSTS_A_CALL = False
+        MODE = checks.EXACT
     cheap = Cheap([first, first])
     found, firm, _ = checks.pooled(cheap, text, None, 3)
     check("a deterministic check runs once", len(cheap.replies), 1)
@@ -1662,14 +1679,22 @@ def test_the_combined_verdict_is_asked_once():
     """
     import checks
     from checks import judgement
-    check("the combined verdict opts out", getattr(judgement, "POOLS", True), False)
-    check("while a separate concern does not",
-          all(getattr(p, "POOLS", True) for p in checks.sequence.phases()), True)
+    check("the combined verdict is asked once", checks.mode_of(judgement), checks.VERDICT)
+    check("while a separate concern is pooled",
+          {checks.mode_of(p) for p in checks.sequence.phases()}, {checks.POOLED})
+    # A mode that is not declared is an error, not a default. It was read with a default of "pooled",
+    # so a check whose author expected one call could silently spend a ceiling of them.
+    undeclared = type("Undeclared", (), {"NAME": "undeclared"})
+    try:
+        checks.mode_of(undeclared)
+        said = ""
+    except ValueError as exc:
+        said = str(exc)
+    check("a check that declares no mode is refused by name", "undeclared" in said, True)
 
     class Combined:
         NAME = "combined"
-        COSTS_A_CALL = True
-        POOLS = False
+        MODE = checks.VERDICT
 
         def __init__(self):
             self.asked = 0
@@ -1709,7 +1734,7 @@ def test_how_hard_a_check_works_follows_the_text():
 
     class Stub:
         NAME = "stub"
-        COSTS_A_CALL = True
+        MODE = checks.POOLED
 
         def __init__(self, replies):
             self.replies = list(replies)
@@ -2414,6 +2439,55 @@ def test_writing_the_level_keeps_the_rest_of_the_file():
             os.environ.pop("PROSE_GUARD_HOME", None)
             if was is not None:
                 os.environ["PROSE_GUARD_HOME"] = was
+
+
+def test_the_call_budget_is_divided_between_the_checks_not_handed_over():
+    """Five concerns each get a share, because the first one used to take the lot.
+
+    On an edit of one sentence in a 1,960-word file at `high`, all nineteen calls went to `relevance`
+    and structure, sentence, reference and address never ran — so the level whose whole purpose is
+    separating the concerns checked one of them. The same money now buys all five.
+    """
+    import itertools
+
+    import checks
+    from checks import ceiling_for, pooled
+
+    text = " ".join(f"Sentence number {n} about the resolver and what it does." for n in range(300))
+    budget = 20
+
+    class Ever:
+        """Never stops finding something new, which is the worst case for a budget."""
+
+        MODE = checks.POOLED
+
+        def __init__(self, name):
+            self.NAME, self._n = name, itertools.count()
+
+        def run(self, text, ctx):
+            return checks.Finding(checks.BLOCK, f'The "unique complaint {next(self._n)}" is unclear')
+
+    def spend(share_it):
+        running = [Ever(n) for n in ("relevance", "structure", "sentence", "reference", "address")]
+        spent_by, calls, unpaid = {}, 0, list(running)
+        for check in running:
+            if calls >= budget:
+                spent_by[check.NAME] = 0
+                continue
+            left = budget - calls
+            ceiling = max(1, left // max(1, len(unpaid))) if share_it else max(1, left)
+            _, _, spent = pooled(check, text, None, min(ceiling_for(text), ceiling))
+            calls += spent
+            spent_by[check.NAME] = spent
+            unpaid = [u for u in unpaid if u.NAME != check.NAME]
+        return calls, spent_by
+
+    before_calls, before = spend(False)
+    after_calls, after = spend(True)
+    check("handing the budget over checks one concern",
+          sum(1 for v in before.values() if v), 1)
+    check("sharing it checks all five", sum(1 for v in after.values() if v), 5)
+    check("for the same money", (before_calls, after_calls), (budget, budget))
 
 
 def teardown_function(_fn):
