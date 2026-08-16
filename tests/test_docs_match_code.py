@@ -26,6 +26,10 @@ ROOT_VAR = "${CLAUDE_PLUGIN_ROOT}"
 INVOCATION = re.compile(r'python3\s+"?((?:\$\{CLAUDE_PLUGIN_ROOT\}/|(?:lib|measure)/)[\w/.-]+\.py)"?'
                         r'([^\n`]*)')
 FLAG = re.compile(r"(?<![\w-])(--[a-z][a-z-]+)")
+# A command written across a shell continuation. The tail group stops at the newline, so every flag
+# after a `\` was invisible: `learn.py create` is the most flag-heavy command in the tool and both
+# places that document it use continuations, so renaming --match-channel passed clean.
+CONTINUED = re.compile(r"\\\n\s*")
 # argparse prints its subcommand choices as a positional line of their own: `    {scan,create}`.
 # Matching that line, rather than any brace anywhere, is what separates a subcommand list from a
 # flag's choices — `--effort {low,medium,high}` made `check_prose.py draft.md` look like a
@@ -33,6 +37,16 @@ FLAG = re.compile(r"(?<![\w-])(--[a-z][a-z-]+)")
 SUBCOMMANDS = re.compile(r"^\s{2,}\{([a-z][\w,-]*)\}\s*$", re.M)
 FAILS = []
 _help = {}
+
+
+def doc_text(path):
+    """One documentation file, with shell continuations folded into the line they continue.
+
+    A reader copies the whole command, `\\` and all, so the flags on the second line are as documented
+    as the ones on the first. Read line by line they are invisible to INVOCATION, whose tail group
+    stops at the newline.
+    """
+    return CONTINUED.sub(" ", open(path, encoding="utf-8", errors="replace").read())
 
 
 def sources():
@@ -49,7 +63,7 @@ def sources():
             if not name.endswith(".md"):
                 continue
             path = os.path.join(here, name)
-            if INVOCATION.search(open(path, encoding="utf-8", errors="replace").read()):
+            if INVOCATION.search(doc_text(path)):
                 found.append(path)
     return sorted(found)
 
@@ -76,7 +90,7 @@ def undocumented():
     """
     ran = set()
     for doc in sources():
-        for script_ref, tail in INVOCATION.findall(open(doc).read()):
+        for script_ref, tail in INVOCATION.findall(doc_text(doc)):
             script = os.path.realpath(resolve(script_ref))
             words = [w for w in tail.split() if not w.startswith("-")]
             ran.add((script, words[0] if words else None))
@@ -93,7 +107,7 @@ def undocumented():
             real = os.path.realpath(path)
             rel = os.path.relpath(path, REPO)
             if (real, None) not in ran:
-                mentioned = any(name in open(d).read() for d in sources())
+                mentioned = any(name in doc_text(d) for d in sources())
                 out.append(f"{rel} takes command-line arguments and no documentation runs it"
                            + (" — it is mentioned, but not as a command anyone can copy"
                               if mentioned else ""))
@@ -128,6 +142,22 @@ def helptext(*argv):
     return _help[argv]
 
 
+def accepted(*argv):
+    """Exactly the flags this command takes, from argparse's own usage block.
+
+    Not a substring test over the whole `--help` output, which is what this was and which passed two
+    different renames. Help TEXT names flags too: `--who`'s description reads "use --for for that", so
+    `--for` survived in the output after the flag itself was gone. And a substring test cannot tell a
+    flag from a longer flag that starts with it — `--who` renamed to `--whoever` passed clean, as did
+    `--passes` to `--passesx`. The usage block lists every optional argparse will accept and nothing
+    else, so membership in it is the question this test is actually asking.
+    """
+    text = helptext(*argv)
+    at = text.find("usage:")
+    block = text[at:].split("\n\n", 1)[0] if at >= 0 else ""
+    return set(FLAG.findall(block))
+
+
 # A flag written in a sentence rather than in a command. `--status` was described in three places, in
 # prose, for a script that has never had it — and this test passed, because it only ever read the
 # flags inside a `python3 ...` line. A reader does not distinguish the two: both say the flag exists.
@@ -144,10 +174,10 @@ def ours():
     """Every flag any script in this repository accepts, subcommands included."""
     found = set()
     for script in every_script():
-        found.update(FLAG.findall(helptext(script)))
+        found.update(accepted(script))
         for group in SUBCOMMANDS.findall(helptext(script)):
             for sub in group.split(","):
-                found.update(FLAG.findall(helptext(script, sub)))
+                found.update(accepted(script, sub))
     return found
 
 
@@ -163,7 +193,7 @@ def mentioned_in_prose():
     real = ours()
     out = []
     for doc in sources():
-        for flag in sorted(set(IN_PROSE.findall(open(doc).read()))):
+        for flag in sorted(set(IN_PROSE.findall(doc_text(doc)))):
             if flag not in NOT_OURS and flag not in real:
                 out.append(f"{label(doc)}: describes {flag}, which no script in this repository has")
     return out
@@ -173,7 +203,7 @@ def main():
     seen = 0
     for doc in sources():
         name = label(doc)
-        for script_ref, tail in INVOCATION.findall(open(doc).read()):
+        for script_ref, tail in INVOCATION.findall(doc_text(doc)):
             seen += 1
             script = resolve(script_ref)
             if not os.path.isfile(script):
@@ -200,11 +230,11 @@ def main():
                     continue
                 argv, where = [script, words[0]], f"{os.path.basename(script)} {words[0]}"
 
-            usage = helptext(*argv)
+            takes = accepted(*argv)
             for flag in FLAG.findall(tail):
-                if flag not in usage:
+                if flag not in takes:
                     FAILS.append(f"{name}: {where} does not accept {flag}  (it accepts: "
-                                 f"{', '.join(sorted(set(FLAG.findall(usage))))})")
+                                 f"{', '.join(sorted(takes))})")
 
     FAILS.extend(mentioned_in_prose())
     if seen == 0:
@@ -218,6 +248,17 @@ def main():
     print(f"docs match the code: {seen} documented command(s) checked "
           f"across {len(sources())} file(s)")
     return 0
+
+
+def test_docs_match_code():
+    """So `pytest tests/` runs this file too.
+
+    Everything here lived in main(), and pytest collects functions whose name begins with `test_`. It
+    collected nothing at all from this file: `python3 -m pytest tests/ -q` reported a green board with
+    all 65 documented commands unchecked. That is the same failure the other suite's teardown_function
+    was written for, and the instruction to use pytest is in this repository's own CONTRIBUTING.md.
+    """
+    assert main() == 0
 
 
 if __name__ == "__main__":
