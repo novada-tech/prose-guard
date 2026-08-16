@@ -634,6 +634,14 @@ def test_passive_discovery():
             V.record_candidate(f"mcp__example__tool{i}", {"body": secret})
         check("the remembered set is bounded", len(telling.everything()) <= 200, True)
         check("and it did stop rather than never filling up", len(telling.everything()), 200)
+        # The bound stops the ledger GROWING, not the counting. Stop counting at the cap too and a tool
+        # somebody uses every day never reaches its third use, so the one shape worth suggesting is the
+        # one that never gets suggested.
+        tracked = "unclaimed: tool: mcp__example__tool0 [body]"
+        was_seen = telling.everything()[tracked]["seen"]
+        V.record_candidate("mcp__example__tool0", {"body": secret})
+        check("and a shape already in it keeps counting",
+              telling.everything()[tracked]["seen"], was_seen + 1)
 
 
 def test_discovery_proposes_how_hard_to_check_a_new_destination():
@@ -893,6 +901,13 @@ def test_a_substitution_is_worked_out_where_that_is_safe():
               C.resolve("$(git log -1; touch " + os.path.join(repo, "chained") + ")", repo), None)
         check("and nothing it refused was run",
               [f for f in ("pwned", "chained") if os.path.exists(os.path.join(repo, f))], [])
+        # A command that ran and failed has nothing to say, and its exit status is the only thing that
+        # says so: `git log` in a repository with no commits exits 128 with empty output, which reads
+        # exactly like a message with nothing in it.
+        with tempfile.TemporaryDirectory() as empty:
+            subprocess.run(["git", "-C", empty, "init", "-q"], capture_output=True, timeout=60)
+            check("a git command that failed yields nothing rather than its empty output",
+                  C.resolve("$(git log -1 --format=%B)", empty), None)
 
         # Resolved and then too short to judge is not the same as unreadable, and saying "substitution"
         # about it would send someone to fix a command that is working. Both leave no text to check.
@@ -1463,8 +1478,12 @@ def test_a_vocabulary_can_come_from_any_command():
             return subprocess.run(argv + ["--out", out], capture_output=True, text=True, env=e,
                                   timeout=120)
 
-        r = scan("exit 3", out=out + ".2")
-        check("a failing command is reported, not swallowed", "warning" in r.stderr, True)
+        # Yields rows AND fails, which is what a source that dies part way through looks like. Asked
+        # with a command that prints nothing, the "nothing usable came out" warning fires as well, so
+        # dropping the exit-code warning entirely left this passing on the other one.
+        r = scan(emit + "; exit 3", out=out + ".2")
+        check("a failing command is reported, not swallowed",
+              "warning" in r.stderr and "3" in r.stderr, True)
 
         # A credential that authenticates and then has no data access exits 0 and prints an error
         # object. From here that is indistinguishable from an empty channel, and it was being written
@@ -1830,8 +1849,13 @@ def test_words_already_there_are_not_words_you_wrote():
             subprocess.run(["git", "-C", repo, *argv], capture_output=True, timeout=60)
         open(os.path.join(repo, "f.txt"), "w").write("x\n")
         subprocess.run(["git", "-C", repo, "add", "f.txt"], capture_output=True, timeout=60)
+        # SFTR_PAYLOAD is here so that "already there" cannot be answered by a substring test. The
+        # identifier is not a term the scan finds — no word boundary inside it — but `"SFTR" in old`
+        # is true, and that difference is what stops a coincidence in an old message becoming a
+        # standing exemption for a term this one introduces.
         old = ("Resolve the J1-vs-J4 disagreement raised in review\n\n"
-               "J1 and J4 were the original author's shorthand for two findings.")
+               "J1 and J4 were the original author's shorthand for two findings, and the "
+               "SFTR_PAYLOAD constant was left alone.")
         subprocess.run(["git", "-C", repo, "commit", "-q", "-m", old], capture_output=True,
                        timeout=60)
         write_audience(home, "team", matches={"paths": ["*"]}, inherits=["engineers"],
@@ -2381,6 +2405,27 @@ def test_rule_installer():
                      "is either backed by a command you ran and its output, or is explicitly marked "
                      "as unverified. Never present an inference as a finding.\n")
         check("an unrelated rule is not a rival", run("--install").startswith("installed"), True)
+
+        # What 0.7 is for, and it had no fixture. The copy that matters is a VARIANT — a team's own
+        # version of the same guidance, pointing at its own skills where this one is generic — and the
+        # rival above differs from the shipped rule only in its closing paragraph, so its first forty
+        # words are identical and a threshold of 0.95 passed just as well.
+        run("--remove")
+        os.remove(os.path.join(rules, "verification.md"))
+        with open(os.path.join(rules, "variant.md"), "w") as fh:
+            fh.write("One team's own opening paragraph about how we write things here.\n\n" + mine)
+        check("a team's own version of the same guidance is still a rival",
+              run("--install").startswith("duplicate"), True)
+        os.remove(os.path.join(rules, "variant.md"))
+
+        # And the comparison is forty words, not the first line. Cut to eight, every rule that opens
+        # with a heading and an ordinary sentence looks like this one, and the installer refuses on a
+        # machine that has nothing of the sort.
+        with open(os.path.join(rules, "borrowed-opening.md"), "w") as fh:
+            fh.write(" ".join(mine.split()[:8]) + "\n\n"
+                     + "Nothing else in here is about writing at all. " * 20)
+        check("but a rule that only opens the same way is not",
+              run("--install").startswith("installed"), True)
 
 
 # ------------------------------------------------------------ what a message may not reach
@@ -2967,10 +3012,15 @@ def test_a_check_that_could_not_run_says_so_instead_of_reading_as_a_pass():
     os.environ["PATH"] = "/nonexistent-so-there-is-no-checker"
     try:
         ok, why = model.verdict("relevance", sequence.phases()[0]._path, "some text", None)
+        # Four checks miss the same binary at `high`, and the person has one thing to fix. Said once
+        # per thing that did not happen, not once per check that noticed.
+        for phase in sequence.phases()[1:]:
+            model.verdict(phase.NAME, phase._path, "some text", None)
     finally:
         os.environ["PATH"] = was
     check("a missing checker still allows the call", (ok, why), (True, ""))
     check("and says that it never ran", any("PATH" in n for n in telling.never_ran()), True)
+    check("once, however many checks could not run", len(telling.never_ran()), 1)
     telling.ran_everything()
 
 
@@ -3034,6 +3084,10 @@ def test_a_bad_value_in_a_hand_written_file_is_reported_not_ignored():
            ({"name": "x", "max_effort": "lo"}, settings.DESTINATION, "max_effort"),
            ({"name": "x", "max_severity": "Advise "}, settings.DESTINATION, None),
            ({"name": "x", "max_effot": "low"}, settings.DESTINATION, "max_effort"),
+           # `require_tracked` decides whether a file has to be committed before it counts as prose
+           # somebody will read. Written as the word rather than the value, "false" is a non-empty
+           # string, so every scratch file in the working tree started being checked.
+           ({"name": "x", "require_tracked": "false"}, settings.DESTINATION, "require_tracked"),
            ({"shared_context": "sdwys"}, settings.ASSUMPTIONS, "shared_context")]
     for data, shape, expected in bad:
         clean, complaints = settings.checked(data, shape, "a file")
@@ -3049,6 +3103,17 @@ def test_a_bad_value_in_a_hand_written_file_is_reported_not_ignored():
           ["commit message"])
     clean, complaints = settings.checked([1, 2], settings.CONFIG, "config.json")
     check("valid JSON of the wrong shape is refused, not crashed on", (clean, len(complaints)), ({}, 1))
+
+    # A file nobody has written yet is the ordinary case and says nothing. A file that IS there and
+    # cannot be parsed is the case worth a sentence: read as empty, it is a configuration somebody
+    # wrote, believes in, and is not getting — which is the same silence a missing file gets.
+    with tempfile.TemporaryDirectory() as where:
+        with open(os.path.join(where, "config.json"), "w") as fh:
+            fh.write('{"effort": "low",\n')
+        got, said = settings.read(os.path.join(where, "config.json"), settings.CONFIG)
+        check("a file that is not JSON at all is said so", (got, len(said)), ({}, 1))
+        check("and a file that is simply not there is not",
+              settings.read(os.path.join(where, "nothing-here.json"), settings.CONFIG), ({}, []))
 
     # And it reaches a person, once, through the channel that reaches them rather than the model.
     with tempfile.TemporaryDirectory() as home:
@@ -3093,8 +3158,11 @@ def test_what_this_plugin_expects_of_its_host_is_in_one_place():
         was = os.path.expanduser("~")
         os.environ["HOME"] = fake
         try:
+            # One sentence about the cause, not three about its consequences. With the directory gone
+            # every source under it is missing too, and reading "your MCP servers were not read; no
+            # plugin manifests were read" sends somebody looking at three things when one is wrong.
             check("a host with nothing in it says so rather than returning less",
-                  len(host.missing()) >= 1, True)
+                  len(host.missing()), 1)
             check("and names the directory it could not find", host.dot_dir() in host.missing()[0],
                   True)
             os.makedirs(os.path.join(fake, ".claude", "plugins", "cache", "a", "b", "c",
