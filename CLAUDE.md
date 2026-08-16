@@ -36,6 +36,12 @@ Each deleted more than it added, and each closed findings nobody had reported ye
 If a fix genuinely must add code, add it in one place rather than at every caller, and say in the
 commit why the reducing version was not available.
 
+Then **finish the sweep before claiming the class is closed.** `lib/settings.py` was introduced for
+`config.json` and `destinations.json`, the review comment said every reader went through it, and the
+third one did not — a hand-edited audience file of the wrong shape crashed the hook, which allows the
+call, for months. When you route one caller through a new abstraction, grep for the rest in the same
+commit and say in the message which ones you found and why any are exempt.
+
 ## The failure that matters most is silence
 
 This tool holds messages back. Every failure path allows the call, which is right — a broken writing
