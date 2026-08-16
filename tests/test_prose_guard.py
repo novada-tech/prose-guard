@@ -3379,6 +3379,36 @@ def test_a_heredoc_feeding_a_text_flag_is_the_message():
               "Rebuild" in C.command_itself(cmd), False)
 
 
+def test_shell_syntax_inside_a_message_is_not_read_as_prose():
+    """A substitution embedded in ordinary text was left in the text the checks read.
+
+    47 of 817 prose-carrying commands in 4,154 local transcripts put one inside an otherwise ordinary
+    message, and those arguments are 87% literal at the median. They were already being checked — with
+    `$(basename $PWD)` sitting in the middle of the prose, so the term check reported PWD as an
+    acronym nobody had explained. A shell variable is not a term the reader has to understand.
+
+    Each unseen span stands in as a word rather than being deleted, because the checks read sentences:
+    deleting it joins the words either side into one, and a symbol makes the sentence ungrammatical and
+    draws a complaint about this tool's own placeholder.
+    """
+    import audiences
+    import command as C
+    from checks import Context, terms
+
+    raw = ("Rebuild the payload index in $(basename $PWD) after the migration so anyone rebuilding it "
+           "later can tell which figures were used and why ${WHOLE_INDEX} had to be rewritten first.")
+    ctx = Context(audiences.resolve({}))
+    before = terms.run(raw, ctx)
+    check("shell syntax used to be reported as jargon", "PWD" in (before.message if before else ""),
+          True)
+
+    seen, unseen = C.visible(raw)
+    check("both spans are accounted for", unseen, 2)
+    check("and neither is read as a term", terms.run(seen, ctx), None)
+    check("the sentence still reads as a sentence", "index in something after" in seen, True)
+    check("nothing else was touched", seen.startswith("Rebuild the payload index"), True)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 

@@ -69,6 +69,29 @@ def heredoc_body(cmd):
     return m.group(2) if m else None
 
 
+# What a span this tool cannot see is replaced with before the checks read the text. A word, because
+# the checks read sentences: an empty string joins the words either side into one, and a symbol makes a
+# sentence ungrammatical and draws a complaint about the tool's own placeholder.
+UNSEEN = "something"
+_SUBSTITUTION = re.compile(r"\$\([^()]*\)|\$\{[^{}]*\}|`[^`]*`")
+
+
+def visible(value):
+    """The literal part of a text argument, with each span this tool cannot see standing in as a word.
+
+    A message is rarely all substitution. Measured across 4,154 local transcripts, the text arguments
+    that contain one are 87% literal at the median and never below 64% — so refusing the whole thing
+    threw away most of a message to avoid guessing at a fraction of it, and held the call back for a
+    defect nobody had looked for.
+
+    Returns (text, how_many_unseen). The caller decides what to do about the count: a finding here is
+    about words that will be sent verbatim, so it is worth acting on, but the tool has not read
+    everything and should not imply that it has.
+    """
+    seen = _SUBSTITUTION.sub(UNSEEN, value)
+    return seen, len(_SUBSTITUTION.findall(value))
+
+
 def command_itself(cmd):
     """A command with its heredoc bodies removed, so what it DOES is read and not what it carries.
 
