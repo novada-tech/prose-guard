@@ -87,6 +87,45 @@ def test_one_bad_audience_file_does_not_switch_the_guard_off():
         check("and so does the shipped baseline", "engineers" in listed, True)
 
 
+def test_no_hand_written_file_can_switch_the_guard_off():
+    """Every file a person can edit, made malformed, against the one failure that matters.
+
+    A `PreToolUse` hook that exits non-zero lets the tool call through. So a crash while reading
+    configuration is not a crash — it is the guard silently turning itself off, which is
+    indistinguishable from having nothing to say. That is how the audience-file bug survived: valid
+    JSON of the wrong shape raised at import and every message went out unchecked.
+
+    The single fix is that every one of these files goes through `settings.read`. This is the matrix
+    rather than one case, because the bug was not "audiences were unchecked" — it was "a third reader
+    was added and nobody swept". A fourth will be added, and it will fail here.
+    """
+    files = ["config.json", "destinations.json", "audiences/x.json", "share_dirs.json",
+             "assumptions.json"]
+    bodies = {"a JSON list": "[1, 2]", "a JSON string": '"nope"', "truncated": '{"name": ',
+              "empty": "", "wrong type inside": '{"name": [1, 2]}'}
+    survived, crashed = 0, []
+    for name in files:
+        for label, body in bodies.items():
+            with tempfile.TemporaryDirectory() as home:
+                path = os.path.join(home, name)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w") as fh:
+                    fh.write(body)
+                env = {**os.environ, "PROSE_GUARD_HOME": home, "PROSE_GUARD_EFFORT": "low"}
+                # hook_reply already asserts the hook did not crash, for exactly this reason —
+                # see its docstring. Catching that assertion here only buys the name of the file
+                # that did it, so the whole matrix is reported at once instead of the first failure.
+                try:
+                    hook_reply({"session_id": "fuzz", "tool_name": "Bash",
+                                "tool_input": {"command": 'git commit -m "' + PAD + PAD + '"'}},
+                               env, 120)
+                    survived += 1
+                except AssertionError:
+                    crashed.append(f"{name} holding {label}")
+    check("no hand-written file crashes the hook", crashed, [])
+    check("and the whole matrix was actually run", survived, len(files) * len(bodies))
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
