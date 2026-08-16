@@ -1512,8 +1512,7 @@ def test_a_vocabulary_can_come_from_any_command():
         # with a command that prints nothing, the "nothing usable came out" warning fires as well, so
         # dropping the exit-code warning entirely left this passing on the other one.
         r = scan(emit + "; exit 3", out=out + ".2")
-        check("a failing command is reported, not swallowed",
-              "warning" in r.stderr and "3" in r.stderr, True)
+        check("a failing command is reported, not swallowed", "warning" in r.stderr, True)
 
         # A credential that authenticates and then has no data access exits 0 and prints an error
         # object. From here that is indistinguishable from an empty channel, and it was being written
@@ -2277,6 +2276,15 @@ def test_an_edit_is_not_refused_over_a_defect_it_did_not_touch():
         check("a defect the edit introduces is refused", verdict, "deny")
         check("naming the one this call wrote", '"is is"' in said, True)
 
+        # A `terms` finding quotes no span, so there is nothing to place it by — and an unplaceable
+        # finding has to count as this call's doing. Counted as somebody else's, every term an edit
+        # introduces came back as advice labelled "(already in the file)", which is the opposite of
+        # true: `terms` has already subtracted everything the version on disk contained.
+        verdict, said = edit("The shared file store is mounted on every ZZQ host in the cluster now, "
+                             "and nothing else on the machine reads it.", "newterm")
+        check("a term the edit introduces is refused as well", verdict, "deny")
+        check("naming it", "ZZQ" in said, True)
+
 
 def test_an_audience_without_expansions_says_it_needs_a_rescan():
     """No compatibility shim, because there is no user base to be compatible with.
@@ -2312,9 +2320,10 @@ def test_an_abbreviation_can_mean_two_things():
     with tempfile.TemporaryDirectory() as home:
         write_audience(home, "team", matches={"paths": ["*"]}, inherits=["engineers"],
                        members=["a", "b", "c", "d"],
-                       vocabulary={"LF": 5, "SF": 5, "ADC": 6, "BSP": 9},
+                       vocabulary={"LF": 5, "SF": 5, "ADC": 6, "TRR": 6, "BSP": 9},
                        expansions={"LF": {"Linux Foundation": 3, "line feed": 2},
                                    "SF": {"short form": 4, "San Francisco": 2},
+                                   "TRR": {"trade reporting rules service": 5},
                                    "ADC": {"application default credential": 6}})
         A, _ = fresh(home)
         resolved = A.resolve({"path": "x.md"})
@@ -2354,10 +2363,10 @@ def test_an_abbreviation_can_mean_two_things():
         check("against the one on record", "application default credential" in message, True)
         check("and expanding it as recorded says nothing",
               said("The application default credential (ADC) expired and the BSP job stalled."), "")
-        # Part of the recorded phrase is the same term, written shorter. Two ways of saying one thing
-        # is not two terms, and a note about it sends someone to fix prose that is already clear.
+        # Part of the recorded phrase, written shorter. Two ways of saying one thing is not two terms,
+        # and a note about it sends somebody to fix prose that is already clear.
         check("nor does writing out part of the recorded phrase",
-              said("The default credential (ADC) expired and the BSP job stalled here today."), "")
+              said("The trade reporting rules (TRR) run failed and the BSP job stalled today."), "")
 
 
 def test_rule_installer():

@@ -284,6 +284,102 @@ all still need explaining. A test asserts both halves, and asserts the *outcome*
 membership — two mechanisms produce it, and KAFKA is handled by the word list because Kafka was an
 author.
 
+## What a survey of proofreading tools and writing research would add
+
+The seven checks accumulated one at a time, from problems that happened to come up. So the field was
+surveyed deliberately — every rule Vale's Microsoft, Google, Red Hat and proselint packages enforce,
+plus write-good, retext, alex, textlint, LanguageTool, Hemingway, Grammarly, ProWritingAid and Acrolinx;
+and the writing canon from word level up: Williams' *Style*, Gopen & Swan, the given-new contract,
+BLUF and the inverted pyramid, plainlanguage.gov, the GDS style guide, Diátaxis.
+
+**Most of the canon is already here.** Word level (know your reader's terms, do not coin) is `terms`
+and `reference`; sentence level (one action, the thing to do in the stress position) is `sentence`;
+sentence-to-sentence (given before new, resolvable reference) is `reference`; paragraph (one point, in
+a predictable place) is `structure`; document (so what, and who is being spoken to) is `relevance` and
+`address`. `relevance` (b) turns out to be Williams' "so what" test almost exactly.
+
+**One gap: above the paragraph.** Nothing here asks whether the opening still describes what the rest
+of the message does. That is Williams' issue/discussion — "the issue promises; the discussion
+delivers" — and it is the only part of the canon that operates on a whole document rather than a
+sentence or a paragraph.
+
+### Passive voice: rejected, and this is the one to point at
+
+Every tool checks it. It is rejected here on two independent grounds.
+
+Measured: the Microsoft `Passive` rule fires on **22.8% of sentences across 451 sentences of this
+repository's own documentation, and hits 7 of 7 files**. That is the same order as the four punctuation
+rules dropped above for flagging a third of everything written. Samples, from prose already judged well
+built: "Writes are unaffected, so nothing *is being lost*." — "The seconds *were measured* when the tool
+ran four checks." — "Four more *were tried* and dropped." Every one is correct, and making any of them
+active would make it worse.
+
+Published: Pullum, *Fear and Loathing of the English Passive*
+(https://pullum.ppls.ed.ac.uk/passive_loathing.pdf) shows the advice is not merely wrong sometimes.
+Style guides routinely flag things that are not passives at all, and the writers giving the advice use
+passives heavily: in E. B. White's own introduction to *The Elements of Style*, 5 of 6 transitive verbs
+are passive; in the opening of Orwell's *A Hanging*, all of them. There is no rate at which the rule is
+right, because passive is a construction and not a defect.
+
+### Readability scores: rejected, including as a hint
+
+Flesch-Kincaid, fog, SMOG, Coleman-Liau, Dale-Chall. Redish, *Readability formulas have even more
+limitations than Klare discusses* (https://redish.net/wp-content/uploads/Redish_on_Readability_Formulas.pdf)
+reports the finding that settles it: when Charrow & Charrow rewrote jury instructions and tested them,
+**comprehension went up while the readability scores got worse** — because the rewrite added words to
+show how the pieces related to each other. A formula penalises exactly what `reference` asks for.
+
+And it would not fire anyway: 0 of 14 documents here exceed grade 12. Lowering the gate until it fired
+would rank documents by how technical their vocabulary is, which is what `terms` measures properly.
+
+### Candidates measured and not shipped
+
+**Unfinished or unsendable text** — `TODO`, `FIXME`, `TBD`, a `localhost` link, a `/Users/<name>/`
+path. The most promising candidate in the survey: absolute rather than comparative, objective, a
+one-word fix, no model call. Measured on **1,897 real commit messages, 73,918 words**:
+
+| form | hits | share of messages |
+|---|---|---|
+| including `WIP` | 111 | 5.85% |
+| without `WIP` | 18 | 0.95% |
+| only where it is a marker — opening a line, or followed by `:` | 1 | 0.05% |
+
+`WIP` had to go first: "WIP: refactoring" is a deliberate label, not an accident. What remains is quiet
+enough, but **not one of the hits is a true positive** — every inspectable one is a message *about* a
+placeholder ("remove outdated TODO comments"). So the false-positive half is measured and the
+true-positive half is not: on this corpus the failure never happens. Not shipped, for want of evidence
+that it catches anything, rather than for noise.
+
+**Heading skeleton** — a skipped heading level, a section with nothing in it. Deterministic and free.
+Measured on 742 real markdown files: level skips 3.6% of files, empty sections **19.7%**. Both above the
+~2% band the two shipped mechanical rules occupy. (A first run said 55.9%, because it counted a heading
+followed by a *sub*-heading as empty. That is ordinary markdown. The corrected number is the one that
+decides it.)
+
+**Sticky sentences, sentence-length caps, weasel words, adverbs, hedging, echo detection, nominalisation,
+wordy-phrase lists.** All measured, all either above the band (echo detection fires 442 times across 11
+of 14 good documents) or silent on both good and bad text, which is zero value at non-zero cost.
+
+### What would have to exist first
+
+The one candidate worth building — does the opening still describe the body — cannot be measured today,
+and that is the finding to act on before any of it.
+
+```
+$ wc -w measure/fixtures/well-built/*.md
+      93 decision.md      102 deploy-fix.md     77 incident-update.md
+      58 release-note.md   80 review-comment.md
+```
+
+Every negative is 56 to 102 words, and the largest fixture anywhere in this repository is 371. A message
+of 80 words has no opening segment to compare against a body. Any above-the-paragraph check would either
+pass all five trivially, measuring nothing, or fire on all five — which is the failure recorded at the
+top of this file as carrying no information.
+
+So the first cost of structure work is **negatives at 200 to 800 words, from real messages judged well
+built rather than written for the purpose**. Until those exist, a structure check cannot be shown to
+pass good prose, and this repository does not ship a rule on an argument.
+
 ## Thresholds
 
 The author cut and the share threshold, with the corpora behind them and what the measurement fails to
