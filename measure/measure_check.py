@@ -41,7 +41,38 @@ PAD = (" This has been in place since the start of the month and nobody has repo
        "unusual on the affected hosts.")
 
 # Written to carry one specific defect. Keyed by check name.
+# A promise defect needs length: below 150 words the check answers PASS by design, because there is no
+# opening segment separate from a body. So these are built by taking a real message and moving its
+# point, which is the failure Williams describes — the issue promises one thing, the discussion
+# delivers another.
+_BURIED = (
+    "The cache directory moved to ~/.local/state/ourtool and the old path is read for one more "
+    "release. Nothing else in the loader changed, and the migration runs on first start.\n\n"
+    "The loader now resolves the directory once at import rather than per call, which took the "
+    "cold-start path from 210ms to 24ms. The per-call resolution had been there since the first "
+    "version and nobody had measured it.\n\n"
+    "Three call sites that built the path by hand were changed to ask the loader for it. Two were "
+    "in tests and one was in the CLI's --where flag.\n\n"
+    "The reason all of this matters is that the old path was inside the package directory, so every "
+    "upgrade wiped everybody's cache and the first run after an upgrade took four minutes. That is "
+    "what this fixes, and it is why it should go out before Friday's release rather than after it.")
+_UNDELIVERED = (
+    "This changes how retries are counted, how the backoff is calculated, and what the dashboard "
+    "shows for a partially failed batch. Each of those had a different owner and they disagreed, so "
+    "the numbers on the dashboard never matched what the queue actually did.\n\n"
+    "Retries are now counted per batch rather than per row. A batch that fails twice and then "
+    "succeeds records two retries, where it used to record one per failing row — sometimes "
+    "thousands.\n\n"
+    "That is the whole change. The counter is in queue/metrics.py and the test that pins it is in "
+    "tests/test_metrics.py, which now asserts on a batch of 500 rows failing twice.\n\n"
+    "It went out on Tuesday and the dashboard has been correct since. Nothing else was touched, and "
+    "the backoff calculation is unchanged from what it always was.")
+
 POSITIVES = {
+    "promise": [
+        ("the point arrives last", _BURIED),
+        ("the opening promises three things and delivers one", _UNDELIVERED),
+    ],
     "terms": [
         ("bare acronym", "The SFTR path now runs through the new cluster." + PAD),
     ],

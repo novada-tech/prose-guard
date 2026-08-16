@@ -14,8 +14,8 @@ comment, a commit message, a document — against two questions:
 **Who is going to read this?**
 **Why should they care?**
 
-Seven checks follow from those two questions, and they are what actually runs. Two are arithmetic — no
-model call, and they run at every level. Five are judgement.
+Eight checks follow from those two questions, and they are what actually runs. Two are arithmetic — no
+model call, and they run at every level. Six are judgement.
 
 | | | |
 |---|---|---|
@@ -26,13 +26,19 @@ model call, and they run at every level. Five are judgement.
 | **Things they will not act on** | backstory they lived through, identifiers nobody types, reassurance nobody asked for, proof that you tested it | judgement |
 | **A paragraph doing two jobs** | two unrelated ideas in one, or an opening sentence that does not state its own | judgement |
 | **Something they have to decode** | a coined label like "the silent row", a pronoun whose subject is four sentences back, the thing they must do buried under a subordinate clause | judgement |
+| **An opening that no longer fits** | the message turns out to be about something the top never mentions, so a reader who acts on the opening alone acts on the wrong thing | judgement, advice only |
 
 **What can hold a message back depends on the level.** The two arithmetic checks always can: both are
-objective and both are a small fix. At `high` the five judgement checks can too, because each names one
-concern and quotes the span it means, and a finding two runs agree on is specific enough to act on. At
-`medium` the same five concerns are asked as one combined question, and that only ever advises —
+objective and both are a small fix. At `high` five of the six judgement checks can too, because each
+names one concern and quotes the span it means, and a finding two runs agree on is specific enough to
+act on. At `medium` those five concerns are asked as one combined question, and that only ever advises —
 measured against a real label it agrees 50–70% of the time and disagrees with itself between runs, which
 is a prompt to look again rather than something to gate on.
+
+The sixth, the one about the opening, advises at every level and says so in its own filename. It passes
+11 of 14 well-built messages where the blocking checks pass 9 or 10 of 10, and the gap is not worth
+closing by tuning against the handful of fixtures long enough to measure it on. The scores and what
+would settle it are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Under 25 words nothing is checked at all.** A short message is not the failure this catches, and it is
 not worth a model call — so a one-line commit message is the wrong thing to test it with.

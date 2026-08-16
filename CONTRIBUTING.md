@@ -83,6 +83,18 @@ Where it stands today, at `claude-sonnet-5` and medium effort, 13 positives and 
 | sentence | 5/6 | 10/10 | 12% |
 | reference | 5/6 | 9/10 | 25% |
 | address | 7/8 | 10/10 | 11% |
+| promise | 2/4 | 11/14 | 11% |
+
+`promise` is measured against the six long negatives in
+[`measure/fixtures/well-built-long/`](measure/fixtures/well-built-long/), not the short ones — a check
+that reads a whole document cannot be measured on an 80-word message. It **advises rather than blocks**,
+which its filename says: `phases/6-promise.advise.md`. The reason is in the row. The blocking phases
+pass 9 or 10 of 10; this passes 11 of 14, and both remaining false alarms are commit messages whose
+subject line does two things, which it reads as two promises.
+
+Closing that gap by editing the prompt against six fixtures from one author would fit the fixtures
+rather than the bar. What would settle it is a wider corpus — the fixture directory's README says which
+kinds are missing. Drop the `.advise` from the filename when it reaches the blocking standard.
 
 **These figures move between runs on unchanged prompts.** Three consecutive runs of `address` alone gave
 5/5, 5/5 and 4/5 on the negatives. So a one-cell difference is not a result, and a change worth claiming

@@ -1368,8 +1368,13 @@ def test_what_a_level_does_with_a_verdict_it_disagrees_with():
         phases = sequence.phases()
         check("the combined verdict only ever advises",
               judgement.run("some text", None).severity, ADVISE)
-        check("while every named concern can hold the message back",
-              {p.run("some text", None).severity for p in phases}, {BLOCK})
+        check("while a named concern that has earned it can hold the message back",
+              {p.run("some text", None).severity for p in phases if not p.advises}, {BLOCK})
+        # A phase that has not been measured to the blocking standard says so in its filename and
+        # advises instead, so a new concern can ship and gather evidence rather than blocking on an
+        # unproven principle. See test_a_phase_can_declare_that_it_only_advises.
+        check("and one that has not, advises",
+              {p.run("some text", None).severity for p in phases if p.advises} <= {ADVISE}, True)
         model.verdict = lambda name, path, text, ctx: (True, "")
         check("and a verdict nobody objects to is nothing to report",
               [judgement.run("t", None)] + [p.run("t", None) for p in phases],
@@ -1429,10 +1434,17 @@ def test_levels():
     from checks import config
     for level, names in (("disabled", []),
                          ("low", ["terms", "mechanics"]),
-                         ("medium", ["terms", "mechanics", "judgement"]),
-                         ("high", ["terms", "mechanics", "relevance", "structure", "sentence",
-                                   "reference", "address"])):
+                         ("medium", ["terms", "mechanics", "judgement"])):
         check(f"level/{level}", [c.NAME for c in checks.for_effort(level)], names)
+    # `high` is not spelled out, because a phase is a file: writing the list here is how a count ends
+    # up in eight places and wrong in all of them. What must hold is the containment — a level runs
+    # everything the level below it runs — and that a phase file reaches `high` without a code change.
+    low = [c.NAME for c in checks.for_effort("low")]
+    high = [c.NAME for c in checks.for_effort("high")]
+    check("high runs everything low runs", high[:len(low)], low)
+    check("plus one check per phase file",
+          len(high) - len(low), len(checks.sequence.phases()))
+    check("and medium's combined verdict is not among them", "judgement" in high, False)
     check("nothing at low costs a call",
           [checks.costs_a_call(c) for c in checks.for_effort("low")], [False, False])
     with tempfile.TemporaryDirectory() as tmp:
@@ -3549,6 +3561,46 @@ def test_shell_syntax_inside_a_message_is_not_read_as_prose():
     check("and neither is read as a term", terms.run(seen, ctx), None)
     check("the sentence still reads as a sentence", "index in something after" in seen, True)
     check("nothing else was touched", seen.startswith("Rebuild the payload index"), True)
+
+
+def test_a_phase_can_declare_that_it_only_advises():
+    """A check that has not been measured to the blocking standard should be able to ship and gather
+    evidence, rather than waiting to be perfect or blocking on an unproven principle.
+
+    Measured for `promise`, against six 342-to-482-word negatives, `claude-sonnet-5` at medium: it
+    passes 11 of 14 and disagrees with itself 11% of the time. The shipped blocking phases pass 9 or 10
+    of 10. That is close, and closing it by tuning against six fixtures from one author would fit the
+    fixtures rather than the bar — so it advises until there is a wider corpus.
+
+    The severity is in the filename rather than in the prompt because the prompt is sent to a model,
+    where a line about severity would read as an instruction to it.
+    """
+    from checks import ADVISE, BLOCK, sequence
+
+    by_name = {p.NAME: p for p in sequence.phases()}
+    check("every phase is found whatever its severity",
+          {"relevance", "structure", "sentence", "reference", "address"} <= set(by_name), True)
+    check("a plain phase blocks",
+          [n for n, p in by_name.items() if not p.advises and p.NAME != "promise"] != [], True)
+    check("and the suffix does not leak into the name", [n for n in by_name if "." in n], [])
+
+    class Stub:
+        def __init__(self, ok):
+            self.ok = ok
+
+        def verdict(self, name, path, text, ctx):
+            return (True, "") if self.ok else (False, 'The "opening" promises what the body does not')
+
+    import checks.sequence as seq
+    was = seq.model
+    try:
+        seq.model = Stub(False)
+        severities = {n: p.run("some text", None).severity for n, p in by_name.items()}
+    finally:
+        seq.model = was
+    check("an advisory phase advises", severities.get("promise"), ADVISE)
+    check("and the rest still block",
+          {s for n, s in severities.items() if n != "promise"}, {BLOCK})
 
 
 def teardown_function(_fn):

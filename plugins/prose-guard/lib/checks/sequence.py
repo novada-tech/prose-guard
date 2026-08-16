@@ -15,7 +15,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import telling  # noqa: E402
 
 from . import model
-from .finding import BLOCK, POOLED, Finding
+from .finding import ADVISE, BLOCK, POOLED, Finding
+
+# A phase whose filename ends in this advises rather than blocks.
+ADVISORY = ".advise"
 
 PHASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "phases")
 
@@ -24,14 +27,24 @@ class Phase:
     MODE = POOLED
 
     def __init__(self, path):
-        self.NAME = os.path.basename(path)[:-3].split("-", 1)[-1]
+        # `4-reference.md` is the reference check and blocks. `6-promise.advise.md` is the promise
+        # check and only advises. The severity is in the filename because a check that has not earned
+        # the right to hold a message back should say so where somebody adding one will see it, and
+        # because putting it inside the prompt would send it to the model as if it were an instruction.
+        stem = os.path.basename(path)[:-3]
+        self.advises = stem.endswith(ADVISORY)
+        if self.advises:
+            stem = stem[:-len(ADVISORY)]
+        self.NAME = stem.split("-", 1)[-1]
         self._path = path
 
     def run(self, text, ctx):
-        # BLOCK, and that is the whole difference between this and the combined verdict: one named
-        # concern with a quoted span can be acted on, so it is worth holding a message for.
+        # A phase BLOCKS by default, and that is the whole difference between one of these and the
+        # combined verdict: one named concern with a quoted span can be acted on, so it is worth
+        # holding a message for. A phase that has not been measured to that standard advises instead —
+        # see CONTRIBUTING.md for the scores a check has to reach before the suffix comes off.
         ok, why = model.verdict(self.NAME, self._path, text, ctx)
-        return None if ok else Finding(BLOCK, why)
+        return None if ok else Finding(ADVISE if self.advises else BLOCK, why)
 
 
 def phases():
