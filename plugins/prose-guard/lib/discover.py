@@ -25,6 +25,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import command  # noqa: E402
 import destinations  # noqa: E402
+import host  # noqa: E402
 import telling  # noqa: E402
 
 # Command-line tools that post prose to people. Extend freely: an entry here only ever becomes a
@@ -45,28 +46,25 @@ OUTBOUND_CLIS = {
 
 
 def mcp_servers():
-    """From ~/.claude.json, at the root and per project, plus any installed plugin that ships one."""
-    names = set()
-    path = os.path.join(os.path.expanduser("~"), ".claude.json")
+    """Every MCP server this machine has configured, from the user's own file and from plugins.
+
+    Plugins were read from `plugin.json` alone, which found none at all on a machine with 24 plugins
+    installed — seven of them declare their servers in a sibling `.mcp.json`. A source that finds
+    nothing and says nothing is worse than one that is absent, so host.py reads both and `missing()`
+    reports a source that could not be read at all.
+    """
+    names = set(host.declared_servers())
     try:
-        with open(path) as fh:
+        with open(host.user_config()) as fh:
             data = json.load(fh)
     except Exception:
+        data = {}
+    if not isinstance(data, dict):
         data = {}
     names |= set((data.get("mcpServers") or {}).keys())
     for project in (data.get("projects") or {}).values():
         if isinstance(project, dict):
             names |= set((project.get("mcpServers") or {}).keys())
-    for manifest in glob.glob(os.path.join(os.path.expanduser("~"), ".claude", "plugins",
-                                           "cache", "*", "*", "*", ".claude-plugin",
-                                           "plugin.json")):
-        try:
-            with open(manifest) as fh:
-                d = json.load(fh)
-            if d.get("mcpServers"):
-                names |= set(d["mcpServers"].keys())
-        except Exception:
-            continue
     return sorted(names)
 
 

@@ -15,6 +15,7 @@ two and says so.
 The rule is the cheapest part of this tool and the only part that acts while a message is being
 written rather than when it is sent. It also reaches subagents, which an output style does not.
 """
+import host
 import argparse
 import filecmp
 import os
@@ -23,7 +24,7 @@ import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 SOURCE = os.path.join(_HERE, "..", "rule", "engineer-communication.md")
-TARGET = os.path.join(os.path.expanduser("~"), ".claude", "rules",
+TARGET = os.path.join(host.rules_dir(),
                       "prose-guard-communication.md")
 
 

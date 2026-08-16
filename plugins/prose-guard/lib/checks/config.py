@@ -28,6 +28,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import host  # noqa: E402
 import paths  # noqa: E402
 import settings  # noqa: E402
 
@@ -42,7 +43,7 @@ def effort():
     for value in ((os.environ.get("PROSE_GUARD_EFFORT") or "").lower(),
                   # Set by Claude Code from the plugin's userConfig. Verified: it reaches a hook's
                   # environment, though not a skill's shell, which is why it cannot be the only path.
-                  (os.environ.get("CLAUDE_PLUGIN_OPTION_EFFORT") or "").lower(),
+                  (os.environ.get(host.EFFORT_VAR) or "").lower(),
                   _from_file()):
         if value in LEVELS:
             return value
@@ -60,7 +61,7 @@ def complaints():
     rule = settings.one_of(*LEVELS)
     out = []
     for name, value in (("PROSE_GUARD_EFFORT", os.environ.get("PROSE_GUARD_EFFORT")),
-                        ("the plugin's effort setting", os.environ.get("CLAUDE_PLUGIN_OPTION_EFFORT"))):
+                        ("the plugin's effort setting", os.environ.get(host.EFFORT_VAR))):
         if (value or "").strip():
             _, complaint = rule(value)
             if complaint:

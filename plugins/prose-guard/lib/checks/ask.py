@@ -9,7 +9,11 @@ import os
 import re
 import secrets
 import subprocess
+import sys
 import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import host  # noqa: E402
 
 MODEL = os.environ.get("CHECKER_MODEL", "claude-sonnet-5")
 EFFORT = os.environ.get("CHECKER_EFFORT", "medium")
@@ -121,7 +125,7 @@ def ask(name, prompt, text, ctx=None):
         # hooks executed on every checked message. This is one prompt with no tools: it needs neither.
         with tempfile.TemporaryDirectory() as elsewhere:
             r = subprocess.run(
-                ["claude", "-p", fenced(prompt, text, ctx),
+                [host.CLI, "-p", fenced(prompt, text, ctx),
                  "--model", MODEL, "--effort", EFFORT,
                  "--system-prompt", SYSTEM,
                  "--output-format", "json"],

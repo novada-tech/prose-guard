@@ -2635,6 +2635,47 @@ def test_a_bad_value_in_a_hand_written_file_is_reported_not_ignored():
         check("and told once", said[1], "")
 
 
+def test_what_this_plugin_expects_of_its_host_is_in_one_place():
+    """A layout somebody else owns can move under us, and when it does the failure is silent.
+
+    Discovery read MCP servers from `plugin.json` alone and found none at all on a machine with 24
+    plugins installed, seven of which declare theirs in a sibling `.mcp.json`. A glob matched nothing,
+    a list got shorter, and everything carried on looking fine. Six modules each held one of these
+    facts; the point of collecting them is that a change is one file, and that `missing()` can say
+    which source stopped working instead of quietly returning less.
+    """
+    import host
+
+    check("the effort variable is named once",
+          [p for p in (os.path.join(LIB, "checks", "config.py"),
+                       os.path.join(PLUGIN, "hooks", "scripts", "outgoing_guard.py"))
+           if "CLAUDE_PLUGIN_OPTION_EFFORT" in open(p).read()], [])
+    check("and so is the checker's binary",
+          [p for p in (os.path.join(LIB, "checks", "ask.py"), os.path.join(LIB, "checks", "model.py"))
+           if '"claude"' in open(p).read()], [])
+
+    with tempfile.TemporaryDirectory() as fake:
+        was = os.path.expanduser("~")
+        os.environ["HOME"] = fake
+        try:
+            check("a host with nothing in it says so rather than returning less",
+                  len(host.missing()) >= 1, True)
+            check("and names the directory it could not find", host.dot_dir() in host.missing()[0],
+                  True)
+            os.makedirs(os.path.join(fake, ".claude", "plugins", "cache", "a", "b", "c",
+                                     ".claude-plugin"))
+            manifest = os.path.join(fake, ".claude", "plugins", "cache", "a", "b", "c",
+                                    ".claude-plugin", "plugin.json")
+            with open(manifest, "w") as fh:
+                json.dump({"name": "x"}, fh)
+            with open(os.path.join(os.path.dirname(os.path.dirname(manifest)), ".mcp.json"), "w") as fh:
+                json.dump({"mcpServers": {"declared-beside-the-manifest": {}}}, fh)
+            check("a server declared beside the manifest is found",
+                  host.declared_servers(), ["declared-beside-the-manifest"])
+        finally:
+            os.environ["HOME"] = was
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 

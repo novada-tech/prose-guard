@@ -14,13 +14,12 @@ import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import host  # noqa: E402
 import telling  # noqa: E402
 
 from . import ask as _ask
 
-# The command `ask.py` invokes. Repeated here rather than imported because ask.py builds the name into
-# its argument list; one constant there would be the place for it.
-BINARY = "claude"
+BINARY = host.CLI
 
 
 def verdict(name, prompt_path, text, ctx):
