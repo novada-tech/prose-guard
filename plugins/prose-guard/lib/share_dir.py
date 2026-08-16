@@ -17,6 +17,8 @@ Paths keep their `$VARS` and `~` unexpanded in the file and are expanded when re
 works on machines that keep their checkouts in different places — which is why a team setup script can
 write it for everybody.
 """
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -26,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import paths  # noqa: E402
 
 
-def listed():
+def listed() -> list[str]:
     """The directories as they are written in config.json, `$VARS` and all.
 
     paths.shared() is the other half: it expands them and drops the ones that are not there, which is
@@ -37,7 +39,7 @@ def listed():
     return list(raw if isinstance(raw, list) else [raw])
 
 
-def main():
+def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--add", metavar="DIR")

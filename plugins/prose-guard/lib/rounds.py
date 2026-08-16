@@ -23,11 +23,14 @@ next to everything else this tool remembers — never in a repository, never any
 Bounded at MOST_KEPT arguments and LONGEST characters a draft, so a long session cannot fill a disk. Old
 files are removed as new ones arrive, and `forget` empties it now.
 """
+from __future__ import annotations
+
 import argparse
 import glob
 import json
 import os
 import time
+from typing import Any
 
 import paths
 
@@ -41,15 +44,15 @@ MOST_KEPT = 100
 LONGEST = 6000
 
 
-def _dir():
+def _dir() -> str:
     return paths.at("rounds")
 
 
-def _path(session):
+def _path(session: str) -> str:
     return os.path.join(_dir(), f"{session}.json")
 
 
-def _read(path):
+def _read(path: str) -> dict[str, Any]:
     try:
         with open(path) as fh:
             got = json.load(fh)
@@ -58,7 +61,7 @@ def _read(path):
         return {}
 
 
-def _write(path, data):
+def _write(path: str, data: dict[str, Any]) -> None:
     try:
         os.makedirs(_dir(), exist_ok=True)
         with open(path, "w") as fh:
@@ -67,12 +70,12 @@ def _write(path, data):
         pass                                 # remembering is a convenience, never a reason to fail
 
 
-def _clip(text):
+def _clip(text: Any) -> str:
     text = str(text or "")
     return text if len(text) <= LONGEST else text[:LONGEST] + "\n[...truncated]"
 
 
-def held(session, envelope, text, check, said):
+def held(session: str, envelope: dict[str, Any], text: str, check: str, said: str) -> None:
     """Record a draft that was refused, and why. The first call opens an argument.
 
     `envelope` is everything the checks were told before they read a word — see `envelope()` in the
@@ -88,7 +91,7 @@ def held(session, envelope, text, check, said):
     _write(path, data)
 
 
-def went_out(session, text, spent=None):
+def went_out(session: str, text: str, spent: int | None = None) -> int | None:
     """Close the open argument with the text that finally went out. No argument, nothing written."""
     path = _path(session)
     data = _read(path)
@@ -105,7 +108,7 @@ def went_out(session, text, spent=None):
     return len(argument["drafts"])
 
 
-def _prune():
+def _prune() -> None:
     """Keep the newest MOST_KEPT arguments across every session, and drop what falls out.
 
     Counted across sessions rather than within one, because a per-session cap is not a bound: a machine
@@ -128,9 +131,9 @@ def _prune():
         room -= len(data.get("arguments") or [])
 
 
-def everything():
+def everything() -> list[dict[str, Any]]:
     """Every closed argument on this machine, newest first."""
-    out = []
+    out: list[dict[str, Any]] = []
     for path in glob.glob(os.path.join(_dir(), "*.json")):
         data = _read(path)
         for argument in data.get("arguments") or []:
@@ -138,7 +141,7 @@ def everything():
     return sorted(out, key=lambda a: a.get("ended") or 0, reverse=True)
 
 
-def forget():
+def forget() -> int:
     gone = 0
     for path in glob.glob(os.path.join(_dir(), "*.json")):
         try:
@@ -149,11 +152,11 @@ def forget():
     return gone
 
 
-def _when(stamp):
+def _when(stamp: float | None) -> str:
     return time.strftime("%d %b %H:%M", time.localtime(stamp)) if stamp else "?"
 
 
-def _differs(before, after):
+def _differs(before: str, after: str) -> str:
     """The first line that is not in both, which is nearly always the one somebody was asked to fix."""
     old = set(before.split("\n"))
     for line in after.split("\n"):
@@ -162,7 +165,7 @@ def _differs(before, after):
     return ""
 
 
-def _envelope_lines(argument):
+def _envelope_lines(argument: dict[str, Any]) -> list[tuple[str, Any]]:
     """The envelope as label/value pairs, in the order somebody debugging reads them."""
     out = [("effort", argument.get("level", "?"))]
     if argument.get("asked_for") and argument["asked_for"] != argument.get("level"):
@@ -180,7 +183,7 @@ def _envelope_lines(argument):
     return out
 
 
-def _cli():
+def _cli() -> None:
     ap = argparse.ArgumentParser(
         description="Read back an argument the guard had with an agent: every draft it held, what it "
                     "said, and what finally went out. Only messages that were actually held back are "

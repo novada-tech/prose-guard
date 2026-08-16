@@ -26,6 +26,8 @@ which no other process can read. `--header "Authorization: Bearer $TOKEN"` was e
 before this process started, so the token was in this process's argv, and `ps` shows argv to anything
 running as the same user. `--header` is still there for headers that are not secret.
 """
+from __future__ import annotations
+
 import argparse
 import http.client
 import json
@@ -36,11 +38,12 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import Any, Callable
 
 TRANSIENT = {408, 425, 429, 500, 502, 503, 504}
 
 
-def dig(obj, path):
+def dig(obj: Any, path: str | None) -> Any:
     """A dotted path into nested JSON. Returns None rather than raising: a missing field is a fact to
     report with the rest of the response, not a traceback."""
     if not path:
@@ -53,7 +56,7 @@ def dig(obj, path):
     return obj
 
 
-def headers_for(literal, from_env):
+def headers_for(literal: list[str], from_env: list[str]) -> dict[str, str]:
     """The request headers, from arguments and from the environment.
 
     Two ways in because they are not equivalent. A header read from the environment never appears in
@@ -79,7 +82,7 @@ def headers_for(literal, from_env):
     return out
 
 
-def with_cursor(url, param, cursor):
+def with_cursor(url: str, param: str, cursor: str | None) -> str:
     if not cursor:
         return url
     parts = urllib.parse.urlsplit(url)
@@ -88,7 +91,8 @@ def with_cursor(url, param, cursor):
     return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query)))
 
 
-def get(url, headers, retries, base, note):
+def get(url: str, headers: dict[str, str], retries: int, base: float,
+        note: Callable[[str], None]) -> Any:
     """One request, retried while the failure looks temporary.
 
     A 429 is not a failure, it is an instruction. Where the service says how long to wait, wait that
@@ -121,7 +125,7 @@ def get(url, headers, retries, base, note):
     raise SystemExit("fetch: unreachable")
 
 
-def main():
+def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--url", required=True, help="first page, query string and all")
@@ -154,7 +158,7 @@ def main():
 
     headers = headers_for(a.header, a.header_env)
 
-    def note(line):
+    def note(line: str) -> None:
         if not a.quiet:
             print(line, file=sys.stderr, flush=True)
 

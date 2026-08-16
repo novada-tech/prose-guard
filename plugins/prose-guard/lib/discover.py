@@ -16,11 +16,14 @@ but only if a person sees the list, which is why this prints rather than writes.
     unclaimed  tools that already carried long prose past the hook without any destination
                claiming them. The best evidence of all, because it happened.
 """
+from __future__ import annotations
+
 import glob
 import json
 import os
 import re
 import sys
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import command  # noqa: E402
@@ -45,7 +48,7 @@ OUTBOUND_CLIS = {
 }
 
 
-def mcp_servers():
+def mcp_servers() -> list[str]:
     """Every MCP server this machine has configured, from the user's own file and from plugins.
 
     Plugins were read from `plugin.json` alone, which found none at all on a machine with 24 plugins
@@ -68,19 +71,19 @@ def mcp_servers():
     return sorted(names)
 
 
-def clis_on_path():
+def clis_on_path() -> list[str]:
     import shutil
     return sorted(name for name in OUTBOUND_CLIS if shutil.which(name))
 
 
-def from_history(limit=40000):
+def from_history(limit: int = 40000) -> tuple[dict[str, int], dict[str, int]]:
     """Which outbound tools you actually use. Command names only — never arguments.
 
     Arguments are the content of your messages, and this file is read to make a suggestion, not to
     build a corpus. Counting `git commit` without reading what was committed is the whole point.
     """
-    counts = {}
-    subcommands = {}
+    counts: dict[str, int] = {}
+    subcommands: dict[str, int] = {}
     for name in ("~/.zsh_history", "~/.bash_history", "~/.local/share/fish/fish_history"):
         path = os.path.expanduser(name)
         if not os.path.isfile(path):
@@ -105,9 +108,9 @@ def from_history(limit=40000):
     return counts, subcommands
 
 
-def unclaimed():
+def unclaimed() -> dict[str, dict[str, Any]]:
     """Shapes seen carrying prose that no destination claims, with what has been decided about each."""
-    out = {}
+    out: dict[str, dict[str, Any]] = {}
     for key, entry in telling.everything().items():
         if not key.startswith("unclaimed: "):
             continue
@@ -117,7 +120,7 @@ def unclaimed():
     return out
 
 
-def covered():
+def covered() -> list[dict[str, Any]]:
     """Which shipped or configured destinations already exist, so setup does not re-suggest them."""
     out = []
     for dest in destinations.DESTINATIONS:
@@ -126,7 +129,7 @@ def covered():
     return out
 
 
-def share(directory):
+def share(directory: str) -> str:
     """Kept as the name /prose-guard:setup uses. destinations.py owns the implementation."""
     return destinations.share(directory)
 
@@ -150,7 +153,7 @@ NOT_OUTGOING = ("old_string", "prompt", "pattern", "command", "query", "regex", 
 # was never checked and, with the exclusion in place, was never mentioned either.
 
 
-def _reads_like_prose(text):
+def _reads_like_prose(text: str) -> bool:
     """Long text that is prose rather than a pattern, a script or a payload.
 
     Passive discovery has one mention per shape and had been spending it on `git grep -E`, on the text
@@ -173,7 +176,7 @@ OWN_COMMANDS = ("check_prose.py", "learn.py", "audiences.py", "discover.py", "in
                 "measure_thresholds.py", "measure_destinations.py")
 
 
-def _shape(tool, tool_input):
+def _shape(tool: str, tool_input: dict[str, Any]) -> str | None:
     """The SHAPE of a call carrying outgoing prose, never the text.
 
     For an MCP tool that is the tool name and the field. For Bash it is the binary, its subcommand and
@@ -206,7 +209,7 @@ def _shape(tool, tool_input):
     return None
 
 
-def decline(shape):
+def decline(shape: str) -> str:
     """Never mention or count this shape again.
 
     This is what makes passive discovery safe to have at all. Without it, declining a suggestion and
@@ -227,7 +230,7 @@ NO_ADDRESSEE = ("git commit", "git tag", "git notes", "changelog", "release_note
                 "release-note")
 
 
-def suggest_caps(shape):
+def suggest_caps(shape: str) -> dict[str, tuple[str, str]]:
     """What a new destination probably deserves, and why, in words a person can agree or disagree with.
 
     Discovery used to be a yes-or-no question, so everything it added ran at full effort and blocked.
@@ -236,7 +239,7 @@ def suggest_caps(shape):
     name is weak evidence about both — enough to open with a proposal rather than a blank question.
     """
     lowered = shape.lower()
-    out = {}
+    out: dict[str, tuple[str, str]] = {}
     if any(word in lowered for word in REVIEWED_FIRST):
         out["max_severity"] = ("advise", "the name says draft, so you would read it before it went "
                                          "anywhere — blocking would argue about text you were about "
@@ -248,7 +251,7 @@ def suggest_caps(shape):
     return out
 
 
-def record_candidate(tool, tool_input):
+def record_candidate(tool: str, tool_input: dict[str, Any]) -> str | None:
     """Count a call nothing claimed, and return a one-line note if now is the moment to say so.
 
     Returns None almost always: at most one note per shape for the lifetime of the config.
@@ -269,7 +272,7 @@ def record_candidate(tool, tool_input):
             + f". This is the only time it will be mentioned.")
 
 
-def main():
+def main() -> None:
     import argparse
     ap = argparse.ArgumentParser(description="What here could be sending prose to a person.")
     ap.add_argument("--decline", metavar="SHAPE",

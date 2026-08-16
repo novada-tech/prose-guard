@@ -21,11 +21,14 @@ tool guessing. Without `--for`, nothing is measured about the reader and terms a
 terms are known, because a sentence is not a vocabulary. Use both together when no measured audience
 fits: `--for engineers` for the terms, `--who` for everything else.
 """
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
 import os
 import sys
+from typing import TYPE_CHECKING
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audiences  # noqa: E402
@@ -33,6 +36,9 @@ import paths  # noqa: E402
 import telling  # noqa: E402
 from checks import (BLOCK, Context, ceiling_for, config, costs_a_call,  # noqa: E402
                     for_effort, pooled)
+
+if TYPE_CHECKING:
+    from audiences import Resolved
 
 
 # What a deliberate run may cost is decided by `ceiling_for` and by how much is wrong, and there is no
@@ -50,7 +56,7 @@ from checks import (BLOCK, Context, ceiling_for, config, costs_a_call,  # noqa: 
 # anything is spent.
 
 
-def context_for(audience, who=None):
+def context_for(audience: Resolved, who: str | None = None) -> Context:
     situation = {"destination": "a draft being checked before it is sent anywhere"}
     if who:
         situation["who the author says reads this"] = who
@@ -70,7 +76,7 @@ def context_for(audience, who=None):
 # written — see docs/design-notes.md, "When is a text finished: no honest answer yet".
 
 
-def history(path):
+def history(path: str | None) -> tuple[list[int], str | None]:
     """Confirmed counts from earlier passes over this same file, oldest first."""
     if not path:
         return [], None
@@ -82,7 +88,7 @@ def history(path):
         return [], where
 
 
-def verdict(path, problems, passes=1):
+def verdict(path: str | None, problems: int, passes: int = 1) -> str:
     """What the count means, and whether to keep going.
 
     The count of confirmed findings is the only signal available, and it is a relative one: it orders a
@@ -124,7 +130,7 @@ def verdict(path, problems, passes=1):
             "change you have decided not to make. Stopping here is a defensible answer.")
 
 
-def main():
+def main() -> int:
     ap = argparse.ArgumentParser(
         description="Check a draft the way the guard checks a message, and say what it would "
                     "say. Spends real model calls above `low` — up to 40 for one run — and "

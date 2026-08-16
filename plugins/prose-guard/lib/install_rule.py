@@ -15,6 +15,8 @@ two and says so.
 The rule is the cheapest part of this tool and the only part that acts while a message is being
 written rather than when it is sent. It also reaches subagents, which an output style does not.
 """
+from __future__ import annotations
+
 import host
 import argparse
 import filecmp
@@ -28,7 +30,7 @@ TARGET = os.path.join(host.rules_dir(),
                       "prose-guard-communication.md")
 
 
-def _rival():
+def _rival() -> str | None:
     """Another rule already loading that says much the same thing.
 
     Installing a second copy is worse than installing none: both load every turn, and longer
@@ -56,7 +58,7 @@ def _rival():
     return None
 
 
-def status():
+def status() -> tuple[str, str]:
     if not os.path.isfile(SOURCE):
         return "missing", f"the plugin's copy is not where it should be: {SOURCE}"
     rival = _rival()
@@ -77,7 +79,7 @@ def status():
                      f"  diff {TARGET} {SOURCE}")
 
 
-def main():
+def main() -> int:
     ap = argparse.ArgumentParser(
         description="Install, remove or compare the writing rule this plugin ships. The rule is a "
                     "copy rather than a link, because a plugin cannot ship one — so an upgrade does "

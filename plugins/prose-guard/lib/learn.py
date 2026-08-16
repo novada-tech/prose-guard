@@ -16,6 +16,8 @@ author. So every source carries an author, and text with no author counts as one
 
 Nothing leaves your machine. `--gh` shells out to the `gh` CLI you are already logged into.
 """
+from __future__ import annotations
+
 import argparse
 import collections
 import json
@@ -24,11 +26,16 @@ import re
 import subprocess
 import sys
 import time
+from typing import Any, Callable, Iterable, Iterator, NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audiences  # noqa: E402
 import jargon  # noqa: E402
 import paths  # noqa: E402
+
+# One document from any source: who wrote it, what they wrote, and when if the source says. Every
+# `from_*` below yields these, so `tally` can read them all the same way.
+Row = tuple[str, str, Any]
 
 BOT = re.compile(r"(\[bot\]|-bot$|dependabot|renovate|github-actions)", re.I)
 # A credential written into a command rather than passed through a variable. Redacted before a command
@@ -37,7 +44,7 @@ BOT = re.compile(r"(\[bot\]|-bot$|dependabot|renovate|github-actions)", re.I)
 SECRET = re.compile(r"(?i)(bearer|token|key|secret|password)\s*[:= ]\s*\S+")
 
 
-def short(cmd):
+def short(cmd: str) -> str:
     """A command, cut to one line and with any inline credential taken out.
 
     Redacted before it is cut, not after: cutting first left the first characters of a token in the
@@ -47,7 +54,7 @@ def short(cmd):
     return cmd if len(cmd) <= 60 else cmd[:57] + "..."
 
 
-def _row(line):
+def _row(line: str) -> Row | None:
     """One {"author": ..., "text": ...} line as (author, text, ts), or None if it is not usable.
 
     One parser, because a source read from a file and the same source piped through a command are the
@@ -63,7 +70,7 @@ def _row(line):
     return who, str(row.get("text") or ""), row.get("ts")
 
 
-def under_home(path):
+def under_home(path: str) -> str:
     """Where a file the scan writes goes. A relative path lands in the config home, not here.
 
     Both files a scan writes carry every measured person's name — `--out` the member list, `--keep` the
@@ -74,7 +81,7 @@ def under_home(path):
     return path if os.path.isabs(path) else paths.at(path)
 
 
-def from_git(repo="."):
+def from_git(repo: str = ".") -> Iterator[Row]:
     """Commit messages with their authors. Free, local, in every repository — but thin: few people
     put acronyms in a commit subject, so this alone under-measures."""
     try:
@@ -90,10 +97,10 @@ def from_git(repo="."):
                 yield author.strip(), body, None
 
 
-def from_gh(slug, limit=400):
+def from_gh(slug: str, limit: int = 400) -> Iterator[Row]:
     """Issues, pull requests and their comments. The richest source: a review comment is written to
     a colleague, so it uses exactly the vocabulary they share."""
-    def run(args):
+    def run(args: list[str]) -> Any:
         try:
             return json.loads(subprocess.run(args, capture_output=True, text=True,
                                              timeout=1800).stdout or "[]")
@@ -112,7 +119,7 @@ def from_gh(slug, limit=400):
                     yield cw, c.get("body") or "", None
 
 
-def from_command(commands):
+def from_command(commands: list[str]) -> Iterator[Row]:
     """Anything that can emit `{"author": ..., "text": ...}` lines on stdout.
 
     This exists because `--gh` shells out to the `gh` CLI, so repository text travels disk to disk
@@ -163,7 +170,7 @@ def from_command(commands):
             print(f"  note: `{short(cmd)}` gave {used} usable of {printed} line(s)", file=sys.stderr)
 
 
-def from_jsonl(files):
+def from_jsonl(files: list[str]) -> Iterator[Row]:
     """Anything you can export as {"author": ..., "text": ...} per line — chat history, a wiki."""
     for path in files:
         try:
@@ -173,7 +180,7 @@ def from_jsonl(files):
             continue
 
 
-def from_text(files):
+def from_text(files: list[str]) -> Iterator[Row]:
     """Plain prose with no author available, so it counts as one voice — which stops it reaching the
     shared-knowledge threshold on its own."""
     for path in files:
@@ -191,7 +198,7 @@ def from_text(files):
 NOT_WORDS = ("/", ">", "<", "http", "@", "#", "|", "`", "*", "=", "{", "}", "[", "]")
 
 
-def _expansion(short, long):
+def _expansion(short: str, long: str) -> str:
     """The written-out form, normalised, or "" if this pair is not an expansion at all."""
     if not jargon.ACRONYM.fullmatch(short) or not jargon.is_acronym(short):
         return ""
@@ -214,7 +221,7 @@ def _expansion(short, long):
 SKIPPED = ("of", "and", "the", "for", "in", "on", "a", "an", "to", "at", "by", "with")
 
 
-def _initials_match(short, words):
+def _initials_match(short: str, words: list[str]) -> bool:
     """Whether the acronym's letters are the initials of these words, in order.
 
     Without this, any parenthesis after a couple of words became an expansion: the real corpus gave
@@ -228,7 +235,20 @@ def _initials_match(short, words):
     return all(a == b for a, b in zip(letters, initials))
 
 
-def tally(sources, cut=None, limit=None, keep=None, report=None, every=3.0):
+class Tallied(NamedTuple):
+    """What one pass over a corpus counted. Six values, so they are named rather than positional."""
+
+    authors: dict[str, set[str]]          # TERM -> the distinct people who wrote it
+    uses: collections.Counter[str]        # TERM -> how often, which decides nothing and reads well
+    docs: int
+    people: set[str]
+    newest: Any                           # the largest `ts` any source carried, or None
+    expansions: dict[str, dict[str, set[str]]]   # TERM -> written-out form -> who wrote it that way
+
+
+def tally(sources: Iterable[Row], cut: int | None = None, limit: int | None = None,
+          keep: str | None = None, report: Callable[[str], None] | None = None,
+          every: float = 3.0) -> Tallied:
     """Count as the documents arrive, saying so as it goes.
 
     `limit` stops the read deliberately. That is safe in one direction and not the other: a term needs
@@ -285,11 +305,11 @@ def tally(sources, cut=None, limit=None, keep=None, report=None, every=3.0):
     finally:
         if handle:
             handle.close()
-    return authors, uses, docs, people, newest, expansions
+    return Tallied(authors, uses, docs, people, newest, expansions)
 
 
-def cmd_scan(a):
-    streams = []
+def cmd_scan(a: argparse.Namespace) -> None:
+    streams: list[Iterator[Row]] = []
     for repo in (a.git or []):
         streams.append(from_git(repo or "."))
     for slug in (a.gh or []):
@@ -303,7 +323,7 @@ def cmd_scan(a):
     if not streams:
         raise SystemExit("give at least one of --git, --gh, --jsonl, --text or --command")
 
-    def chained():
+    def chained() -> Iterator[Row]:
         for s in streams:
             yield from s
 
@@ -378,7 +398,7 @@ def cmd_scan(a):
           "that")
 
 
-def _losses(name, fresh):
+def _losses(name: str, fresh: dict[str, Any]) -> tuple[list[str], list[str]]:
     """What a rebuild would take away from an audience that already exists.
 
     Rebuilding is a normal thing to do — a wider corpus, a second source — and overwriting was silent.
@@ -394,7 +414,8 @@ def _losses(name, fresh):
     if old is None:
         return [], []
     was = audiences._read(old.path) or {}
-    routing, other = [], []
+    routing: list[str] = []
+    other: list[str] = []
 
     for key, before in (was.get("matches") or {}).items():
         gone = [v for v in before if v not in (fresh["matches"].get(key) or [])]
@@ -418,7 +439,7 @@ def _losses(name, fresh):
     return routing, other
 
 
-def _folded(expansions):
+def _folded(expansions: dict[str, dict[str, set[str]]]) -> dict[str, dict[str, int]]:
     """One entry per meaning, case-folded, with the people who wrote each pooled."""
     out = {}
     for term, seen in sorted(expansions.items()):
@@ -432,7 +453,7 @@ def _folded(expansions):
     return out
 
 
-def cmd_create(a):
+def cmd_create(a: argparse.Namespace) -> None:
     if not audiences.usable_name(a.name):
         raise SystemExit(f"{a.name!r} cannot be an audience name: it becomes a filename, so it starts "
                          f"with a letter or digit and holds only letters, digits, dot, dash and "
@@ -496,7 +517,7 @@ def cmd_create(a):
     print("Unexplained terms for this audience will now be held back rather than guessed at.")
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
