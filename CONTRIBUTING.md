@@ -83,6 +83,18 @@ Where it stands today, at `claude-sonnet-5` and medium effort, 13 positives and 
 | sentence | 5/6 | 10/10 | 12% |
 | reference | 5/6 | 9/10 | 25% |
 | address | 7/8 | 10/10 | 11% |
+| promise | 2/4 | 11/14 | 11% |
+
+`promise` is measured against the six long negatives in
+[`measure/fixtures/well-built-long/`](measure/fixtures/well-built-long/), not the short ones — a check
+that reads a whole document cannot be measured on an 80-word message. It **advises rather than blocks**,
+which its filename says: `phases/6-promise.advise.md`. The reason is in the row. The blocking phases
+pass 9 or 10 of 10; this passes 11 of 14, and both remaining false alarms are commit messages whose
+subject line does two things, which it reads as two promises.
+
+Closing that gap by editing the prompt against six fixtures from one author would fit the fixtures
+rather than the bar. What would settle it is a wider corpus — the fixture directory's README says which
+kinds are missing. Drop the `.advise` from the filename when it reaches the blocking standard.
 
 **These figures move between runs on unchanged prompts.** Three consecutive runs of `address` alone gave
 5/5, 5/5 and 4/5 on the negatives. So a one-cell difference is not a result, and a change worth claiming
@@ -155,6 +167,13 @@ Numbers with the command that produced them, so a reviewer can re-run it. That i
 - **No new dependencies.** Standard library only, on purpose: it means the tool needs `python3` and
   nothing else, which is most of why it is easy to adopt. If you genuinely need a package, open an issue
   first and argue for it.
+- **Annotate what you write, and put `from __future__ import annotations` at the top of the file.**
+  That is what makes `list[str]` and `X | None` safe here: with it, no annotation is ever evaluated, so
+  the floor stays at whatever `python3` the machine already has. Without it, `X | None` raises before
+  3.10 — and the interpreter this was checked against, `/usr/bin/python3` on macOS, is 3.9.6. An
+  annotation that needs a type from another module can pull in an import the module deliberately does
+  not have; put that import under `if TYPE_CHECKING:` and say in a comment what the runtime import
+  would have cost.
 - **Comments say why, not what.** The code says what. Where a decision cost something to learn, the
   comment is where that goes — several in here exist because a plausible alternative turned out to be
   wrong, and the next person deserves to know which.

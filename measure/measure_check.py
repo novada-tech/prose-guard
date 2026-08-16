@@ -22,26 +22,61 @@ threshold you pick on top of it will help.
 Add your own positives to POSITIVES below when you add a check. Three is enough to catch a check that
 never fires; it is not enough to claim a rate.
 """
+from __future__ import annotations
+
 import argparse
 import concurrent.futures as cf
 import glob
 import os
 import statistics as st
 import sys
+from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB = os.path.abspath(os.path.join(HERE, "..", "plugins", "prose-guard", "lib"))
 sys.path.insert(0, LIB)
 
 import audiences  # noqa: E402
+from audiences import Resolved  # noqa: E402
 from checks import ask as _ask  # noqa: E402
-from checks import for_effort  # noqa: E402
+from checks import Check, Context, for_effort  # noqa: E402
 
 PAD = (" This has been in place since the start of the month and nobody has reported anything else "
        "unusual on the affected hosts.")
 
 # Written to carry one specific defect. Keyed by check name.
+# A promise defect needs length: below 150 words the check answers PASS by design, because there is no
+# opening segment separate from a body. So these are built by taking a real message and moving its
+# point, which is the failure Williams describes — the issue promises one thing, the discussion
+# delivers another.
+_BURIED = (
+    "The cache directory moved to ~/.local/state/ourtool and the old path is read for one more "
+    "release. Nothing else in the loader changed, and the migration runs on first start.\n\n"
+    "The loader now resolves the directory once at import rather than per call, which took the "
+    "cold-start path from 210ms to 24ms. The per-call resolution had been there since the first "
+    "version and nobody had measured it.\n\n"
+    "Three call sites that built the path by hand were changed to ask the loader for it. Two were "
+    "in tests and one was in the CLI's --where flag.\n\n"
+    "The reason all of this matters is that the old path was inside the package directory, so every "
+    "upgrade wiped everybody's cache and the first run after an upgrade took four minutes. That is "
+    "what this fixes, and it is why it should go out before Friday's release rather than after it.")
+_UNDELIVERED = (
+    "This changes how retries are counted, how the backoff is calculated, and what the dashboard "
+    "shows for a partially failed batch. Each of those had a different owner and they disagreed, so "
+    "the numbers on the dashboard never matched what the queue actually did.\n\n"
+    "Retries are now counted per batch rather than per row. A batch that fails twice and then "
+    "succeeds records two retries, where it used to record one per failing row — sometimes "
+    "thousands.\n\n"
+    "That is the whole change. The counter is in queue/metrics.py and the test that pins it is in "
+    "tests/test_metrics.py, which now asserts on a batch of 500 rows failing twice.\n\n"
+    "It went out on Tuesday and the dashboard has been correct since. Nothing else was touched, and "
+    "the backoff calculation is unchanged from what it always was.")
+
 POSITIVES = {
+    "promise": [
+        ("the point arrives last", _BURIED),
+        ("the opening promises three things and delivers one", _UNDELIVERED),
+    ],
     "terms": [
         ("bare acronym", "The SFTR path now runs through the new cluster." + PAD),
     ],
@@ -116,15 +151,15 @@ POSITIVES = {
 DEFAULT_NEGATIVES = os.path.join(HERE, "fixtures", "well-built", "*.md")
 
 
-class Ctx:
-    def __init__(self, audience, who=None):
-        self.audience = audience
-        self.situation = {"destination": "a draft being measured, not sent"}
-        if who:
-            self.situation["who reads this"] = who
+def Ctx(audience: Resolved, who: str | None = None) -> Context:
+    """The shipped Context, so a harness cannot measure a shape nothing runs."""
+    situation = {"destination": "a draft being measured, not sent"}
+    if who:
+        situation["who reads this"] = who
+    return Context(audience, situation)
 
 
-def cell(job):
+def cell(job: tuple[Check, str, str, str, Context, int]) -> dict[str, Any]:
     check, kind, tag, text, ctx, rep = job
     finding = check.run(text, ctx)
     return {"check": check.NAME, "kind": kind, "tag": tag, "rep": rep,
@@ -132,7 +167,7 @@ def cell(job):
             "why": (finding.message[:140] if finding else "")}
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="append", help="check name; repeatable, default all of them")
     ap.add_argument("--negatives", default=DEFAULT_NEGATIVES,

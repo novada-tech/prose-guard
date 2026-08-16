@@ -15,6 +15,9 @@ two and says so.
 The rule is the cheapest part of this tool and the only part that acts while a message is being
 written rather than when it is sent. It also reaches subagents, which an output style does not.
 """
+from __future__ import annotations
+
+import host
 import argparse
 import filecmp
 import os
@@ -23,11 +26,11 @@ import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 SOURCE = os.path.join(_HERE, "..", "rule", "engineer-communication.md")
-TARGET = os.path.join(os.path.expanduser("~"), ".claude", "rules",
+TARGET = os.path.join(host.rules_dir(),
                       "prose-guard-communication.md")
 
 
-def _rival():
+def _rival() -> str | None:
     """Another rule already loading that says much the same thing.
 
     Installing a second copy is worse than installing none: both load every turn, and longer
@@ -55,7 +58,7 @@ def _rival():
     return None
 
 
-def status():
+def status() -> tuple[str, str]:
     if not os.path.isfile(SOURCE):
         return "missing", f"the plugin's copy is not where it should be: {SOURCE}"
     rival = _rival()
@@ -76,10 +79,17 @@ def status():
                      f"  diff {TARGET} {SOURCE}")
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--install", action="store_true")
-    ap.add_argument("--remove", action="store_true")
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        description="Install, remove or compare the writing rule this plugin ships. The rule is a "
+                    "copy rather than a link, because a plugin cannot ship one — so an upgrade does "
+                    "not refresh it, and --status is how you find out.")
+    ap.add_argument("--status", action="store_true",
+                    help="what is installed and whether it still matches the plugin's copy "
+                         "(the default when no other flag is given)")
+    ap.add_argument("--install", action="store_true",
+                    help="copy the rule into your rules directory, where every session loads it")
+    ap.add_argument("--remove", action="store_true", help="delete the installed copy")
     ap.add_argument("--force", action="store_true", help="overwrite a file you changed")
     a = ap.parse_args()
     state, message = status()

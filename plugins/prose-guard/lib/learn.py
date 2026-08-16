@@ -16,6 +16,8 @@ author. So every source carries an author, and text with no author counts as one
 
 Nothing leaves your machine. `--gh` shells out to the `gh` CLI you are already logged into.
 """
+from __future__ import annotations
+
 import argparse
 import collections
 import json
@@ -24,19 +26,63 @@ import re
 import subprocess
 import sys
 import time
+from typing import Any, Callable, Iterable, Iterator, NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audiences  # noqa: E402
 import jargon  # noqa: E402
+import paths
+import settings  # noqa: E402
+
+# One document from any source: who wrote it, what they wrote, and when if the source says. Every
+# `from_*` below yields these, so `tally` can read them all the same way.
+Row = tuple[str, str, Any]
 
 BOT = re.compile(r"(\[bot\]|-bot$|dependabot|renovate|github-actions)", re.I)
+# A credential written into a command rather than passed through a variable. Redacted before a command
+# is printed, because the warning naming a failing command is how someone finds out their credential
+# was refused — and stderr here is an agent's transcript.
+SECRET = re.compile(r"(?i)(bearer|token|key|secret|password)\s*[:= ]\s*\S+")
 
 
-def short(cmd):
+def short(cmd: str) -> str:
+    """A command, cut to one line and with any inline credential taken out.
+
+    Redacted before it is cut, not after: cutting first left the first characters of a token in the
+    message, which is enough to identify it and not enough to be useful.
+    """
+    cmd = SECRET.sub(lambda m: f"{m.group(1)} <redacted>", cmd)
     return cmd if len(cmd) <= 60 else cmd[:57] + "..."
 
 
-def from_git(repo="."):
+def _row(line: str) -> Row | None:
+    """One {"author": ..., "text": ...} line as (author, text, ts), or None if it is not usable.
+
+    One parser, because a source read from a file and the same source piped through a command are the
+    same lines and must be filtered the same way — bots dropped by name, an authorless line dropped.
+    """
+    try:
+        row = json.loads(line.strip() or "{}")
+    except ValueError:
+        return None
+    who = str(row.get("author") or "").strip()
+    if not who or BOT.search(who):
+        return None
+    return who, str(row.get("text") or ""), row.get("ts")
+
+
+def under_home(path: str) -> str:
+    """Where a file the scan writes goes. A relative path lands in the config home, not here.
+
+    Both files a scan writes carry every measured person's name — `--out` the member list, `--keep` the
+    messages themselves. `candidates.json` relative to the working directory put them in whichever
+    repository the scan was run from, which is where an agent runs things, and one `git add -A` away
+    from being published. An absolute path is taken as meant.
+    """
+    return path if os.path.isabs(path) else paths.at(path)
+
+
+def from_git(repo: str = ".") -> Iterator[Row]:
     """Commit messages with their authors. Free, local, in every repository — but thin: few people
     put acronyms in a commit subject, so this alone under-measures."""
     try:
@@ -52,10 +98,10 @@ def from_git(repo="."):
                 yield author.strip(), body, None
 
 
-def from_gh(slug, limit=400):
+def from_gh(slug: str, limit: int = 400) -> Iterator[Row]:
     """Issues, pull requests and their comments. The richest source: a review comment is written to
     a colleague, so it uses exactly the vocabulary they share."""
-    def run(args):
+    def run(args: list[str]) -> Any:
         try:
             return json.loads(subprocess.run(args, capture_output=True, text=True,
                                              timeout=1800).stdout or "[]")
@@ -74,7 +120,7 @@ def from_gh(slug, limit=400):
                     yield cw, c.get("body") or "", None
 
 
-def from_command(commands):
+def from_command(commands: list[str]) -> Iterator[Row]:
     """Anything that can emit `{"author": ..., "text": ...}` lines on stdout.
 
     This exists because `--gh` shells out to the `gh` CLI, so repository text travels disk to disk
@@ -100,18 +146,13 @@ def from_command(commands):
         # takes tens of minutes, and nothing could be reported — no count, no rate, no way to stop —
         # until it had finished. Someone asked how long theirs would take and there was no answer.
         for line in proc.stdout:
-            line = line.strip()
-            if not line:
+            if not line.strip():
                 continue
             printed += 1
-            try:
-                row = json.loads(line)
-            except ValueError:
-                continue
-            who = str(row.get("author") or "").strip()
-            if who and not BOT.search(who):
+            row = _row(line)
+            if row:
                 used += 1
-                yield who, str(row.get("text") or ""), row.get("ts")
+                yield row
         proc.stdout.close()
         code = proc.wait()
         err = (proc.stderr.read() or "").strip()
@@ -128,42 +169,22 @@ def from_command(commands):
                   file=sys.stderr)
         elif used < printed:
             print(f"  note: `{short(cmd)}` gave {used} usable of {printed} line(s)", file=sys.stderr)
-        # A source that authenticates and then has no data access exits 0 and prints an error object,
-        # which looks from here exactly like a channel with nothing in it. Saying what arrived is the
-        # difference between finding that out now and measuring an empty corpus.
-        if used == 0:
-            detail = (f"printed {printed} line(s), none of them "
-                      f"{{\"author\": ..., \"text\": ...}}" if printed else "printed nothing")
-            print(f"  warning: `{cmd[:60]}` {detail}. A rejected credential looks like this.",
-                  file=sys.stderr)
-        elif used < printed:
-            print(f"  note: `{cmd[:60]}` gave {used} usable of {printed} line(s)", file=sys.stderr)
 
 
-def from_jsonl(paths):
+def from_jsonl(files: list[str]) -> Iterator[Row]:
     """Anything you can export as {"author": ..., "text": ...} per line — chat history, a wiki."""
-    for path in paths:
+    for path in files:
         try:
             with open(path, errors="replace") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        row = json.loads(line)
-                    except ValueError:
-                        continue
-                    who = str(row.get("author") or "").strip()
-                    if who and not BOT.search(who):
-                        yield who, str(row.get("text") or ""), row.get("ts")
+                yield from filter(None, (_row(line) for line in fh))
         except OSError:
             continue
 
 
-def from_text(paths):
+def from_text(files: list[str]) -> Iterator[Row]:
     """Plain prose with no author available, so it counts as one voice — which stops it reaching the
     shared-knowledge threshold on its own."""
-    for path in paths:
+    for path in files:
         try:
             with open(path, errors="replace") as fh:
                 yield f"file:{os.path.basename(path)}", fh.read(), None
@@ -171,7 +192,64 @@ def from_text(paths):
             continue
 
 
-def tally(sources, cut=None, limit=None, keep=None, report=None, every=3.0):
+# What a written-out form has to look like to be recorded. Run against the real corpus, the loose version
+# produced `PREVIEW]` with nineteen netlify URLs, `E.G.` with three sentence fragments, and `CDM ->
+# cdm/pull/653>` — markdown links, code and abbreviations rather than expansions. An ambiguity check fed
+# that would fire on noise for ever.
+NOT_WORDS = ("/", ">", "<", "http", "@", "#", "|", "`", "*", "=", "{", "}", "[", "]")
+
+
+def _expansion(short: str, long: str) -> str:
+    """The written-out form, normalised, or "" if this pair is not an expansion at all."""
+    if not jargon.ACRONYM.fullmatch(short) or not jargon.is_acronym(short):
+        return ""
+    spelt = " ".join(long.split())
+    if any(bad in spelt for bad in NOT_WORDS):
+        return ""
+    words = spelt.split()
+    if not 1 < len(words) <= 8:
+        return ""                             # one word is rarely an expansion; eight is a sentence
+    if not all(w.strip("-'").replace("-", "").isalpha() for w in words):
+        return ""
+    if not _initials_match(short, words):
+        return ""
+    # Case-folded, so "CodeFresh Container Registry" and "Codefresh container registry" are one meaning
+    # rather than two. The first spelling seen is the one shown.
+    return spelt
+
+
+# Words an expansion skips over: "Hong Kong University of Science and Technology" is HKUST.
+SKIPPED = ("of", "and", "the", "for", "in", "on", "a", "an", "to", "at", "by", "with")
+
+
+def _initials_match(short: str, words: list[str]) -> bool:
+    """Whether the acronym's letters are the initials of these words, in order.
+
+    Without this, any parenthesis after a couple of words became an expansion: the real corpus gave
+    "child model (CDM)", "Xerces validation (XSD)" and "recently released (RC)" — three coincidences that
+    would each have been reported as a second meaning for a term that has one.
+    """
+    letters = [c for c in short.lower() if c.isalnum()]
+    initials = [w[0].lower() for w in words if w.lower() not in SKIPPED]
+    if len(initials) != len(letters):
+        return False
+    return all(a == b for a, b in zip(letters, initials))
+
+
+class Tallied(NamedTuple):
+    """What one pass over a corpus counted. Six values, so they are named rather than positional."""
+
+    authors: dict[str, set[str]]          # TERM -> the distinct people who wrote it
+    uses: collections.Counter[str]        # TERM -> how often, which decides nothing and reads well
+    docs: int
+    people: set[str]
+    newest: Any                           # the largest `ts` any source carried, or None
+    expansions: dict[str, dict[str, set[str]]]   # TERM -> written-out form -> who wrote it that way
+
+
+def tally(sources: Iterable[Row], cut: int | None = None, limit: int | None = None,
+          keep: str | None = None, report: Callable[[str], None] | None = None,
+          every: float = 3.0) -> Tallied:
     """Count as the documents arrive, saying so as it goes.
 
     `limit` stops the read deliberately. That is safe in one direction and not the other: a term needs
@@ -186,6 +264,11 @@ def tally(sources, cut=None, limit=None, keep=None, report=None, every=3.0):
     """
     authors = collections.defaultdict(set)
     uses = collections.Counter()
+    # What each term was written out as, and by how many people. The scan already finds "Long Form (SF)"
+    # pairs and used to discard them. Keeping them is the only way to see that one abbreviation carries
+    # two meanings here: LF is Linux Foundation in this corpus and line feed in a kernel one, and a
+    # count on its own cannot tell those apart.
+    expansions = collections.defaultdict(lambda: collections.defaultdict(set))
     docs = 0
     people = set()
     newest = None
@@ -201,10 +284,14 @@ def tally(sources, cut=None, limit=None, keep=None, report=None, every=3.0):
                 handle.write(json.dumps({"author": who, "text": text,
                                          **({"ts": when} if when is not None else {})}) + "\n")
             # the same filter the checker uses, so the piles a human reads contain no THE, WAS or WITH
-            for term in set(t for t in jargon.ACRONYM.findall(jargon.prose(text))
-                            if jargon.is_acronym(t)):
+            body = jargon.prose(text)
+            for term in set(t for t in jargon.ACRONYM.findall(body) if jargon.is_acronym(t)):
                 authors[term.upper()].add(who)
                 uses[term.upper()] += 1
+            for short, long in jargon.pairs(body).items():
+                spelt = _expansion(short, long)
+                if spelt:
+                    expansions[short.upper()][spelt].add(who)
             now = time.monotonic()
             if report and now - last >= every:
                 last = now
@@ -219,11 +306,11 @@ def tally(sources, cut=None, limit=None, keep=None, report=None, every=3.0):
     finally:
         if handle:
             handle.close()
-    return authors, uses, docs, people, newest
+    return Tallied(authors, uses, docs, people, newest, expansions)
 
 
-def cmd_scan(a):
-    streams = []
+def cmd_scan(a: argparse.Namespace) -> None:
+    streams: list[Iterator[Row]] = []
     for repo in (a.git or []):
         streams.append(from_git(repo or "."))
     for slug in (a.gh or []):
@@ -237,13 +324,18 @@ def cmd_scan(a):
     if not streams:
         raise SystemExit("give at least one of --git, --gh, --jsonl, --text or --command")
 
-    def chained():
+    def chained() -> Iterator[Row]:
         for s in streams:
             yield from s
 
     cut = audiences.MIN_AUTHORS
-    authors, uses, docs, people, newest = tally(
-        chained(), cut=cut, limit=a.max_documents, keep=a.keep,
+    out_path = under_home(a.out or "candidates.json")
+    keep_path = under_home(a.keep) if a.keep else None
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    if keep_path:
+        os.makedirs(os.path.dirname(os.path.abspath(keep_path)), exist_ok=True)
+    authors, uses, docs, people, newest, expansions = tally(
+        chained(), cut=cut, limit=a.max_documents, keep=keep_path,
         report=(None if a.quiet else lambda line: print(line, file=sys.stderr, flush=True)))
     inherited = audiences.BASELINES.get(a.inherits or "engineers", set())
     rows = {t: {"authors": len(w), "uses": uses[t]} for t, w in authors.items()
@@ -260,13 +352,31 @@ def cmd_scan(a):
                      "what": "authors is how many distinct people wrote the term. That, not how "
                              "often it appears, decides whether the audience shares it."},
            "members": sorted(people),
+           # {TERM: {"Long Form": how many people wrote it that way}}. A term with two entries is one
+           # this audience uses for two things.
+           "expansions": _folded(expansions),
            "known": known, "borderline": borderline, "needs_explaining": rest, "counts": rows}
-    with open(a.out, "w") as fh:
+    if not docs:
+        named = ", ".join(f"--{flag} {value}" for flag, values in
+                          (("gh", a.gh), ("git", a.git or []), ("command", a.command),
+                           ("jsonl", a.jsonl), ("text", a.text))
+                          for value in values)
+        # Nothing written. A candidates file listing nobody used to be produced anyway, and `create`
+        # accepted it — so a mistyped repository slug yielded an audience that knew nothing and
+        # therefore held back every term in the house vocabulary. The file was the bridge between a
+        # failed read and a working-looking audience, so there is no file.
+        #
+        # And the old wording sent people to look for warnings that were not there: a source that
+        # cannot be reached at all prints one, but `--gh` on a slug that does not exist prints
+        # nothing, because nothing failed — the repository simply had no issues to read.
+        raise SystemExit(
+            "no documents were read, so there is nothing to measure and nothing was written.\n"
+            "  Every source was either unreachable or held nothing readable. Check the source names "
+            "for a typo, and that the credential in use can see them.\n"
+            f"  Sources given: {named or 'none'}")
+    with open(out_path, "w") as fh:
         json.dump(out, fh, indent=1)
         fh.write("\n")
-    if not docs:
-        raise SystemExit("no documents were read, so there is nothing to measure. Check the warnings "
-                         "above: every source either failed or produced no usable lines.")
     print(f"{docs} documents from {len(people)} people; {len(rows)} terms not already inherited.")
     print(f"  {len(known):4d} reached {cut}+ people — shared knowledge")
     print(f"  {len(borderline):4d} at exactly {cut - 1} — worth a human look: "
@@ -282,12 +392,14 @@ def cmd_scan(a):
               f"\nonly add terms.")
     if newest is not None:
         print(f"\nnewest document read: {newest}")
-    if a.keep:
-        print(f"documents kept in {a.keep} — pass it as --jsonl to add to them without re-reading")
-    print(f"\nwritten to {a.out}")
+    if keep_path:
+        print(f"documents kept in {keep_path} — pass it as --jsonl to add to them without re-reading")
+    print(f"\nwritten to {out_path}")
+    print("  it lists every person measured, so it is not in your working tree unless you asked for "
+          "that")
 
 
-def _losses(name, fresh):
+def _losses(name: str, fresh: dict[str, Any]) -> tuple[list[str], list[str]]:
     """What a rebuild would take away from an audience that already exists.
 
     Rebuilding is a normal thing to do — a wider corpus, a second source — and overwriting was silent.
@@ -303,7 +415,8 @@ def _losses(name, fresh):
     if old is None:
         return [], []
     was = audiences._read(old.path) or {}
-    routing, other = [], []
+    routing: list[str] = []
+    other: list[str] = []
 
     for key, before in (was.get("matches") or {}).items():
         gone = [v for v in before if v not in (fresh["matches"].get(key) or [])]
@@ -327,9 +440,35 @@ def _losses(name, fresh):
     return routing, other
 
 
-def cmd_create(a):
-    with open(a.candidates) as fh:
-        cand = json.load(fh)
+def _folded(expansions: dict[str, dict[str, set[str]]]) -> dict[str, dict[str, int]]:
+    """One entry per meaning, case-folded, with the people who wrote each pooled."""
+    out = {}
+    for term, seen in sorted(expansions.items()):
+        merged = {}
+        for spelt, who in sorted(seen.items()):
+            key = spelt.lower()
+            first, people = merged.get(key, (spelt, set()))
+            merged[key] = (first, people | who)
+        out[term] = {first: len(people) for first, people in
+                     sorted(merged.values(), key=lambda pair: -len(pair[1]))}
+    return out
+
+
+def cmd_create(a: argparse.Namespace) -> None:
+    if not audiences.usable_name(a.name):
+        raise SystemExit(f"{a.name!r} cannot be an audience name: it becomes a filename, so it starts "
+                         f"with a letter or digit and holds only letters, digits, dot, dash and "
+                         f"underscore, up to 64 characters")
+    # The last hand-editable file with no declaration, and the one place a hand edit still answered
+    # with a stack trace instead of a sentence: `/prose-guard:audiences` walks somebody through the
+    # borderline pile, so this file gets edited. Loud and on a command just typed, unlike the audience
+    # crash — but there is no reason for it to be the exception.
+    cand, said = settings.read(a.candidates, settings.CANDIDATES, os.path.basename(a.candidates))
+    for line in said:
+        print(f"warning: {line}")
+    if not cand:
+        raise SystemExit(f"{a.candidates} holds nothing this can build an audience from. It is the "
+                         f"file `learn.py scan --out` writes.")
     counts = cand.get("counts") or {}
     cut = audiences.MIN_AUTHORS
     vocab = {t: counts.get(t, {}).get("authors", cut) for t in cand.get("known") or []}
@@ -349,12 +488,25 @@ def cmd_create(a):
     if not matches:
         raise SystemExit("an audience needs at least one identifier to match on, or it can never "
                          "apply: --match-channel, --match-repo, --match-owner or --match-path")
+    # An audience nobody was measured for is not an audience, and the direction it fails in is the
+    # expensive one: creating it makes the term check ENFORCE — so it holds back every term in the
+    # house vocabulary, having no evidence that anyone knows any of them. A mistyped repository slug
+    # used to produce exactly that, and the message said "terms will now be held back" as though the
+    # measurement had worked.
+    if not vocab and not (cand.get("members") or []):
+        raise SystemExit(
+            f"{a.name} would know nothing: the candidates file records no terms and no people.\n"
+            f"  Creating it would hold back every term in your house vocabulary, because nothing "
+            f"shows anyone knows any of them.\n"
+            f"  Re-run `scan` against a source that has writing in it, or pass --also-known to name "
+            f"the terms yourself.")
     data = {"name": a.name, "who": a.who or "",
+            "expansions": cand.get("expansions") or {},
             "matches": matches,
             "inherits": [cand.get("_meta", {}).get("inherits") or "engineers"],
             "members": cand.get("members") or [],
             "vocabulary": vocab,
-            "assumptions": {"shared_context": a.shared_context, "reach": a.reach},
+            "assumptions": {"shared_context": a.shared_context},
             "_meta": {"learned_from": cand.get("_meta", {}),
                       "accepted_by_hand": [t.upper() for t in a.also_known]}}
     routing, other = _losses(a.name, data)
@@ -374,7 +526,7 @@ def cmd_create(a):
     print("Unexplained terms for this audience will now be held back rather than guessed at.")
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -389,14 +541,20 @@ def main():
                         "the audience holds back more than it should rather than less")
     s.add_argument("--keep", metavar="FILE",
                    help="write the usable documents here as they arrive, so a read that dies part "
-                        "way through leaves them on disk. Pass it back as --jsonl to add to them")
+                        "way through leaves them on disk. Pass it back as --jsonl to add to them. A "
+                        "relative path is resolved under your prose-guard config directory")
     s.add_argument("--quiet", action="store_true", help="no progress while it runs")
     s.add_argument("--command", action="append", default=[], metavar="SHELL",
                    help='any command emitting those lines on stdout — a chat export, a wiki dump, '
                         'an mbox. Keeps the text out of an agent\'s context. See docs/sources.md')
     s.add_argument("--text", nargs="+", default=[], metavar="FILE")
     s.add_argument("--inherits", help="baseline to subtract and inherit (default engineers)")
-    s.add_argument("--out", default="candidates.json")
+    # Not the working directory. The candidate list holds every measured person's name and every term
+    # they used, and a scan is usually run from the repository being worked in.
+    s.add_argument("--out", metavar="FILE",
+                   help="where the candidate list goes (default: candidates.json in your prose-guard "
+                        "config directory). A relative path is resolved there too, because this file "
+                        "names every person measured")
 
     c = sub.add_parser("create", help="write an audience from a candidates file")
     c.add_argument("name")
@@ -414,10 +572,16 @@ def main():
                    help="file paths this audience reads")
     c.add_argument("--force", action="store_true",
                    help="rebuild even though it drops routing the existing audience had")
-    c.add_argument("--also-known", nargs="*", default=[])
-    c.add_argument("--not-known", nargs="*", default=[])
-    c.add_argument("--shared-context", choices=audiences.CONTEXT_ORDER, default="low")
-    c.add_argument("--reach", choices=audiences.REACH_ORDER, default="internal")
+    c.add_argument("--also-known", nargs="*", default=[], metavar="TERM",
+                   help="terms this audience knows that the count did not reach — the borderline "
+                        "pile, and anything a person confirms")
+    c.add_argument("--not-known", nargs="*", default=[], metavar="TERM",
+                   help="the opposite: a term the count made look shared that a few people happen "
+                        "to use in one corner")
+    c.add_argument("--shared-context", choices=audiences.CONTEXT_ORDER, default="low",
+                   help="how much of the thread these readers already have. `low` assumes they are "
+                        "reading it cold, which is the safe default; a destination can raise it per "
+                        "call, as a direct message does")
 
     a = ap.parse_args()
     (cmd_scan if a.cmd == "scan" else cmd_create)(a)

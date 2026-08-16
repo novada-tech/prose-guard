@@ -14,6 +14,8 @@ Needs the `claude` CLI on PATH. Each session is a real one, so five reps of two 
 expect a few minutes and real tokens. That is the point — a cost measurement that costs nothing is
 measuring nothing.
 """
+from __future__ import annotations
+
 import argparse
 import concurrent.futures as cf
 import json
@@ -23,6 +25,7 @@ import statistics as st
 import subprocess
 import tempfile
 import time
+from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.abspath(os.path.join(HERE, "..", "plugins", "prose-guard"))
@@ -39,7 +42,7 @@ PROMPT = ("Read notes.txt in this directory. Write the announcement you would po
           "written.")
 
 
-def one(args):
+def one(args: tuple[str, int, str, str, str]) -> dict[str, Any]:
     level, rep, home_root, model, effort = args
     tag = f"{level}_r{rep}"
     work = os.path.join(home_root, tag)
@@ -104,7 +107,7 @@ def one(args):
     return row
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--levels", default="disabled,medium",
                     help="comma separated; always include disabled as the control")
@@ -137,7 +140,7 @@ def main():
         with open(a.out, "w") as fh:
             json.dump(rows, fh, indent=1)
 
-    def med(sub, key):
+    def med(sub: list[dict[str, Any]], key: str) -> float:
         return st.median(r[key] for r in sub)
 
     control = [r for r in ok if r["level"] == "disabled"]

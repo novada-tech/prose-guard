@@ -14,17 +14,34 @@ comment, a commit message, a document — against two questions:
 **Who is going to read this?**
 **Why should they care?**
 
-From these two central questions of effective communication, six checks follow, and they are what actually runs. The first is arithmetic and can
-hold a message back; the other five are judgement and only ever advise.
+Eight checks follow from those two questions, and they are what actually runs. Two are arithmetic — no
+model call, and they run at every level. Six are judgement.
 
-| | |
-|---|---|
-| **Terms they do not know** | an acronym never explained, judged against what your audience has actually written. Deterministic, and the only check that can hold a message back. |
-| **No reason to care** | it never says what changed for them or why it matters. |
-| **Missing what they need** | the command to run, the version, the deadline, the choice — absent. |
-| **Things they will not act on** | backstory they lived through, identifiers nobody types, reassurance nobody asked for, proof that you tested it. |
-| **A paragraph doing two jobs** | two unrelated ideas in one, or an opening sentence that does not state its own. |
-| **Something they have to decode** | a coined label like "the silent row", a pronoun whose subject is four sentences back, the thing they must do buried under a subordinate clause. |
+| | | |
+|---|---|---|
+| **Terms they do not know** | an acronym never explained, judged against what your audience has actually written | arithmetic |
+| **A word typed twice, `a` where `an` belongs** | objective, and a one-word fix | arithmetic |
+| **No reason to care** | it never says what changed for them or why it matters | judgement |
+| **Missing what they need** | the command to run, the version, the deadline, the choice — absent | judgement |
+| **Things they will not act on** | backstory they lived through, identifiers nobody types, reassurance nobody asked for, proof that you tested it | judgement |
+| **A paragraph doing two jobs** | two unrelated ideas in one, or an opening sentence that does not state its own | judgement |
+| **Something they have to decode** | a coined label like "the silent row", a pronoun whose subject is four sentences back, the thing they must do buried under a subordinate clause | judgement |
+| **An opening that no longer fits** | the message turns out to be about something the top never mentions, so a reader who acts on the opening alone acts on the wrong thing | judgement, advice only |
+
+**What can hold a message back depends on the level.** The two arithmetic checks always can: both are
+objective and both are a small fix. At `high` five of the six judgement checks can too, because each
+names one concern and quotes the span it means, and a finding two runs agree on is specific enough to
+act on. At `medium` those five concerns are asked as one combined question, and that only ever advises —
+measured against a real label it agrees 50–70% of the time and disagrees with itself between runs, which
+is a prompt to look again rather than something to gate on.
+
+The sixth, the one about the opening, advises at every level and says so in its own filename. It passes
+11 of 14 well-built messages where the blocking checks pass 9 or 10 of 10, and the gap is not worth
+closing by tuning against the handful of fixtures long enough to measure it on. The scores and what
+would settle it are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+**Under 25 words nothing is checked at all.** A short message is not the failure this catches, and it is
+not worth a model call — so a one-line commit message is the wrong thing to test it with.
 
 Everything below is those two questions, made checkable.
 
@@ -46,9 +63,10 @@ Send to that channel and it knows `GKE` is safe and `SFTR` is not. Send somewher
 of and it says so rather than guessing at you: **findings become advice, and nothing is held back**,
 because a tool that blocks on a guess spends your first day arguing about your own house vocabulary.
 
-That is also why the five judgement checks only ever advise. Asked to sort real messages by whether a
-colleague or an agent wrote them, they manage 50–70%, unstably. Useful as a prompt to look again. Not
-something to gate on.
+That is also why `medium`'s combined judgement call only ever advises. Asked to sort real messages by
+whether a colleague or an agent wrote them, it manages 50–70%, unstably. Useful as a prompt to look
+again. Not something to gate on. `high` asks the same concerns one at a time and each answer quotes the
+span it means, which is specific enough to hold a message for.
 
 ## Setting it up
 
@@ -90,27 +108,25 @@ already has.
 | level | what runs | added per message sent |
 |---|---|---|
 | `disabled` | nothing | — |
-| `low` | the term check only, no model call | +12s |
-| `medium` | plus one advisory judgement call | +19s |
-| `high` | four separate checks, re-verified after each edit | +75s |
+| `low` | the two arithmetic checks only, no model call | +12s |
+| `medium` | plus one advisory judgement call over the five concerns | +19s |
+| `high` | one separate check per concern, re-verified after each edit | +75s |
 
-**Pick `medium`.** `/prose-guard:setup` asks and writes the answer for you. Two measured results make
-that choice less obvious than it looks:
+The seconds were measured when `high` ran four model-backed checks. It runs six now, so its figure is a floor.
 
-- **`low` is not the cheap option.** It spends no model call, but holding a message back costs a whole
-  agent turn on your own context — dearer than the small call `medium` adds.
-- **`high` is not known to be better.** Both satisfied every concern on every message measured, so the
-  measurement could not tell them apart — which is not the same as their being equal.
-
-Those figures come from five paired sessions per level on one task, with `claude-sonnet-5` writing the
-message. Read the ordering rather than the digits: your own traffic and your own model will move them.
+**Pick `medium`.** `/prose-guard:setup` asks and writes the answer for you. `low` is not the cheap
+option and `high` is not measurably better, which is less obvious than it looks — the numbers, the
+unguarded run they were priced against, and what the measurement cannot tell you are in
+[docs/design-notes.md](docs/design-notes.md).
 
 ## Reading further
 
 | | |
 |---|---|
-| [docs/reference.md](docs/reference.md) | what counts as sending, managing audiences, where files live, checking a draft by hand |
-| [docs/design-notes.md](docs/design-notes.md) | what was measured, and the two ideas that did not survive it |
+| [docs/reference.md](docs/reference.md) | how it behaves once you are using it: what counts as sending, what the caps do, where files live, checking a draft by hand |
+| [docs/design-notes.md](docs/design-notes.md) | what was measured, and the designs that did not survive it |
+| [docs/audiences.md](docs/audiences.md) | managing audiences, and sharing one with a team |
+| [docs/sources.md](docs/sources.md) | where a vocabulary comes from: the contract, and recipes for chat, mail and wikis |
 | [docs/thresholds.md](docs/thresholds.md) | the two numbers that decide whether a message is held back |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | how to test and measure a change |
 | [measure/](measure/) | the harnesses that do the measuring |

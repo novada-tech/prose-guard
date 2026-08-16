@@ -14,21 +14,49 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        # The oldest interpreter this plugin claims, and the newest anybody will run it on. 3.9.6 is
+        # macOS's `/usr/bin/python3`, which is what a first-time user has and what the hook will
+        # actually be executed by — the plugin needs no virtualenv, so it takes whatever python3 is
+        # there. The runners default to 3.12+, so before this the floor was never tested at all: one
+        # `dict[str, int]` in a signature without `from __future__ import annotations` is a green
+        # pipeline and a hook that will not import for every macOS user.
+        #
+        # This is cheap and exact where a type checker is neither. mypy 2.3.1 cannot target 3.9 at
+        # all, and run at its default version it reports 33 errors here, of which the three I read
+        # are all correct at runtime — `proc.stdout` is never None with `stdout=PIPE`, the quote
+        # pairs are two characters, `known` is a shadowed local. Neither of the two bugs found in
+        # this pull request is a static type error, so a gate on it would have caught neither.
+        python: ['3.9', '3.x']
+        exclude:
+          # `macos-latest` is arm64 and the 3.9 builds are x64 only — the newest is 3.9.25, darwin/x64
+          # — so this leg would fail while installing the interpreter and say nothing about the code.
+          # What it would have tested is not OS-specific anyway: a builtin generic in a signature
+          # without the future import fails to import on 3.9 everywhere.
+          - os: macos-latest
+            python: '3.9'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
 
-      # The filter that tells an acronym from a capitalised English word prefers the system word
-      # list. A bare Ubuntu image has none, and the shipped floor in data/common-words.txt covers
-      # that case — but the tests should exercise the path a developer machine actually takes.
-      - name: install a system word list
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq wamerican
-
-      - name: word list present
+      # No system word list is installed, and that is the point: the dictionary ships with the
+      # plugin, so a verdict does not depend on which list a machine happens to have. Ubuntu's
+      # `wamerican` and macOS's `web2` disagree about api, amd, aws, ids and ads, and this job used to
+      # install one so the tests could exercise "the path a developer machine takes". There is one path
+      # now. See plugins/prose-guard/data/english-words.README.
+      - name: no system dictionary is used
         run: |
-          test -f /usr/share/dict/words && wc -l < /usr/share/dict/words \
-            || echo "no system word list; the shipped floor is what is being tested"
+          python3 - <<'CHECK'
+          import sys
+          sys.path.insert(0, "plugins/prose-guard/lib")
+          import jargon
+          assert len(jargon.ENGLISH_WORDS) > 200000, "the shipped dictionary did not load"
+          assert jargon.is_acronym("AWS"), "AWS should be an acronym on every machine"
+          assert not jargon.is_acronym("THE"), "THE is an English word on every machine"
+          print(f"{len(jargon.ENGLISH_WORDS):,} words, shipped")
+          CHECK
 
       - run: python3 tests/test_prose_guard.py
       - run: python3 tests/test_docs_match_code.py
@@ -70,6 +98,22 @@ jobs:
             echo "::error::.claude-plugin/marketplace.json."
             exit 1
           fi
+          # Different is not the same as newer, and only checking difference let a branch take the
+          # version BACKWARDS while this passed. That is the same failure the check exists to prevent,
+          # in the form it could not see: somebody already on the higher version is offered a lower one
+          # and never moves, and nothing anywhere says so.
+          python3 - "$before" "$after" <<'SEMVER'
+          import sys
+          def parts(v):
+              return tuple(int(x) for x in v.split("."))
+          before, after = sys.argv[1], sys.argv[2]
+          if parts(after) < parts(before):
+              print(f"::error::the version went backwards, {before} -> {after}. Anybody already on "
+                    f"{before} is offered {after} and will never move to it, because an update only "
+                    f"goes forwards. If the lower number is deliberate, say so in the pull request and "
+                    f"expect every existing install to need removing and adding again.")
+              sys.exit(1)
+          SEMVER
           market=$(python3 -c 'import json; d=json.load(open(".claude-plugin/marketplace.json")); print([p["version"] for p in d["plugins"] if p["name"]=="prose-guard"][0])')
           if [ "$market" != "$after" ]; then
             echo "::error::plugin.json says $after and marketplace.json says $market. They must match"

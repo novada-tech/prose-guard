@@ -12,6 +12,7 @@ is are was were be been being am do does did done doing have has had having
 will would shall should can could may might must ought need dare
 i we you he she me us him her my our your his hers ours yours mine
 in on at by to from with without within into onto out off over under above below across through
+as than like about against among between during before after per via
 against between among during before after up down near past about around beyond
 all any both each every few many more most much no none one only other others own same several
 some such than too very not never always often sometimes again still just even also
@@ -42,6 +43,8 @@ job jobs task tasks queue queues event events message messages
 host hosts port ports server servers client clients service services
 memory disk cache caches pool pools thread threads process processes
 level levels mode modes flag flags option options config
+logger loggers coin coins kafka broker brokers queue queues topic topics ascii unicode
+id ids ad ads app apps repo repos env envs
 scale scaled limit limits quota quotas rate rates
 plan plans stage stages phase phases cycle cycles
 team teams member members people person
@@ -51,7 +54,7 @@ ask asks answer answers question questions issue issues
 # specialism reads these without pausing, so asking someone to expand them would be noise. Kept
 # here rather than in a baseline audience because knowing them depends on reading English, not on
 # what anybody works on.
-asap fyi eta aka etc vs tldr iirc afaik imo imho kpi cfo cto hr pto ooo eod eow
+asap fyi eta aka etc vs tldr iirc afaik imo imho kpi cfo cto hr pto ooo eod eow btw
 
 # General knowledge rather than anybody's vocabulary: places, time, dates, units, currencies, job
 # titles, company suffixes and office file formats. These were reaching the borderline pile in a real

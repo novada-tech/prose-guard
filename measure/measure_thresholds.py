@@ -11,6 +11,8 @@ everything off it is "scored for the wrong ones". The threshold worth using is r
 percentile of the diagonal: above that, a finding is better explained by the audience being wrong than
 by the message being wrong.
 """
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -23,8 +25,8 @@ import audiences  # noqa: E402
 import jargon  # noqa: E402
 
 
-def load(path, floor=25):
-    out = []
+def load(path: str, floor: int = 25) -> list[str]:
+    out: list[str] = []
     for line in open(path, errors="replace"):
         try:
             row = json.loads(line)
@@ -36,8 +38,8 @@ def load(path, floor=25):
     return out
 
 
-def shares(msgs, known):
-    rows = []
+def shares(msgs: list[str], known: set[str]) -> list[tuple[int, int, float]]:
+    rows: list[tuple[int, int, float]] = []
     for text in msgs:
         bad, considered = jargon.scan(text, lambda t: t.upper() in known)
         if considered:
@@ -45,7 +47,7 @@ def shares(msgs, known):
     return rows
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", action="append", required=True)
     ap.add_argument("--audience", action="append", required=True)

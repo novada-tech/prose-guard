@@ -17,15 +17,16 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/install_rule.py"
 
 ## 2. Choose a level
 
-The numbers are five paired sessions on one fixture and one model, so the ordering is the finding
-and the digits are not:
+The numbers are five paired sessions on one fixture and one model, taken when `high` ran four
+model-backed checks rather than the six it runs now — so the ordering is the finding and the digits are
+not:
 
 | level | what runs | added per message sent |
 |---|---|---|
 | `disabled` | nothing | — |
-| `low` | the term check only, no model call | +12s |
+| `low` | the two deterministic checks only, no model call | +12s |
 | `medium` | plus one advisory writing check | +19s |
-| `high` | four separate checks, re-verified after each edit | +75s |
+| `high` | one separate check per concern, re-verified after each edit | +75s |
 
 Both counter-intuitive results are worth saying out loud:
 
@@ -75,6 +76,19 @@ Then do the part no script can:
   carries the text. Ask before writing.
 - **Say what each addition costs.** Every added destination is more messages checked, at the
   per-message price above.
+- **Ask the two questions that decide how hard it is checked.** Adding a destination is not one
+  decision but three, and these two are the ones you cannot work out for them:
+
+  1. *Does anybody read it before its audience does?* If yes — a draft, a preview, anything that lands
+     in their own compose box — set `"max_severity": "advise"`. Blocking is only justified when text is
+     about to reach a reader with nobody in between.
+  2. *Does it have an addressee and an ask?* If not — a record, a changelog, a tag message — set
+     `"max_effort": "low"`. The checks above `low` ask whether the reader will care and whether the ask
+     is clear, and neither question means anything without a reader. Measured: every destination costs
+     about 15 seconds and 5 model calls at `high`, so this is about what applies, not about speed.
+
+  `discover.py` prints a suggested answer for each candidate where the name is evidence, with the
+  reason. Read it out and let them disagree — it is a guess from a name.
 
 **If they say no to something, record it** — otherwise the same suggestion comes back the next time
 they use that tool, which is the fastest way to get a tool switched off:
@@ -83,16 +97,40 @@ they use that tool, which is the fastest way to get a tool switched off:
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/discover.py" --decline '<shape>'
 ```
 
-Write confirmed entries to `<config dir>/destinations.json`, whose shape is documented in
-[`data/destinations.json`](../../data/destinations.json). User entries are read first, so the same
-file also overrides a shipped entry — that is how to stop checking something.
+Once they are confirmed, offer to share them. Working out which tool sends prose and which field
+carries it takes this conversation, and a destination is the same fact for everyone using that tool — so
+nobody should have this conversation twice:
 
-Already covered without asking: chat messages, GitHub and GitLab comments and PR descriptions,
-documentation pages, issue trackers, `git commit` and `git tag -m`, and prose files that are inside
-a git working tree and not ignored.
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/discover.py" --share <a directory their team clones>
+```
 
-Two known gaps worth stating rather than hiding: `git commit` with no `-m` opens an editor and that
-text never reaches a tool call, and `--body "$(cat file)"` cannot be read.
+It copies only what this machine added, never the shipped set, and skips anything already there.
+Everyone else registers the directory once, or has their team's setup script do it.
+
+Write confirmed entries with `add`, which refuses what the loader would have dropped — a cap that is
+not a level, a tool with no field carrying the prose, a pattern that does not compile:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/destinations.py" add "our chat" \
+  --tool chat_send --text-field body --max-severity advise
+```
+
+Yours are read before the shipped set, so giving one the same name overrides it. To stop checking a
+shipped one entirely, `destinations.py off "<name>"`.
+
+Already covered without asking: `git commit` and `git tag -m`, `gh pr` and `gh issue` comments and
+descriptions, and prose files that are inside a git working tree and not ignored. Chat, issue trackers
+and the rest are what this step is for — they are not in the shipped file because it cannot see the tool
+list, and you can.
+
+One known gap worth stating rather than hiding: `git commit` with no `-m` opens an editor, and that text
+never reaches a tool call.
+
+A body passed as `--body "$(cat file)"` used to be a second gap. The prose is a shell substitution the
+tool call does not contain, so nothing was checked — and passing silently reads exactly like a check that
+passed. That is held back now, naming `--body-file`, which is read. Write long bodies to a file and pass
+them that way and it never comes up.
 
 ## 5. Offer audiences, and be honest about what it buys
 

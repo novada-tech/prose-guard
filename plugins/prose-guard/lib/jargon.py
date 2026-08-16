@@ -16,9 +16,13 @@ detection serves any audience. audiences.py decides what is known.
     python3 lib/jargon.py <file>
     cat draft.md | python3 lib/jargon.py
 """
+from __future__ import annotations
+
+import gzip
 import os
 import re
 import sys
+from typing import Callable, Iterator
 
 FENCE = re.compile(r"```.*?```", re.S)
 INLINE = re.compile(r"`[^`]+`")
@@ -28,28 +32,44 @@ INLINE = re.compile(r"`[^`]+`")
 QUOTE = re.compile(r"^\s*>.*$", re.M)
 # acronym-shaped: 2-6 characters, capitals and digits
 ACRONYM = re.compile(r"\b([A-Z][A-Z0-9]{1,5})\b")
+# What is in the brackets, and the phrase before them. See pairs().
+INSIDE = re.compile(r"\(([^()]{2,80}?)\)")
+BEFORE = re.compile(r"[^()]{2,}$")
+LOOK_BACK = 120         # how far before a bracket the phrase may start
 
 
-def _system_words():
-    """The system word list, used to tell an acronym from a capitalised English word.
+WORD_LIST = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "..", "data", "english-words.txt.gz")
 
-    An acronym is by definition not a word, so this belongs here rather than in any audience: THE,
-    WAS, LOGGER, NULL, ERROR and ASCII all lowercase to real words and were being reported as jargon
-    nobody had explained. A hand-kept exclusion list would grow for ever.
+
+def _english_words() -> set[str]:
+    """The English dictionary, shipped rather than read from the machine.
+
+    `is_acronym` uses it to tell an acronym from a capitalised English word — a word list rather than a
+    hand-kept list of exceptions, because the exceptions would grow for ever.
+
+    It is shipped because reading the machine's own list made the verdict depend on which list the
+    machine happened to have. macOS has `web2`; Ubuntu has `wamerican`, which contains `api`, `amd`,
+    `aws`, `ids` and `ads` — so the same message was held back on one machine and let through on
+    another, and a CI run went red over exactly that. Containers often have no dictionary at all, which
+    is a third answer again. See data/english-words.README.
+
+    Two-letter words are kept, or IS, IT, ON and AS survive as "acronyms" and every message using one is
+    held back. The cost is that IT as in information technology is filtered too, which is the right way
+    round: a message writing IT almost never means that.
     """
-    for path in ("/usr/share/dict/words", "/usr/dict/words"):
-        try:
-            with open(path, encoding="utf-8", errors="ignore") as fh:
-                # two-letter words included, or IS, IT, ON and AS survive as "acronyms". The cost is
-                # that IT as in information technology is filtered too, which is the right way
-                # round: a message using "IT" is almost never using it as a term to explain.
-                return {w.strip().lower() for w in fh if len(w.strip()) > 1}
-        except OSError:
-            continue
-    return set()
+    try:
+        with gzip.open(WORD_LIST, "rt", encoding="utf-8", errors="ignore") as fh:
+            # Read and split the whole file rather than walking it line by line: the same set, and the
+            # splitting happens in C over one buffer instead of in Python per line. Gzipped costs 2.8ms
+            # more than plain and saves 1.7MB in the repository, on a read that only happens once a
+            # message is actually being checked.
+            return {w for w in fh.read().split() if len(w) > 1}
+    except OSError:
+        return set()
 
 
-def _shipped_words():
+def _shipped_words() -> set[str]:
     """The floor, for a machine with no system dictionary at all.
 
     Many Linux containers have none. Without this the filter never fires and every capitalised
@@ -66,9 +86,34 @@ def _shipped_words():
         return set()
 
 
-SHIPPED_WORDS = _shipped_words()
-SYSTEM_WORDS = _system_words()
-WORDS = SYSTEM_WORDS | SHIPPED_WORDS
+# SHIPPED_WORDS, ENGLISH_WORDS and WORDS are read on first use, not at import. Only is_acronym() ever
+# consults them, and nothing reaches it until a destination has matched and text has been extracted —
+# so every tool call the guard ignores was reading a 2.5 MB file and building three sets from it before
+# main() had looked at stdin. Measured on an ignored Read: 77.3 ms and 59.4 MB of peak RSS as shipped,
+# 23.6 ms and 21.3 MB read on first use. Python calls __getattr__ only for a name the module does not
+# already have, so the second read is a plain dictionary lookup, and a caller that assigns its own set
+# (the tests do, to test the floor on its own) keeps it. Two sets rather than one, because the floor has
+# to be usable alone: SHIPPED_WORDS is what a machine with no system dictionary is left with.
+_LAZY = ("SHIPPED_WORDS", "ENGLISH_WORDS", "WORDS")
+
+
+def __getattr__(name: str) -> set[str]:
+    if name not in _LAZY:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    g = globals()
+    if "SHIPPED_WORDS" not in g:
+        g["SHIPPED_WORDS"] = _shipped_words()
+    if "ENGLISH_WORDS" not in g:
+        g["ENGLISH_WORDS"] = _english_words()
+    if "WORDS" not in g:
+        g["WORDS"] = g["ENGLISH_WORDS"] | g["SHIPPED_WORDS"]
+    return g[name]
+
+
+def _words() -> set[str]:
+    """The word list. Read through the module so __getattr__ can fill it in, since a plain global
+    reference from inside a function would not reach it."""
+    return getattr(sys.modules[__name__], "WORDS")
 
 
 # The system word list carries base forms, so FAILS and COINED survive it. Stripping these suffixes
@@ -78,31 +123,48 @@ _SUFFIXES = ("s", "es", "ed", "ing", "d")
 # "am" and AWS to "aw" — both in the dictionary — so neither was ever reported, and adding any
 # two-letter abbreviation to the word list silently retired a whole family of acronyms with it.
 _SHORTEST_STEM = 3
+# English turns a final y into i before these two suffixes, and a word list carries the base form only,
+# so stripping the suffix is not enough on its own: "denied" reduces to "deni", which is in no
+# dictionary, so DENIED read as an acronym and the check held back a commit message that wrote it in
+# capitals for emphasis. RELIED, APPLIES, COPIES, IDENTIFIED, QUERIED and VERIFIED went the same way on
+# this machine, while TRIED, CARRIED, SIMPLIFIED and STUDIED escaped only because web2 lists those four
+# outright — which words a machine reports was luck, and on a machine with no system dictionary it is
+# all of them. Only these two suffixes: putting the y back after any of the five instead reduced GUID
+# to "guy" and retired a real acronym.
+_Y_BEFORE = ("ed", "es")
 
 
-def is_acronym(token):
+def _base_forms(low: str) -> Iterator[str]:
+    """The base forms this word could be an inflection of, for the word list to be asked about."""
+    for sfx in _SUFFIXES:
+        if low.endswith(sfx) and len(low) - len(sfx) >= _SHORTEST_STEM:
+            stem = low[: -len(sfx)]
+            yield stem
+            if sfx in _Y_BEFORE and stem.endswith("i"):
+                yield stem[:-1] + "y"
+
+
+def is_acronym(token: str) -> bool:
     """False when this is a capitalised English word rather than an acronym.
 
-    An acronym is by definition not a word. THE, WAS, LOGGER, NULL and ASCII all lowercase to real
-    words and were being reported as jargon nobody had explained.
+    An acronym is by definition not a word, so this belongs here rather than in any audience: THE,
+    WAS, LOGGER, NULL, ERROR and ASCII all lowercase to real words and were being reported as jargon
+    nobody had explained.
     """
-    low = token.lower()
-    if low in WORDS:
-        return False
-    return not any(low.endswith(sfx) and len(low) - len(sfx) >= _SHORTEST_STEM
-                   and low[: -len(sfx)] in WORDS for sfx in _SUFFIXES)
+    low, words = token.lower(), _words()
+    return low not in words and not any(base in words for base in _base_forms(low))
 
 
-def prose(text):
+def prose(text: str | None) -> str:
     return INLINE.sub(" ", QUOTE.sub(" ", FENCE.sub(" ", text or "")))
 
 
-def _valid_short(s):
+def _valid_short(s: str) -> bool:
     return 2 <= len(s) <= 10 and len(s.split()) <= 2 and bool(re.search(r"[A-Za-z]", s)) \
         and s[0].isalnum()
 
 
-def _best_long(short, candidate):
+def _best_long(short: str, candidate: str) -> str | None:
     """Schwartz-Hearst right-to-left match. Returns the matched long form, or None."""
     s, l = short.lower(), candidate.lower()
     si, li = len(s) - 1, len(l) - 1
@@ -126,11 +188,31 @@ def _best_long(short, candidate):
     return candidate[li + 1:].strip() if li + 1 < len(candidate) else candidate
 
 
-def pairs(text):
-    """(short, long) pairs written as 'Long Form (SF)' or 'SF (Long Form)'."""
+def pairs(text: str) -> dict[str, str]:
+    """(short, long) pairs written as 'Long Form (SF)' or 'SF (Long Form)'.
+
+    Anchored on the bracket, and the phrase read backwards from it. Written the other way round —
+    `([^()]{2,120}?)\\s*\\(([^()]{2,80}?)\\)` — the leading run was tried at every offset in the text
+    and expanded to its full 120 characters before failing at almost all of them, which is ~120
+    character comparisons per input character. Linear, but the constant cost 960 ms on 100,000 words of
+    this repository's own documentation, where the anchored version takes 0.72 ms for identical output.
+    Issue #8 measured it as 96% of a term check, and as the whole of learn.py's 17 seconds over a
+    20,000-document corpus. On text carrying a parenthetical pair every ten words — denser than any real
+    document — anchored is still the faster of the two, 32.7 ms against 38.4 ms, so no input loses.
+    """
     out = {}
-    for m in re.finditer(r"([^()]{2,120}?)\s*\(([^()]{2,80}?)\)", text):
-        before, inside = m.group(1), m.group(2)
+    hunt = 0                    # where the last pair ended: finditer never overlapped its matches
+    for m in INSIDE.finditer(text):
+        inside = m.group(1)
+        # The phrase runs up to the bracket, minus the whitespace the old \s* absorbed, and reaches back
+        # LOOK_BACK characters or as far as the last bracket, whichever is nearer. The slice is what
+        # bounds the look-back, so BEFORE needs no second bound of its own.
+        end = m.start()
+        while end > hunt and text[end - 1].isspace():
+            end -= 1
+        found = BEFORE.search(text[max(hunt, end - LOOK_BACK):end])
+        before = found.group(0) if found else ""
+        hunt = m.end()
         if _valid_short(inside):
             words = before.split()
             n = min(len(inside) + 5, len(inside) * 2)
@@ -146,7 +228,7 @@ def pairs(text):
     return out
 
 
-def expanded_in_prose(short, text):
+def expanded_in_prose(short: str, text: str) -> bool:
     """Also count it as expanded when a phrase whose initials match appears anywhere, e.g.
     'Application Default Credentials' with '(ADC)' never written. Schwartz-Hearst sees only
     parenthetical pairs, and writers often expand in running prose instead.
@@ -163,7 +245,7 @@ def expanded_in_prose(short, text):
     return re.search(pat, text, re.I) is not None
 
 
-def uses(text, term):
+def uses(text: str, term: str) -> bool:
     """Whether this text already contains that term.
 
     Deliberately the scan's own machinery rather than a substring test or a second regex: the question
@@ -173,9 +255,21 @@ def uses(text, term):
     return term in set(ACRONYM.findall(prose(text)))
 
 
-def scan(text, is_known):
+def scan(text: str, is_known: Callable[[str], bool]) -> tuple[list[str], list[str]]:
     """(unexplained, considered). `considered` is every acronym-shaped term the reader had to
     handle, known or not — the denominator for asking whether the audience model is wrong.
+    """
+    unexplained, considered, _ = examine(text, is_known)
+    return unexplained, considered
+
+
+def examine(text: str,
+            is_known: Callable[[str], bool]) -> tuple[list[str], list[str], dict[str, str]]:
+    """scan(), and also what each term was written out as here.
+
+    Two callers want the expansions: the scan itself, to decide what counts as explained, and
+    checks/terms.py, to notice a term written out two different ways. It used to recompute them, which
+    was the whole of the second `pairs()` call in a term check.
     """
     body = prose(text)
     written = pairs(body)
@@ -188,10 +282,10 @@ def scan(text, is_known):
     unexplained = sorted(t for t in considered
                          if not is_known(t) and t not in written
                          and not expanded_in_prose(t, body))
-    return unexplained, considered
+    return unexplained, considered, written
 
 
-def main():
+def main() -> None:
     sys.path.insert(0, __file__.rsplit("/", 1)[0])
     import audiences
     text = open(sys.argv[1]).read() if len(sys.argv) > 1 else sys.stdin.read()

@@ -26,11 +26,26 @@ covers the same team twice.
 
 ## One term is wrong
 
-Reach for this before anything else. It applies immediately and needs no re-measuring.
+Reach for these before anything else. Both apply immediately and need no re-measuring.
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" accept <audience> <TERM>
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" reject <TERM>
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" unreject <TERM>
 ```
+
+`accept` says one audience knows a term the count did not reach. `reject` is the opposite and applies
+everywhere, including the shipped baselines: nobody is assumed to know it, whichever audience is in
+scope, and `unreject` puts it back.
+
+They are not mirror images, and the difference is which mistake they fix. A term wrongly UNKNOWN is
+loud — somebody is asked to explain a word everyone here uses, and they will tell you. A term wrongly
+KNOWN is silent: the message goes out carrying a word the reader does not have, and nothing is said.
+So `reject` is the one worth offering when somebody says "I don't know what that means" about a term
+the tool let through, and it is worth asking whether they mean it for this audience or in general.
+
+`HMR` is the case that produced the command. It shipped in the `engineers` baseline, which claims
+general industry vocabulary, and the engineer who found it in review had never met it.
 
 ## Delete
 
@@ -127,7 +142,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/learn.py" create <name> /tmp/candidates.json 
 ```
 
 The `--match-*` flags say when the audience applies. They are not sources — reading them as "learn
-from this channel" is the mistake to avoid. To change them later, without editing the file by hand:
+from this channel" is the mistake to avoid. Four kinds, and the last two are easy to miss:
+`--match-channel`, `--match-repo`, `--match-owner OWNER` for every repository under one owner, and
+`--match-path GLOB` for an audience that reads particular files.
+
+Two more worth knowing, both of which a scan cannot decide for you:
+
+- `--not-known TERM` is the opposite of `--also-known`: a term the count made look shared because a
+  few people use it in one corner. Use it when somebody says "that one is not general".
+- `--shared-context low|medium|high` is how much of the thread these readers already have. `low` is
+  the default and assumes they are reading cold, which is the safe end. It is worth setting
+  deliberately when an audience is a small group who talk all day — where every audience carries the
+  default, the rule that the least-informed reader decides is ranking a constant.
+
+To change the routing later, without editing the file by hand:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" match <name> channel C0123

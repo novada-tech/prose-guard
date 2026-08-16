@@ -15,8 +15,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/check_prose.py" <file> --who "who reads this,
 These are the same checks prose-guard runs on a message you send, so what it
 says here is what the hook would say. It runs the most thorough level whatever the hook is set
 to, because this is one deliberate run rather than every message someone sends: the deterministic
-term check, then four separate checks for relevance, structure, sentences and reference. Four
-model calls of a few seconds each.
+term check, the deterministic mechanics check, then five model-based checks: relevance, structure,
+sentences, reference, and how it addresses the reader.
+
+**What it costs, before you run it.** Five model calls if nothing is wrong — one per check. More where
+a check keeps finding something new, up to a ceiling that grows with the document: about 30 calls for a
+short one, 85 for 1,600 words, 125 for 2,400 and above. The command prints the ceiling before it starts
+and what it actually spent when it finishes. A long document with real problems is meant to cost more
+than a short clean one; that is the design, not an overrun.
 
 The two flags do different jobs. **`--for` sets the vocabulary** — run
 `python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" list` to see what exists. **`--who` describes the
@@ -36,8 +42,20 @@ that fails: in the one session where this skill was used on real work, the agent
 passes below, reported having done so, and had skipped both of the concrete outputs. Running a
 command cannot be skipped by accident.
 
-Run it again on the rewrite. The check is on the current wording, not on the draft you started
-from.
+Run it again on the rewrite. The check is on the current wording, not on the draft you started from.
+
+Each check runs more than once, and how many times is decided by the text rather than by a flag: a check
+keeps running while its runs keep finding something new, under a ceiling that grows with length. The hook
+uses the same rule on the same text, so a deliberate run and a message going out are held to one bar.
+
+Each item says how often it came up. Seen more than once means a reader can rely on it. Seen once, on a
+document with real defects, means the check sampled a different real defect that run — not that the item
+is noise. Fix everything you agree with in one edit rather than one per finding.
+
+Then run it again on the rewrite, and stop when the number of checks with something to say has stopped
+falling. One finding a pass is roughly what a good writer's own draft scores here, so disagreeing with
+what is left is allowed — chasing zero is chasing something a good writer does not reach. The
+measurements behind all of that are in [docs/design-notes.md](../../../../docs/design-notes.md).
 
 ## What you hand back
 

@@ -75,8 +75,10 @@ Inside a team the names are unremarkable and useful: they are who the audience *
 `overlap` work, and the person who measured it is usually among them. Published, they are a list of
 named people, and some of those names come from sources wider than the team — a public repository's
 contributors, a channel shared with clients. So `share` asks GitHub whether the target repository is
-public, reports what it found, and refuses `--with-names` when the answer is yes. Where it cannot tell,
-it says so and leaves the decision with you.
+public, and `--with-names` goes ahead only when the answer is a definite no. Where it cannot tell — not
+a git repository yet, no `gh` on the path, `gh` not logged in, a remote that is not GitHub — it refuses
+and says which of those it hit. Not being able to tell used to mean the names went out, and three of the
+four ways a first-time user arrives are ways of not being able to tell.
 
 ### Retiring a shared audience
 
@@ -88,8 +90,14 @@ commit that says why.
 ## What a shared audience does not carry
 
 Nothing about your machine. Routing identifiers, the measured vocabulary, the prose description of the
-people, what it inherits, and the assumptions. A colleague who pulls it gets the same verdicts you get,
-because those are the whole input.
+people, what it inherits, and the assumptions.
+
+Expansions do not travel either, and that one is a deliberate loss. An expansion is a phrase copied
+verbatim out of private writing — which is exactly where an unreleased project or a client appears in
+full — and a shared audience can end up in a public repository. A colleague who pulls it therefore gets
+the same verdicts you get on whether a term is known, and cannot tell two meanings of the same
+abbreviation apart. `show` says which of the two reasons applies, so nobody is sent to re-scan a corpus
+they never had.
 
 The corpus it was measured from is not included either — it was never in the audience file. If you want
 someone else to be able to re-measure rather than trust the result, share the export command, which is
