@@ -31,8 +31,11 @@ import time
 
 import paths
 
-# Enough to look back over a working day, few enough that the directory stays readable by hand.
-MOST_KEPT = 40
+# One bound, across every session on the machine, because that is the number somebody can reason about
+# — 40 a session times however many sessions is not a bound anybody can hold in their head. The oldest
+# go as new ones arrive. A hundred arguments is more than a week of a busy install and about 600KB at
+# the cap below.
+MOST_KEPT = 100
 # A draft longer than this is truncated rather than dropped: what a reader wants is the difference
 # between two versions, and the difference is usually near the part somebody objected to.
 LONGEST = 6000
@@ -90,20 +93,32 @@ def went_out(session, text):
     argument["sent"] = _clip(text)
     argument["ended"] = time.time()
     data.setdefault("arguments", []).append(argument)
-    data["arguments"] = data["arguments"][-MOST_KEPT:]
     _write(path, data)
     _prune()
     return len(argument["drafts"])
 
 
 def _prune():
-    """Keep the newest MOST_KEPT sessions. A session file is small; a year of them is not."""
+    """Keep the newest MOST_KEPT arguments across every session, and drop what falls out.
+
+    Counted across sessions rather than within one, because a per-session cap is not a bound: a machine
+    that opens twenty sessions a day keeps twenty times whatever the number says.
+    """
     files = sorted(glob.glob(os.path.join(_dir(), "*.json")), key=os.path.getmtime, reverse=True)
-    for stale in files[MOST_KEPT:]:
-        try:
-            os.remove(stale)
-        except OSError:
-            pass
+    room = MOST_KEPT
+    for path in files:
+        data = _read(path)
+        arguments = data.get("arguments") or []
+        if room <= 0:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            continue
+        if len(arguments) > room:
+            data["arguments"] = arguments[-room:]
+            _write(path, data)
+        room -= len(data.get("arguments") or [])
 
 
 def everything():

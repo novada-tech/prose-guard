@@ -258,12 +258,39 @@ def tally(level, rewrites, notes, calls):
     if notes:
         said.append(f"{notes} note" + ("s" if notes != 1 else ""))
     # Where to read the argument back, said only when there is one. A rewrite is an exchange that
-    # happened out of sight, and a person who wants to judge whether the complaint was fair needs the
-    # drafts rather than the count. Nothing is written unless a check held something back, so this
-    # line and that file appear together or not at all.
+    # happened out of sight, and somebody judging whether the complaint was fair needs the drafts rather
+    # than the count. Nothing is recorded unless a check held something back, so this line and that
+    # record appear together or not at all.
+    #
+    # A skill rather than a script path, because everything else here is asked for in words —
+    # /prose-guard:setup, /prose-guard:audiences — and a path to a file inside a plugin directory is
+    # not something anybody should have to keep.
     return (f"prose-guard {level}: " + (", ".join(said) if said else "nothing to say")
             + (f" ({calls} model call{'s' if calls != 1 else ''})" if calls else "")
-            + (f". `python3 {rounds.__file__} show 1` reads the drafts" if rewrites else "") + ".")
+            + (". /prose-guard:feedback shows the drafts" if rewrites else "") + ".")
+
+
+def say_together(findings, checks, state, path, digest, advice, keep):
+    """One interruption carrying what every free check found. True when the call was denied.
+
+    Nothing when there is nothing: the caller does not have to check first. The denial is counted
+    against each check that objected, because each did, and against the session once, because the
+    person was interrupted once — counting it per check there would halve a session's allowance for
+    a message that was held back a single time.
+    """
+    if not findings:
+        return False
+    joined = findings[0]._replace(message="\n".join(f.message for f in findings))
+    before = state["total_denials"]
+    for n, check in enumerate(checks):
+        # Only the first reaches `say`, so only it can emit; the rest just record that they objected.
+        if n:
+            state["denials"][check.NAME] = state["denials"].get(check.NAME, 0) + 1
+    denied = say(joined, checks[0], state, path, digest, advice, keep)
+    if denied and len(checks) > 1:
+        state["total_denials"] = before + 1
+        save_state(path, state)
+    return denied
 
 
 def main():
@@ -370,6 +397,13 @@ def main():
     # one. Bounded three ways so two checks that genuinely disagree make a message expensive and
     # then let it go, rather than hanging the turn.
     advice = []
+    # Findings from the checks that cost nothing, held until all of them have run. Stopping at the
+    # first objection is right when the next one costs a model call — and it is what keeps two blocking
+    # checks from pulling a message apart, which `docs/design-notes.md` records producing no message at
+    # all. Neither reason applies to `terms` and `mechanics`: both are free, both are absolute, and both
+    # ask for a one-word fix. Being sent back for a doubled word and then again for an unexplained
+    # acronym is one turn wasted, and a held turn is the most expensive thing this tool does.
+    free_findings, free_checks = [], []
     unpaid = [c for c in running if costs_a_call(c)
               and (state["verdicts"].get(c.NAME) or {}).get("digest") != digest]
     for check in running:
@@ -380,6 +414,10 @@ def main():
             # It objected to this exact text and the text has not changed, so the answer has not
             # either. Re-say it without paying for it again.
             finding = checks_module.Finding(remembered["severity"], remembered["message"])
+            if not costs_a_call(check) and finding.severity == BLOCK:
+                free_findings.append(finding)
+                free_checks.append(check)
+                continue
             if say(finding, check, state, path, digest, advice, keep):
                 return
             continue
@@ -421,9 +459,21 @@ def main():
         if finding.severity == BLOCK and dest.get("max_severity") == "advise":
             finding = finding._replace(severity="advise")
         state["verdicts"][check.NAME] = {"digest": digest, "message": finding.message,
-                                     "severity": finding.severity}
+                                         "severity": finding.severity}
+        if not costs_a_call(check) and finding.severity == BLOCK:
+            free_findings.append(finding)
+            free_checks.append(check)
+            continue
+        # Everything the free checks found goes out in one interruption, before anything is paid for.
+        if say_together(free_findings, free_checks, state, path, digest, advice, keep):
+            return
+        free_findings, free_checks = [], []
         if say(finding, check, state, path, digest, advice, keep):
             return
+
+    # A free check objected and nothing after it did, so this is where that is said.
+    if say_together(free_findings, free_checks, state, path, digest, advice, keep):
+        return
 
     # The message is going out, so the argument is over: a new message gets a fresh allowance and a
     # fresh budget. The session ledger of total denials deliberately survives, so a fresh draft cannot

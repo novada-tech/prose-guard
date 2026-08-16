@@ -3848,8 +3848,10 @@ def test_the_argument_before_a_message_goes_out_can_be_read_back():
               "ADC migration" in kept[0]["drafts"][0]["text"], True)
         check("and the last entry is what actually went out",
               "reporting index" in kept[0]["sent"], True)
-        check("the person is told where to read it",
-              "rounds.py" in out.get("systemMessage", ""), True)
+        # A skill, not a script path. Everything else here is asked for in words, and nobody should
+        # have to keep a path to a file inside a plugin directory.
+        check("the person is told how to read it",
+              "/prose-guard:feedback" in out.get("systemMessage", ""), True)
 
     # The other half, and the reason writing text here does not contradict discover.py: a message
     # nobody objected to leaves nothing behind at all.
@@ -3890,6 +3892,41 @@ def test_the_article_rule_leaves_words_that_only_look_like_vowels():
     wrong = ("an rule", "an deploy", "a error", "a index")
     check("and every genuine slip still is",
           [p for p in wrong if not mechanics.scan(p)], [])
+
+
+def test_the_free_checks_object_together_rather_than_one_turn_each():
+    """Being sent back for a doubled word and then again for an unexplained acronym is one turn wasted.
+
+    Stopping at the first objection is right when the next check costs a model call, and it is what
+    keeps two blocking checks from pulling a message apart — `docs/design-notes.md` records that
+    producing no message at all. Neither reason applies to `terms` and `mechanics`: both cost nothing,
+    both are absolute, and both ask for a one-word fix.
+    """
+    with tempfile.TemporaryDirectory() as home:
+        repo = os.path.join(home, "repo")
+        os.makedirs(os.path.join(home, "audiences"))
+        os.makedirs(repo)
+        for argv in (["init", "-q"], ["config", "user.email", "a@b.c"], ["config", "user.name", "t"],
+                     ["remote", "add", "origin", "git@github.com:acme/infra.git"]):
+            subprocess.run(["git", "-C", repo, *argv], capture_output=True, timeout=60)
+        with open(os.path.join(home, "audiences", "team.json"), "w") as fh:
+            json.dump({"name": "team", "who": "engineers here", "matches": {"repos": ["acme/infra"]},
+                       "inherits": ["engineers"], "members": ["a", "b", "c", "d"],
+                       "vocabulary": {"PAYLOAD": 5}, "expansions": {}}, fh)
+        env = {**os.environ, "PROSE_GUARD_HOME": home, "PROSE_GUARD_EFFORT": "low"}
+        both = ("Rebuild the the SFTR index after the ADC migration so anyone rebuilding it later can "
+                "tell which figures were used and why the whole index had to be rewritten before sign off")
+        out = hook_reply({"session_id": "b", "tool_name": "Bash", "cwd": repo,
+                          "tool_input": {"command": f'git commit -m "{both}"'}}, env, 120) or {}
+        said = out.get("permissionDecisionReason", "")
+        check("it is held back once", out.get("permissionDecision"), "deny")
+        check("and told about the terms", "SFTR" in said and "ADC" in said, True)
+        check("and the doubled word, in the same interruption", '"the the"' in said, True)
+
+        # One interruption is one denial against the session's allowance, however many checks objected.
+        # Counting it per check would halve what a session gets for a message held back a single time.
+        with open(os.path.join(home, "sessions", "b.json")) as fh:
+            check("which costs the session one denial", json.load(fh)["total_denials"], 1)
 
 
 def teardown_function(_fn):
