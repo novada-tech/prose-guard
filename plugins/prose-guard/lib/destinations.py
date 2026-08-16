@@ -574,9 +574,13 @@ def _cli():
     p.add_argument("--file", metavar="REGEX", help="a pattern matching the path being written")
     p.add_argument("--text-field", nargs="+", metavar="FIELD",
                    help="which field of the tool call carries the prose. Required with --tool")
-    p.add_argument("--text-arg", nargs="+", metavar="FLAG",
-                   help="which flag carries it, for --bash. A flag ending in -file, or -F, names a "
-                        "file whose contents are read")
+    # One at a time, and written as --text-arg=--body: the value is itself a flag, so argparse reads
+    # it as one of ours unless it arrives attached. Given as a list it consumed `--body` as an
+    # unrecognised option and refused the whole command.
+    p.add_argument("--text-arg", action="append", metavar="FLAG",
+                   help="which flag carries it, for --bash — written as --text-arg=--body, and "
+                        "repeated for more than one. A flag ending in -file, or -F, names a file "
+                        "whose contents are read")
     p.add_argument("--identifier", nargs="+", metavar="KEY=FIELD",
                    help="what the call reveals about who will read it, so an audience can be matched: "
                         "channel=channel_id, repo=owner,name, cwd_repo=true")

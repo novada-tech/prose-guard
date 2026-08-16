@@ -2868,6 +2868,16 @@ def test_add_is_the_one_writer_of_the_destination_schema():
         check("and nothing that was refused landed in the file",
               [d["name"] for d in D.DESTINATIONS if d["_origin"] == "yours"], ["our wiki"])
 
+        # The flag a command carries its prose in is itself a flag, and argparse reads a bare `--body`
+        # as one of ours: given as a list it refused the whole command as an unrecognised option.
+        r = subprocess.run([sys.executable, os.path.join(LIB, "destinations.py"), "add", "our forge",
+                            "--bash", r"\bforge\s+post\b", "--text-arg=--body", "--text-arg=-m"],
+                           capture_output=True, text=True,
+                           env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=120)
+        check("a flag can be the value of a flag", r.returncode, 0)
+        _, D = fresh(home)
+        check("and both were written", (D.find("our forge") or {}).get("text_arg"), ["--body", "-m"])
+
         # The same declaration, reached the other way: a pattern somebody hand-wrote that does not
         # compile used to raise out of `match`, and a PreToolUse hook that exits non-zero lets the call
         # through unchecked — the schema failing open in the one direction that matters.
