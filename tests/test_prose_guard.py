@@ -22,6 +22,17 @@ LIB = os.path.join(PLUGIN, "lib")
 GUARD = os.path.join(PLUGIN, "hooks", "scripts", "guard-outgoing-prose.sh")
 sys.path.insert(0, LIB)
 
+# Before anything is imported, and never unset. Several modules read config files at import, so a test
+# that runs before the first `fresh()` used to read whoever's config was on the machine — which meant
+# WHICH tests were isolated was decided by their line numbers. A developer with an `engineers.json` of
+# their own failed 33 of 46, and a `destinations.json` with one entry switched off crashed a fourth
+# under `pytest -k`, because that ordering does not run the tests that happen to isolate the rest.
+_ISOLATED = tempfile.mkdtemp(prefix="prose-guard-tests-")
+os.environ["PROSE_GUARD_HOME"] = _ISOLATED
+os.environ.pop("PROSE_GUARD_EFFORT", None)
+os.environ.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
+os.environ.pop("PROSE_GUARD_STATE", None)
+
 PAD = (" Anyone still relying on the previous credentials will need to re-run the setup command "
        "before their next deploy actually goes through cleanly today.")
 FAILS = []
