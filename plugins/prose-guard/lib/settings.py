@@ -115,30 +115,34 @@ LEVELS = ("disabled", "low", "medium", "high")
 SEVERITIES = ("block", "advise")
 CONTEXTS = ("low", "medium", "high")
 
-CONFIG: dict[str, Rule] = {"effort": one_of(*LEVELS),
-          "shared": each(text),
-          "unresolved_audience": text,
-          # Terms never assumed known, whichever audience applies. See audiences.never_known.
-          "not_known": each(text)}
+CONFIG: dict[str, Rule] = {
+    "effort": one_of(*LEVELS),
+    "shared": each(text),
+    "unresolved_audience": text,
+    # Terms never assumed known, whichever audience applies. See audiences.never_known.
+    "not_known": each(text)}
 
 # A destination: which tool calls carry prose to which readers, and how hard to look. `max_effort` and
 # `max_severity` are the two that exist to make the guard LESS aggressive, which is why a typo in
 # either is the one that must not pass.
-DESTINATION: dict[str, Rule] = {"name": text, "note": text, "caveat": text,
-               "tool": each(text), "bash": text, "file": text,
-               "text_fields": each(text), "text_arg": each(text),
-               "identifiers": mapping, "when": mapping, "context_from": mapping,
-               "require_tracked": flag,
-               "max_effort": one_of(*LEVELS),
-               "max_severity": one_of(*SEVERITIES)}
+DESTINATION: dict[str, Rule] = {
+    "name": text, "note": text, "caveat": text,
+    "tool": each(text), "bash": text, "file": text,
+    "text_fields": each(text), "text_arg": each(text),
+    "identifiers": mapping, "when": mapping, "context_from": mapping,
+    "require_tracked": flag,
+    "max_effort": one_of(*LEVELS),
+    "max_severity": one_of(*SEVERITIES)}
 
-DESTINATIONS_FILE: dict[str, Rule] = {"destinations": anything, "public_owners": each(text), "off": each(text),
-                     "_meta": anything, "public_owners_help": anything}
+DESTINATIONS_FILE: dict[str, Rule] = {
+    "destinations": anything, "public_owners": each(text), "off": each(text),
+    "_meta": anything, "public_owners_help": anything}
 
-AUDIENCE: dict[str, Rule] = {"name": text, "who": text, "inherits": each(text),
-            "matches": mapping, "vocabulary": mapping, "expansions": mapping,
-            "members": each(text), "assumptions": mapping,
-            "_meta": anything, "_note": anything}
+AUDIENCE: dict[str, Rule] = {
+    "name": text, "who": text, "inherits": each(text),
+    "matches": mapping, "vocabulary": mapping, "expansions": mapping,
+    "members": each(text), "assumptions": mapping,
+    "_meta": anything, "_note": anything}
 
 ASSUMPTIONS: dict[str, Rule] = {"shared_context": one_of(*CONTEXTS)}
 
