@@ -34,11 +34,14 @@ does not imply every member of it knows the term, and dropping an audience can o
 vocabulary, which is the unsafe direction. `overlap()` reports shared membership for a human to
 look at instead.
 """
+from __future__ import annotations
+
 import fnmatch
 import itertools
 import json
 import os
 import subprocess
+from typing import Any
 
 import paths
 import re
@@ -56,11 +59,11 @@ CONTEXT_ORDER = ("low", "medium", "high")
 SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
-def user_dir():
+def user_dir() -> str:
     return paths.mine().audiences
 
 
-def usable_name(name):
+def usable_name(name: Any) -> str | None:
     """The name if it can become a filename, else None. The one gate between a name and a path.
 
     Every write goes through `path_for`, `path_for` goes through here, and `load` drops a file whose
@@ -75,7 +78,7 @@ def usable_name(name):
 
 
 class Audience:
-    def __init__(self, data, path, origin):
+    def __init__(self, data: dict[str, Any], path: str, origin: str) -> None:
         self.path = path
         # Which layer it came from, in the words `list` prints: yours, shared, built in. One label,
         # from paths.layers(), so this and destinations.py cannot describe the same layer differently.
@@ -114,7 +117,7 @@ class Audience:
         self.meta = data.get("_meta") or {}
 
     # ---------------------------------------------------------------- matching
-    def matches(self, ctx):
+    def matches(self, ctx: dict[str, str]) -> bool:
         """ctx carries whatever the tool call revealed: channel, repo, owner, path, cwd_repo."""
         m = self.matches_on
         # `channels` is generic on purpose: any chat destination yields a channel id, and whatever
@@ -134,7 +137,7 @@ class Audience:
                     return True
         return False
 
-    def known(self, baselines):
+    def known(self, baselines: dict[str, set[str]]) -> set[str]:
         """Terms this audience can be assumed to know: measured, plus any baseline it inherits."""
         terms = {t for t, n in self.vocabulary.items() if n >= MIN_AUTHORS}
         for name in self.inherits:
@@ -142,17 +145,17 @@ class Audience:
         return terms
 
     @property
-    def builtin(self):
+    def builtin(self) -> bool:
         return self.origin == "built in"
 
     @property
-    def shared(self):
+    def shared(self) -> bool:
         """It came from a directory a team keeps, so it is not yours to delete: it goes away when
         somebody removes it from that repository."""
         return self.origin == "shared"
 
     @property
-    def rescan_note(self):
+    def rescan_note(self) -> str:
         """Why this audience cannot tell an overloaded abbreviation apart, or "" if it can.
 
         Two different reasons, and telling someone to rescan a file they did not measure is worse than
@@ -165,11 +168,11 @@ class Audience:
             return "no expansions: a shared audience travels without them"
         return "rescan: no expansions recorded"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Audience {self.name} {len(self.vocabulary)} terms, {self.origin}>"
 
 
-def _read(path):
+def _read(path: str) -> Any:
     try:
         with open(path) as fh:
             return json.load(fh)
@@ -177,7 +180,7 @@ def _read(path):
         return None
 
 
-def load():
+def load() -> dict[str, Audience]:
     """Built-ins, then your team's, then yours. Later replaces earlier by name.
 
     That order is the useful one, and it is `paths.layers()` read backwards — nearest last, because an
@@ -188,7 +191,7 @@ def load():
     Replacing is not free and is now visible: what a file displaced is recorded on it, so `list` can
     say that the 227-term shipped baseline is not what is being used.
     """
-    found = {}
+    found: dict[str, Audience] = {}
     for layer in reversed(paths.layers()):
         for path in layer.audience_files():
             data = _read(path)
@@ -211,7 +214,7 @@ BASELINES = {name: a.known({}) for name, a in ALL.items() if not a.matches_on}
 class Resolved:
     """What one outgoing message is being judged against."""
 
-    def __init__(self, audiences, unresolved_default=None):
+    def __init__(self, audiences: list[Audience], unresolved_default: str | None = None) -> None:
         self.audiences = audiences
         self.resolved = bool(audiences)
         self.fallback = unresolved_default if not audiences else None
@@ -224,10 +227,10 @@ class Resolved:
                                   key=CONTEXT_ORDER.index) if source else CONTEXT_ORDER[0]
 
     @property
-    def names(self):
+    def names(self) -> list[str]:
         return [a.name for a in self.audiences]
 
-    def meanings(self, term):
+    def meanings(self, term: str) -> dict[str, int]:
         """What this term has been written out as, by how many people, across the audiences in scope."""
         out = {}
         for a in self.audiences:
@@ -235,10 +238,10 @@ class Resolved:
                 out[long] = out.get(long, 0) + count
         return out
 
-    def is_known(self, term):
+    def is_known(self, term: str) -> bool:
         return term.upper() in self.known and term.upper() not in never_known()
 
-    def describe(self):
+    def describe(self) -> str:
         """The prose the model-based checks are given. Only ever descriptive."""
         if not self.resolved:
             who = (ALL[self.fallback].who if self.fallback in ALL else "")
@@ -250,24 +253,24 @@ class Resolved:
         return ("several groups at once, so assume only what all of them share — " + joined)
 
 
-def resolve(ctx, unresolved_default="engineers"):
+def resolve(ctx: dict[str, str], unresolved_default: str = "engineers") -> Resolved:
     scope = [a for a in ALL.values() if a.matches_on and a.matches(ctx)]
     return Resolved(scope, unresolved_default)
 
 
-def _key(name):
+def _key(name: str) -> str:
     """A person's name reduced to something two sources might agree on."""
     return re.sub(r"[^a-z]", "", name.lower())
 
 
-def _might_be(x, y):
+def _might_be(x: str, y: str) -> bool:
     """Whether two names from different sources might be one person. A prefix match on at least four
     letters: shorter than that, initials collide with everybody."""
     kx, ky = _key(x), _key(y)
     return min(len(kx), len(ky)) >= 4 and (kx.startswith(ky) or ky.startswith(kx))
 
 
-def possible_overlap():
+def possible_overlap() -> list[tuple[str, str, list[tuple[str, str]], int, int]]:
     """People who MIGHT be in two audiences at once. A hint for a person, never a fact.
 
     Exact overlap is not computable and the tool does not pretend otherwise. Sources name people
@@ -292,7 +295,7 @@ def possible_overlap():
 
 
 # ------------------------------------------------------------------------ writing
-def path_for(name, directory=None):
+def path_for(name: Any, directory: str | None = None) -> str:
     """Where an audience file goes. The only place a name turns into a path.
 
     Refuses rather than sanitising quietly, because a name that is not a usable name means the file it
@@ -307,7 +310,7 @@ def path_for(name, directory=None):
     return os.path.join(directory or user_dir(), safe + ".json")
 
 
-def _write(path, data):
+def _write(path: str, data: dict[str, Any]) -> str:
     """One writer, so every audience file on disk has the same shape whoever wrote it — the file a
     `share` puts in a team repository has to be readable by `load` on someone else's machine."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -317,11 +320,11 @@ def _write(path, data):
     return path
 
 
-def save(name, data):
+def save(name: str, data: dict[str, Any]) -> str:
     return _write(path_for(name), data)
 
 
-def remove(name):
+def remove(name: str) -> str:
     a = ALL.get(name)
     if a is None:
         raise KeyError(name)
@@ -338,7 +341,7 @@ def remove(name):
     return a.path
 
 
-def never_known():
+def never_known() -> set[str]:
     """Terms this machine says nobody should be assumed to know, whichever audience is in scope.
 
     The escape hatch for a vocabulary that is wrong in the direction nothing else can correct. `accept`
@@ -356,7 +359,7 @@ def never_known():
     return {str(t).upper() for t in (paths.config().get("not_known") or [])}
 
 
-def reject(term):
+def reject(term: str) -> str | None:
     """Say that a term should never be assumed known. Returns where it was written."""
     listed = [str(t).upper() for t in (paths.config().get("not_known") or [])]
     if term.upper() in listed:
@@ -364,7 +367,7 @@ def reject(term):
     return paths.update_config(not_known=sorted(listed + [term.upper()]))
 
 
-def unreject(term):
+def unreject(term: str) -> str | None:
     """Undo `reject`. Returns where it was written, or None when it was not rejected."""
     listed = [str(t).upper() for t in (paths.config().get("not_known") or [])]
     if term.upper() not in listed:
@@ -372,7 +375,7 @@ def unreject(term):
     return paths.update_config(not_known=[t for t in listed if t != term.upper()])
 
 
-def accept(name, term):
+def accept(name: str, term: str) -> str | None:
     """Mark a term known for one audience, at full confidence, without re-measuring.
 
     What to reach for when a single flag is wrong. It edits the audience file, so it is visible in
@@ -404,7 +407,8 @@ DIMENSIONS = {
 }
 
 
-def route(name, dimension, values, drop=False):
+def route(name: str, dimension: str, values: list[str],
+          drop: bool = False) -> tuple[str | None, list[str]]:
     """Add or remove the identifiers that decide when an audience applies.
 
     Without this the only way to widen an audience was to hand-edit its JSON, which someone did —
@@ -439,7 +443,7 @@ def route(name, dimension, values, drop=False):
 # The COUNT travels either way, because that is the provenance a reader actually needs: an audience
 # measured over 94 people deserves more trust than one measured over 5, and neither answer requires a
 # name.
-def visibility(directory):
+def visibility(directory: str) -> tuple[bool | None, str]:
     """Whether the repository holding a directory is public: True, False, or None for cannot tell.
 
     Best effort and clearly labelled as such. Whether names may be shared depends entirely on who can
@@ -467,7 +471,7 @@ def visibility(directory):
         return None, "could not tell who can read this repository"
 
 
-def share(name, directory, with_names=False):
+def share(name: str, directory: str, with_names: bool = False) -> tuple[str, int]:
     """Copy one audience into a directory a team keeps.
 
     Sharing is a separate verb on purpose. This shares exactly the one you name — audiences are
@@ -496,7 +500,7 @@ def share(name, directory, with_names=False):
     return _write(path_for(name, directory), data), len(people)
 
 
-def _cli():
+def _cli() -> None:
     import argparse
     ap = argparse.ArgumentParser(description="Inspect and manage audiences.")
     sub = ap.add_subparsers(dest="cmd", required=True)

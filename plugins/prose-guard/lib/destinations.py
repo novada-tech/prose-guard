@@ -10,14 +10,21 @@ edit to a document reads as an incoherent message when it is a diff.
 Which tools count is data — data/destinations.json, plus your file which is tried first so you can
 override an entry as well as add one.
 """
+from __future__ import annotations
+
 import json
 import os
+from typing import Any
 
 import command
 import paths
 import settings
 import re
 import subprocess
+
+# One entry of a destinations.json, after settings.DESTINATION has checked it: the fields in that
+# declaration, plus the `_origin` this module adds to say which layer it came from.
+Dest = dict[str, Any]
 
 # A short message is not the failure this catches, and is not worth a model call.
 MIN_WORDS = 25
@@ -27,11 +34,11 @@ FILE_TOOLS = ("Write", "Edit", "NotebookEdit")
 PATTERNS = ("bash", "file")
 
 
-def _user_path():
+def _user_path() -> str:
     return paths.mine().destinations
 
 
-def _read(path):
+def _read(path: str) -> tuple[dict[str, Any], list[str]]:
     """One layer, checked against its declaration. Complaints are collected rather than raised."""
     got, complaints = settings.read(path, settings.DESTINATIONS_FILE, os.path.basename(path))
     rows, kept = got.get("destinations") or [], []
@@ -52,7 +59,7 @@ def _read(path):
     return got, complaints
 
 
-def _uncompilable(entry, where):
+def _uncompilable(entry: Dest, where: str) -> list[str]:
     """Complaints for any pattern that will not compile. The field is dropped rather than kept.
 
     A pattern is the one thing the declaration cannot check by shape: `"bash": "gh pr ("` is perfectly
@@ -72,7 +79,7 @@ def _uncompilable(entry, where):
     return out
 
 
-def load():
+def load() -> tuple[list[Dest], set[str], list[tuple[str, str, int]], list[str]]:
     """Yours first, then your team's, then the shipped set. First match wins, so an earlier layer
     overrides a later one — which is how a team stops something being checked, or checks it differently,
     for everybody at once.
@@ -89,16 +96,18 @@ def load():
     many entries it actually stopped: a name that stops nothing is one somebody renamed in a release,
     and printing it as switched off is how a person comes to believe a check is not running.
     """
-    layers, complaints = [], []
+    layers: list[tuple[str, dict[str, Any]]] = []
+    complaints: list[str] = []
     for layer in paths.layers():
         got, said = _read(layer.destinations)
         layers.append((layer.origin, got))
         complaints.extend(said)
-    silenced = {}
+    silenced: dict[str, list[Any]] = {}
     for origin, layer in layers:
         for name in layer.get("off") or []:
             silenced.setdefault(str(name).lower(), [str(name), origin, 0])
-    found, owners = [], set()
+    found: list[Dest] = []
+    owners: set[str] = set()
     for origin, layer in layers:
         for entry in layer.get("destinations") or []:
             stopped = silenced.get(str(entry.get("name", "")).lower())
@@ -113,7 +122,7 @@ def load():
 DESTINATIONS, PUBLIC_OWNERS, SWITCHED_OFF, COMPLAINTS = load()
 
 
-def _repo_at(path):
+def _repo_at(path: str | None) -> str | None:
     """owner/name for the git remote at `path`, or None. Used to resolve an audience for a commit
     message or a `gh` invocation, where the repository is the cwd rather than an argument."""
     try:
@@ -125,7 +134,7 @@ def _repo_at(path):
     return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
-def _is_tracked_prose(path):
+def _is_tracked_prose(path: str) -> bool:
     """True when the file sits in a git working tree and is not ignored.
 
     That is the line between a document colleagues will read and a scratch file: one gets
@@ -150,7 +159,7 @@ def _is_tracked_prose(path):
         return False
 
 
-def _matches(dest, tool, tool_input):
+def _matches(dest: Dest, tool: str, tool_input: dict[str, Any]) -> bool:
     names = dest.get("tool")
     if names:
         if isinstance(names, str):
@@ -172,7 +181,7 @@ def _matches(dest, tool, tool_input):
     return False
 
 
-def match(tool, tool_input):
+def match(tool: str, tool_input: Any) -> Dest | None:
     if not isinstance(tool_input, dict):
         return None
     for dest in DESTINATIONS:
@@ -181,7 +190,7 @@ def match(tool, tool_input):
     return None
 
 
-def _from_bash(dest, cmd, cwd=None):
+def _from_bash(dest: Dest, cmd: str, cwd: str | None = None) -> str | None:
     passed = list(command.flag_values(cmd))
     for flag in dest.get("text_arg") or ():
         values = [v for f, v in passed if f == flag]
@@ -223,7 +232,8 @@ def _from_bash(dest, cmd, cwd=None):
     return None
 
 
-def resulting(dest, tool, tool_input, cwd=None):
+def resulting(dest: Dest, tool: str, tool_input: dict[str, Any],
+              cwd: str | None = None) -> tuple[str | None, str]:
     """The document as it will be AFTER this call, and which part of it is new.
 
     An edit was being judged as though the hunk were the whole document. Both "no sentence stating what
@@ -252,7 +262,7 @@ def resulting(dest, tool, tool_input, cwd=None):
     return None, ""
 
 
-def extract(dest, tool, tool_input, cwd=None):
+def extract(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None = None) -> str | None:
     """The prose about to leave, or None if there is not enough of it to judge."""
     if tool == "Bash":
         text = _from_bash(dest, str(tool_input.get("command") or ""), cwd)
@@ -269,7 +279,8 @@ def extract(dest, tool, tool_input, cwd=None):
     return text if text and len(text.split()) >= MIN_WORDS else None
 
 
-def identifiers(dest, tool, tool_input, cwd=None):
+def identifiers(dest: Dest, tool: str, tool_input: dict[str, Any],
+                cwd: str | None = None) -> dict[str, str]:
     """What the call reveals about who will read it. audiences.py matches on exactly this."""
     spec = dest.get("identifiers") or {}
     out = {}
@@ -291,7 +302,8 @@ def identifiers(dest, tool, tool_input, cwd=None):
     return out
 
 
-def unreadable(dest, tool, tool_input, cwd=None):
+def unreadable(dest: Dest, tool: str, tool_input: dict[str, Any],
+               cwd: str | None = None) -> str | None:
     """Why a matched destination yielded no text, when the reason is worth telling somebody.
 
     The alternative is what happened when the pull request for this very change was opened: the guard
@@ -322,7 +334,7 @@ def unreadable(dest, tool, tool_input, cwd=None):
     return None
 
 
-def previous(dest, tool, tool_input, cwd=None):
+def previous(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None = None) -> str:
     """The text this one replaces, where there is one. Empty string when there is not.
 
     A term already in the text being replaced is not a term this message introduces. Someone was asked
@@ -356,7 +368,7 @@ def previous(dest, tool, tool_input, cwd=None):
     return ""
 
 
-def situation(dest, tool, tool_input):
+def situation(dest: Dest, tool: str, tool_input: dict[str, Any]) -> dict[str, Any]:
     """Facts about the moment rather than the reader: a thread reply, an edit, a public repo."""
     out = {}
     if dest.get("note"):
@@ -389,11 +401,11 @@ def situation(dest, tool, tool_input):
 
 
 # ---------------------------------------------------------------------------- managing them
-def _user_file():
+def _user_file() -> dict[str, Any]:
     return _read(_user_path())[0]
 
 
-def _save_user(data):
+def _save_user(data: dict[str, Any]) -> str:
     paths.ensure()
     with open(_user_path(), "w") as fh:
         json.dump(data, fh, indent=1)
@@ -401,7 +413,7 @@ def _save_user(data):
     return _user_path()
 
 
-def find(name):
+def find(name: str) -> Dest | None:
     """The destination of that name, and which layer it came from."""
     for entry in DESTINATIONS:
         if str(entry.get("name", "")).lower() == name.lower():
@@ -409,7 +421,7 @@ def find(name):
     return None
 
 
-def remove(name):
+def remove(name: str) -> str:
     """Delete one of your own. A shipped or shared one is switched off instead — see `off`."""
     data = _user_file()
     rows = list(data.get("destinations") or [])
@@ -426,12 +438,12 @@ def remove(name):
     return _save_user(data)
 
 
-def switched_off_by(name):
+def switched_off_by(name: str) -> list[str]:
     """The layers whose `off` list holds this name: yours, shared, built in."""
     return [origin for n, origin, _ in SWITCHED_OFF if n.lower() == name.lower()]
 
 
-def switch(name, on):
+def switch(name: str, on: bool) -> str | None:
     """Stop, or resume, checking a destination on this machine, whichever layer it came from.
 
     Only your own file is written. A name your team switched off is refused rather than quietly left
@@ -460,7 +472,7 @@ def switch(name, on):
     return _save_user(data)
 
 
-def add(entry):
+def add(entry: dict[str, Any]) -> tuple[str, str | None]:
     """Write one destination into your own file. The only writer, checked by the same declaration
     `load` reads with, so the file cannot hold a shape the loader will drop.
 
@@ -498,7 +510,7 @@ def add(entry):
     return _save_user(data), (shadowed or {}).get("_origin")
 
 
-def share(directory, only=None, with_off=False):
+def share(directory: str, only: str | None = None, with_off: bool = False) -> str:
     """Copy destinations from this machine into a directory a team keeps.
 
     Only ever your own: the shipped set is already everywhere, and copying it would put a stale duplicate
@@ -547,7 +559,7 @@ def share(directory, only=None, with_off=False):
             f"`rm` the local one once it is committed, or keep it if yours is deliberately different.")
 
 
-def _how(entry):
+def _how(entry: Dest) -> str:
     if entry.get("bash"):
         return "a command: " + entry["bash"][:44]
     if entry.get("file"):
@@ -556,7 +568,7 @@ def _how(entry):
     return f"{len(tools)} tool(s): " + ", ".join(tools[:2]) + (" …" if len(tools) > 2 else "")
 
 
-def _identifiers(pairs):
+def _identifiers(pairs: list[str]) -> dict[str, Any]:
     """`channel=channel_id`, `repo=owner,name` or `cwd_repo=true`, as the map audiences route on.
 
     An identifier is what turns a tool call into a reader: the channel id in the call is what says
@@ -574,7 +586,7 @@ def _identifiers(pairs):
     return out
 
 
-def _cli():
+def _cli() -> None:
     import argparse
     ap = argparse.ArgumentParser(description="Inspect and manage destinations — what counts as sending.")
     sub = ap.add_subparsers(dest="cmd", required=True)
