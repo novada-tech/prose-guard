@@ -2676,6 +2676,40 @@ def test_what_this_plugin_expects_of_its_host_is_in_one_place():
             os.environ["HOME"] = was
 
 
+def test_what_the_hook_adds_to_the_conversation_is_bounded_and_ordered():
+    """Findings the agent can act on come first, and the rest is a count rather than a list.
+
+    Measured before this: 1,466 tokens for one edit of a long document, of which 1,393 were about
+    sentences the edit never touched — the tool making an agent read a list of somebody else's
+    sentences while it is mid-edit and can act on none of them. Worst case 8,310. One budget for the
+    whole turn, because five checks each staying under a limit is not a limit.
+    """
+    import importlib.util
+
+    import checks
+
+    spec = importlib.util.spec_from_file_location(
+        "guard_for_budget_test", os.path.join(PLUGIN, "hooks", "scripts", "outgoing_guard.py"))
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+
+    found = [checks.Finding(checks.BLOCK,
+                            f'The sentence "number {n} here" is unclear and wants rewriting so a '
+                            f'reader can act on it without reading the paragraph twice') for n in range(25)]
+    def mine(f):
+        return '"number 7 ' in f.message
+
+    msg = guard.one_message(found, mine, guard.MOST_TO_SAY)
+    check("what this call wrote is said first", '"number 7 ' in msg.splitlines()[0], True)
+    check("the rest is a count, not a list", "more, about text this call did not write" in msg, True)
+    check("and it fits the budget", len(msg) <= guard.MOST_TO_SAY + 400, True)
+
+    # A spent budget must not silence a check completely: that is indistinguishable from passing.
+    last = guard.one_message(found, mine, 0)
+    check("a check with nothing left to spend still says one thing", len(last.splitlines()) >= 1, True)
+    check("and it is the actionable one", '"number 7 ' in last.splitlines()[0], True)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 

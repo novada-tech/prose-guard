@@ -171,6 +171,39 @@ def emit(decision, message, hint="", for_user=""):
     print(json.dumps({"hookSpecificOutput": out}))
 
 
+# What this tool may add to the conversation about one message, in characters. Everything every check
+# found used to be joined and sent, with nothing bounding it: measured at 1,466 tokens for one edit of
+# a long document, of which 1,393 were findings about sentences the edit never touched, and a worst
+# case of 8,310. That is the tool making an agent read a list of somebody else's sentences while it is
+# mid-edit and can act on none of them. One budget for the whole turn rather than one per check,
+# because five checks each staying under a limit is not a limit.
+MOST_TO_SAY = 3000
+
+
+def one_message(found, mine, budget):
+    """Everything worth saying about one check's findings, within what is left of the turn's budget.
+
+    What this call wrote comes first, whatever order the runs found things in: those are the ones the
+    agent can act on now, and they are the only ones that can hold the message back. So a budget that
+    runs out drops the least actionable findings, not an arbitrary tail.
+    """
+    ordered = [f for f in found if mine(f)] + [f for f in found if not mine(f)]
+    lines, dropped = [], 0
+    for f in ordered:
+        line = f.message + ("" if mine(f) else "  (already in the file)")
+        # `lines and` is a floor of one, deliberately: a check that found something always gets to say
+        # one thing, or a spent budget would silence the last check completely and that is
+        # indistinguishable from it passing. So the real ceiling is the budget plus one line per check.
+        if lines and sum(len(x) + 1 for x in lines) + len(line) > budget:
+            dropped += 1
+            continue
+        lines.append(line)
+    if dropped:
+        lines.append(f"({dropped} more, about text this call did not write. "
+                     f"`python3 lib/check_prose.py <file>` shows them.)")
+    return "\n".join(lines)
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -298,8 +331,7 @@ def main():
             return written_here(text, f, ctx.mine)
         blocking = [f for f in firm if f.severity == BLOCK and mine(f)]
         finding = found[0]._replace(
-            message="\n".join(f.message + ("" if mine(f) else "  (already in the file)")
-                              for f in found),
+            message=one_message(found, mine, MOST_TO_SAY - sum(len(a) for a in advice)),
             severity=BLOCK if blocking else "advise")
         # A destination can refuse to block at all. Blocking is justified by the text being about to
         # reach a reader unreviewed; where it is not — a draft that lands in your own compose box —

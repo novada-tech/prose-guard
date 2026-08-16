@@ -14,17 +14,28 @@ comment, a commit message, a document — against two questions:
 **Who is going to read this?**
 **Why should they care?**
 
-From these two central questions of effective communication, six checks follow, and they are what actually runs. The first is arithmetic and can
-hold a message back; the other five are judgement and only ever advise.
+From these two central questions of effective communication, seven checks follow, and they are what
+actually runs. Two are arithmetic — no model call, and they run at every level. Five are judgement.
 
-| | |
-|---|---|
-| **Terms they do not know** | an acronym never explained, judged against what your audience has actually written. Deterministic, and the only check that can hold a message back. |
-| **No reason to care** | it never says what changed for them or why it matters. |
-| **Missing what they need** | the command to run, the version, the deadline, the choice — absent. |
-| **Things they will not act on** | backstory they lived through, identifiers nobody types, reassurance nobody asked for, proof that you tested it. |
-| **A paragraph doing two jobs** | two unrelated ideas in one, or an opening sentence that does not state its own. |
-| **Something they have to decode** | a coined label like "the silent row", a pronoun whose subject is four sentences back, the thing they must do buried under a subordinate clause. |
+| | | |
+|---|---|---|
+| **Terms they do not know** | an acronym never explained, judged against what your audience has actually written | arithmetic |
+| **A word typed twice, `a` where `an` belongs** | objective, and a one-word fix | arithmetic |
+| **No reason to care** | it never says what changed for them or why it matters | judgement |
+| **Missing what they need** | the command to run, the version, the deadline, the choice — absent | judgement |
+| **Things they will not act on** | backstory they lived through, identifiers nobody types, reassurance nobody asked for, proof that you tested it | judgement |
+| **A paragraph doing two jobs** | two unrelated ideas in one, or an opening sentence that does not state its own | judgement |
+| **Something they have to decode** | a coined label like "the silent row", a pronoun whose subject is four sentences back, the thing they must do buried under a subordinate clause | judgement |
+
+**What can hold a message back depends on the level.** The two arithmetic checks always can: both are
+objective and both are a small fix. At `high` the five judgement checks can too, because each names one
+concern and quotes the span it means, and a finding two runs agree on is specific enough to act on. At
+`medium` the same five concerns are asked as one combined question, and that only ever advises —
+measured against a real label it agrees 50–70% of the time and disagrees with itself between runs, which
+is a prompt to look again rather than something to gate on.
+
+**Under 25 words nothing is checked at all.** A short message is not the failure this catches, and it is
+not worth a model call — so a one-line commit message is the wrong thing to test it with.
 
 Everything below is those two questions, made checkable.
 
@@ -46,9 +57,10 @@ Send to that channel and it knows `GKE` is safe and `SFTR` is not. Send somewher
 of and it says so rather than guessing at you: **findings become advice, and nothing is held back**,
 because a tool that blocks on a guess spends your first day arguing about your own house vocabulary.
 
-That is also why the five judgement checks only ever advise. Asked to sort real messages by whether a
-colleague or an agent wrote them, they manage 50–70%, unstably. Useful as a prompt to look again. Not
-something to gate on.
+That is also why `medium`'s combined judgement call only ever advises. Asked to sort real messages by
+whether a colleague or an agent wrote them, it manages 50–70%, unstably. Useful as a prompt to look
+again. Not something to gate on. `high` asks the same concerns one at a time and each answer quotes the
+span it means, which is specific enough to hold a message for.
 
 ## Setting it up
 
@@ -90,8 +102,8 @@ already has.
 | level | what runs | added per message sent |
 |---|---|---|
 | `disabled` | nothing | — |
-| `low` | the term check only, no model call | +12s |
-| `medium` | plus one advisory judgement call | +19s |
+| `low` | the two arithmetic checks only, no model call | +12s |
+| `medium` | plus one advisory judgement call over the five concerns | +19s |
 | `high` | five separate checks, re-verified after each edit | +75s |
 
 The seconds were measured when `high` ran four checks; the fifth was added afterwards and they have not
