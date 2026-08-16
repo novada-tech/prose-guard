@@ -35,6 +35,13 @@ os.environ.pop("PROSE_GUARD_STATE", None)
 
 PAD = (" Anyone still relying on the previous credentials will need to re-run the setup command "
        "before their next deploy actually goes through cleanly today.")
+# A paragraph, and it has to be one: passive discovery, the prose-file destination and every routing
+# fixture below are asked to tell a document from a search pattern, and `"word " * 40` is long without
+# being either. Written out ten times in three slightly different wordings, so a change to what
+# "reads like prose" means had ten places to reach and no place to start.
+PROSE = ("The exporter line was removed because nothing on a laptop reads that variable. Plans had "
+         "started failing in any shell older than an hour, so access uses the application default "
+         "credential now. Continuous integration sets it itself.")
 FAILS = []
 
 
@@ -60,6 +67,21 @@ def hook_reply(payload, environment, timeout=300):
     assert not r.stderr.strip(), f"the hook wrote to stderr: {r.stderr.strip()[-1500:]}"
     out = r.stdout.strip()
     return json.loads(out)["hookSpecificOutput"] if out else None
+
+
+def verdict_on(payload, home, timeout=120):
+    """What the hook decided about one tool call: ("deny" | "advise" | "allowed", what it said).
+
+    Five tests had their own copy of this, differing only in a timeout and in whether they called
+    saying nothing "allowed" or "silent". Saying nothing IS allowing — a PreToolUse hook that prints
+    nothing lets the call through — so there is one word for it here.
+    """
+    out = hook_reply(payload, {**os.environ, "PROSE_GUARD_HOME": home}, timeout)
+    if out is None:
+        return "allowed", ""
+    if out.get("permissionDecision") == "deny":
+        return "deny", out["permissionDecisionReason"]
+    return "advise", str(out.get("additionalContext") or "")
 
 
 def fresh(home):
@@ -486,11 +508,7 @@ def test_prose_files_must_be_tracked():
     committed. Extension alone would check the agent's own notes."""
     with tempfile.TemporaryDirectory() as tmp:
         _, D = fresh(os.path.join(tmp, "home"))
-        # Real prose, because that is what discovery is looking for. "word " * 40 is long and is not
-        # a paragraph, and the check that tells those apart is the point of the mechanism.
-        long = ("The exporter line was removed because nothing on a laptop reads that variable. "
-                "Plans had started failing in any shell older than an hour, so access uses the "
-                "application default credential now. Continuous integration sets it itself.")
+        long = PROSE
         repo = os.path.join(tmp, "repo")
         os.makedirs(repo)
         subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True)
@@ -575,11 +593,7 @@ def test_user_destinations_win():
                 {"name": "stop checking commits", "bash": r"\bgit\s+commit\b", "text_arg": []},
             ]}, fh)
         _, D = fresh(home)
-        # Real prose, because that is what discovery is looking for. "word " * 40 is long and is not
-        # a paragraph, and the check that tells those apart is the point of the mechanism.
-        long = ("The exporter line was removed because nothing on a laptop reads that variable. "
-                "Plans had started failing in any shell older than an hour, so access uses the "
-                "application default credential now. Continuous integration sets it itself.")
+        long = PROSE
         check("a destination the user added is claimed",
               (D.match("example__send_briefing", {"note": long}) or {}).get("name"),
               "our briefing tool")
@@ -695,8 +709,10 @@ def test_the_mechanical_errors_are_found_without_a_model():
         check(f"caught: {text[:26]}", bool(found) and expected in found[0], True)
 
     # Pronunciation, not spelling. Getting this wrong would flag correct English constantly.
+    # `an hour` and the rest of the h-words are in their own test, which says why the rule is silent
+    # about them; a second copy here pinned the same decision and explained none of it.
     for correct in ("an FpML mapping arrived", "a UPI value", "a unique identifier", "a unanimous vote",
-                    "an hour later", "a useful idea", "that that clause"):
+                    "a useful idea", "that that clause"):
         check(f"left alone: {correct[:24]}", mechanics.scan(correct), [])
 
     # Not prose: a doubled identifier in code, and a table row that repeats its heading.
@@ -767,8 +783,7 @@ def test_destinations_are_managed_the_way_audiences_are():
         _, D = fresh(home)
         check("switching one off stops it being read",
               [d["name"] for d in D.DESTINATIONS if d["name"] == "commit message"], [])
-        long = ("The exporter line went because nothing on a laptop reads that variable. Plans had "
-                "started failing in any shell older than an hour. Access uses the credential now.")
+        long = PROSE
         check("so a commit is no longer claimed",
               D.match("Bash", {"command": 'git commit -m "' + long + '"'}), None)
         D.switch("commit message", on=True)
@@ -830,8 +845,7 @@ def test_destinations_can_be_shared_like_audiences():
             with open(os.path.join(theirs, "config.json"), "w") as fh:
                 json.dump({"shared": [team]}, fh)
             _, D2 = fresh(theirs)
-            long = ("The exporter line went because nothing on a laptop reads that variable. Plans had "
-                    "started failing in any shell older than an hour. Access uses the credential now.")
+            long = PROSE
             got = D2.match("mcp__team__wiki_write", {"content": long})
             check("they have it without configuring anything", (got or {}).get("name"), "wiki page")
             # Their own file still wins, so they can stop checking it locally.
@@ -940,13 +954,8 @@ def test_prose_behind_a_substitution_still_reaches_the_checks():
             json.dump({"effort": "low"}, fh)
 
         def ask(command, session):
-            payload = {"tool_name": "Bash", "session_id": session, "cwd": repo,
-                       "tool_input": {"command": command}}
-            out = hook_reply(payload, {**os.environ, "PROSE_GUARD_HOME": home}, 180)
-            if out is None:
-                return "silent", ""
-            return ("deny" if out.get("permissionDecision") == "deny" else "advise",
-                    out.get("permissionDecisionReason") or str(out.get("additionalContext") or ""))
+            return verdict_on({"tool_name": "Bash", "session_id": session, "cwd": repo,
+                               "tool_input": {"command": command}}, home, 180)
 
         # The exact command that opened the pull request this came from.
         verdict, said = ask('gh pr create --title "T" --body "$(git log -1 --format=%B)"', "resolved")
@@ -973,7 +982,7 @@ def test_prose_behind_a_substitution_still_reaches_the_checks():
         third, said_third = ask(unresolvable, "bound")
         check("then let through", third, "advise")
         check("saying why it stopped insisting", "not worth blocking" in said_third, True)
-        check("and silent after that", ask(unresolvable, "bound")[0], "silent")
+        check("and silent after that", ask(unresolvable, "bound")[0], "allowed")
 
 
 def test_discovery_ignores_long_text_that_is_not_going_anywhere():
@@ -986,9 +995,7 @@ def test_discovery_ignores_long_text_that_is_not_going_anywhere():
     """
     import destinations as D
     import discover as V
-    prose = ("The exporter line was removed because nothing on a laptop reads that variable. Plans "
-             "had started failing in any shell older than an hour, so access uses the application "
-             "default credential now. Continuous integration sets it itself.")
+    prose = PROSE
 
     def shape(tool, **kw):
         return V._shape(tool, kw)
@@ -1031,11 +1038,7 @@ def test_discovery_ignores_long_text_that_is_not_going_anywhere():
 def test_the_hook_surfaces_a_candidate_once():
     with tempfile.TemporaryDirectory() as tmp:
         home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
-        # Real prose, because that is what discovery is looking for. "word " * 40 is long and is not
-        # a paragraph, and the check that tells those apart is the point of the mechanism.
-        long = ("The exporter line was removed because nothing on a laptop reads that variable. "
-                "Plans had started failing in any shell older than an hour, so access uses the "
-                "application default credential now. Continuous integration sets it itself.")
+        long = PROSE
         payload = {"tool_name": "mcp__example__post_update", "session_id": "pd", "cwd": tmp,
                    "tool_input": {"body": long}}
         replies = [hook_reply(payload, env(home, state)) for _ in range(5)]
@@ -1809,14 +1812,8 @@ def test_a_destination_can_cap_effort_and_severity():
                 "again, which is why CI has been red since yesterday and the deploy could not go out.")
 
         def ask(tool):
-            payload = {"tool_name": tool, "session_id": tool[-8:], "cwd": repo,
-                       "tool_input": {"channel_id": "C1", "message": body}}
-            out = hook_reply(payload, {**os.environ, "PROSE_GUARD_HOME": home}, 120)
-            if out is None:
-                return "allowed", ""
-            if out.get("permissionDecision") == "deny":
-                return "deny", out["permissionDecisionReason"]
-            return "advise", str(out.get("additionalContext") or "")
+            return verdict_on({"tool_name": tool, "session_id": tool[-8:], "cwd": repo,
+                               "tool_input": {"channel_id": "C1", "message": body}}, home)
 
         sent, said_sent = ask("mcp__slack__slack_send_message")
         draft, said_draft = ask("mcp__slack__slack_send_message_draft")
@@ -1871,14 +1868,8 @@ def test_words_already_there_are_not_words_you_wrote():
         commit = "git" + " commit"
 
         def ask(command, session):
-            payload = {"tool_name": "Bash", "session_id": session, "cwd": repo,
-                       "tool_input": {"command": command}}
-            out = hook_reply(payload, {**os.environ, "PROSE_GUARD_HOME": home}, 120)
-            if out is None:
-                return "allowed", ""
-            if out.get("permissionDecision") == "deny":
-                return "deny", out["permissionDecisionReason"]
-            return "advise", str(out.get("additionalContext") or "")
+            return verdict_on({"tool_name": "Bash", "session_id": session, "cwd": repo,
+                               "tool_input": {"command": command}}, home)
 
         # "Already there" is answered with the scan's own machinery, not a substring test. A previous
         # message mentioning SOURCE must not excuse RC, or a coincidence becomes an exemption.
@@ -1919,14 +1910,8 @@ def test_one_command_can_be_excused_but_not_a_session():
         commit = "git" + " commit"
 
         def ask(command, session="skip"):
-            payload = {"tool_name": "Bash", "session_id": session, "cwd": repo,
-                       "tool_input": {"command": command}}
-            out = hook_reply(payload, {**os.environ, "PROSE_GUARD_HOME": home}, 120)
-            if out is None:
-                return "allowed", ""
-            if out.get("permissionDecision") == "deny":
-                return "deny", out["permissionDecisionReason"]
-            return "advise", str(out.get("additionalContext") or "")
+            return verdict_on({"tool_name": "Bash", "session_id": session, "cwd": repo,
+                               "tool_input": {"command": command}}, home)
 
         verdict, said = ask(f'PROSE_GUARD_SKIP="republishing text I did not write" {commit} '
                             f'-m "{body}"')
@@ -2250,15 +2235,9 @@ def test_an_edit_is_not_refused_over_a_defect_it_did_not_touch():
         subprocess.run(["git", "-C", repo, "add", "notes.md"], capture_output=True, timeout=60)
 
         def edit(new_text, session):
-            payload = {"tool_name": "Edit", "session_id": session, "cwd": repo,
-                       "tool_input": {"file_path": path, "old_string": replaced,
-                                      "new_string": new_text}}
-            out = hook_reply(payload, {**os.environ, "PROSE_GUARD_HOME": home}, 120)
-            if out is None:
-                return "allowed", ""
-            if out.get("permissionDecision") == "deny":
-                return "deny", out["permissionDecisionReason"]
-            return "advise", str(out.get("additionalContext") or "")
+            return verdict_on({"tool_name": "Edit", "session_id": session, "cwd": repo,
+                               "tool_input": {"file_path": path, "old_string": replaced,
+                                              "new_string": new_text}}, home)
 
         verdict, said = edit("The shared file store is mounted on every host in the cluster now, and "
                              "nothing else on the machine reads it.", "untouched")
@@ -3336,8 +3315,7 @@ def test_add_is_the_one_writer_of_the_destination_schema():
     in now, so the file has one reader and one writer and they agree by construction.
     """
     import destinations as D
-    long = ("The exporter line went because nothing on a laptop reads that variable. Plans had "
-            "started failing in any shell older than an hour. Access uses the credential now.")
+    long = PROSE
     with tempfile.TemporaryDirectory() as home:
         os.environ["PROSE_GUARD_HOME"] = home
         _, D = fresh(home)
