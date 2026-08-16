@@ -1187,6 +1187,33 @@ def test_a_session_stops_paying_for_model_checks_once_its_budget_is_spent():
         check("and once twenty are spent it is not", asked_after(20), False)
 
 
+def test_an_install_nobody_has_set_up_says_so_once():
+    """Installed, restarted, setup never run — the state every new user is in, and nothing tested it.
+
+    Working correctly and doing nothing are the same output here: somebody installs this, sends a
+    message, sees nothing, and concludes it is broken, with no wrong output to report. Which is why
+    nobody would file it.
+
+    Said by the shell pre-filter rather than by the Python, so the empty state still costs nobody the
+    interpreter startup that pre-filter exists to save, and remembered in told.json — a notice nobody
+    can dismiss is its own defect.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        home = os.path.join(tmp, "home")
+        os.makedirs(home)
+        nothing_set = {k: v for k, v in os.environ.items() if not k.startswith("PROSE_GUARD")}
+        nothing_set.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
+        nothing_set["PROSE_GUARD_HOME"] = home
+        payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": "empty", "cwd": tmp,
+                   "tool_input": {"channel_id": "C1", "message": PROSE}}
+        said = [hook_reply(payload, nothing_set) for _ in range(2)]
+        check("a tool nobody has set up says so, with the command that fixes it",
+              "prose-guard:setup" in (said[0] or {}).get("systemMessage", ""), True)
+        check("to the model too, so it can offer to run it",
+              "prose-guard:setup" in (said[0] or {}).get("additionalContext", ""), True)
+        check("and then never again", said[1], None)
+
+
 def test_state_stays_out_of_the_plugin():
     with tempfile.TemporaryDirectory() as tmp:
         home = os.path.join(tmp, "home")
