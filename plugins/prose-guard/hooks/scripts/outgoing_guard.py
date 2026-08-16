@@ -133,7 +133,11 @@ def load_state(session):
     # passed and denials describe the message being argued about and reset once it goes out.
     # total_denials is the session ledger and never resets, so the guard cannot keep blocking for a
     # whole session however many fresh drafts arrive.
-    state = {"passed": {}, "denials": {}, "total_denials": 0, "calls": 0, "advised": []}
+    # `verdicts` maps a check to what it made of one exact text: {"digest": ..., "message": ...,
+    # "severity": ...}, with no message meaning it passed. It used to hold the digest alone, so a
+    # denial had to forget it to make the check run again — and an identical resend then re-derived
+    # the same answer at the price of a model call. Three identical sends cost three calls.
+    state = {"verdicts": {}, "denials": {}, "total_denials": 0, "calls": 0, "advised": []}
     try:
         with open(path) as fh:
             state.update(json.load(fh))
@@ -202,6 +206,41 @@ def one_message(found, mine, budget):
         lines.append(f"({dropped} more, about text this call did not write. "
                      f"`python3 lib/check_prose.py <file>` shows them.)")
     return "\n".join(lines)
+
+
+def say(finding, check, state, path, digest, advice):
+    """Deny on this finding, or add it to the advice. True when the call was denied and we are done.
+
+    Split out because an identical resend re-says what a check already decided, and doing that had to
+    mean re-running the check. The decision — deny, or advise — depends on the session's ledger rather
+    than on the text, so it is the same code either way.
+    """
+    if finding.severity == BLOCK:
+        used = state["denials"].get(check.NAME, 0)
+        if used < MAX_PER_CHECK and state["total_denials"] < MAX_DENIALS:
+            state["denials"][check.NAME] = used + 1
+            state["total_denials"] += 1
+            save_state(path, state)
+            # The escape hatch is named only on the last denial this check gets, which is the first
+            # moment it is the right answer. Naming it in every denial would teach the cheaper move
+            # before the correct one, and the correct one is almost always to edit the text. An agent
+            # that has already tried twice is a different situation.
+            hint = ("" if used + 1 < MAX_PER_CHECK else
+                    "\n\nIf editing cannot fix this — you are reproducing text you did not write, "
+                    "or quoting someone — say so and send it anyway: "
+                    'PROSE_GUARD_SKIP="<why>" in front of the command excuses that one command. '
+                    "If a term is fine for this reader in general, "
+                    "`/prose-guard:audiences` is the lasting fix.")
+            emit(BLOCK, finding.message, hint)
+            return True
+    # Advice, or a block that has run out of budget. Say it once per text and move on: giving up on
+    # one check must not skip the rest.
+    key = check.NAME + ":" + digest
+    if key not in state["advised"]:
+        state["advised"].append(key)
+        advice.append(finding.message.rstrip(".") + ".")
+    save_state(path, state)
+    return False
 
 
 def main():
@@ -297,12 +336,21 @@ def main():
     # one. Bounded three ways so two checks that genuinely disagree make a message expensive and
     # then let it go, rather than hanging the turn.
     advice = []
-    unpaid = [c for c in running if costs_a_call(c) and state["passed"].get(c.NAME) != digest]
+    unpaid = [c for c in running if costs_a_call(c)
+              and (state["verdicts"].get(c.NAME) or {}).get("digest") != digest]
     for check in running:
-        if state["passed"].get(check.NAME) == digest:
+        remembered = state["verdicts"].get(check.NAME) or {}
+        if remembered.get("digest") == digest:
+            if not remembered.get("message"):
+                continue                     # it passed on this exact text; nothing has changed
+            # It objected to this exact text and the text has not changed, so the answer has not
+            # either. Re-say it without paying for it again.
+            finding = checks_module.Finding(remembered["severity"], remembered["message"])
+            if say(finding, check, state, path, digest, advice):
+                return
             continue
         if costs_a_call(check) and state["calls"] >= MAX_CALLS:
-            state["passed"][check.NAME] = digest
+            state["verdicts"][check.NAME] = {"digest": digest}
             continue
         try:
             # The same pooling a deliberate run uses, so both apply one bar: passes scale with the
@@ -319,9 +367,9 @@ def main():
                 unpaid = [c for c in unpaid if c.NAME != check.NAME]
         except Exception:
             found, firm = [], []             # a broken check is a silent check, never a blocker
-        state["passed"][check.NAME] = digest
-        save_state(path, state)
         if not found:
+            state["verdicts"][check.NAME] = {"digest": digest}
+            save_state(path, state)
             continue
         # One message carrying everything this check found, so a caller pays one turn to fix several
         # things rather than one turn each.
@@ -338,35 +386,20 @@ def main():
         # the finding is worth saying and not worth a turn spent arguing.
         if finding.severity == BLOCK and dest.get("max_severity") == "advise":
             finding = finding._replace(severity="advise")
-        if finding.severity == BLOCK:
-            used = state["denials"].get(check.NAME, 0)
-            if used < MAX_PER_CHECK and state["total_denials"] < MAX_DENIALS:
-                state["denials"][check.NAME] = used + 1
-                state["total_denials"] += 1
-                state["passed"].pop(check.NAME, None)   # it has to pass on the NEXT text, not this
-                save_state(path, state)
-                # The escape hatch is named only on the last denial this check gets, which is the
-                # first moment it is the right answer. Naming it in every denial would teach the
-                # cheaper move before the correct one, and the correct one is almost always to edit
-                # the text. An agent that has already tried twice is a different situation.
-                hint = ("" if used + 1 < MAX_PER_CHECK else
-                        "\n\nIf editing cannot fix this — you are reproducing text you did not write, "
-                        "or quoting someone — say so and send it anyway: "
-                        'PROSE_GUARD_SKIP="<why>" in front of the command excuses that one command. '
-                        "If a term is fine for this reader in general, "
-                        "`/prose-guard:audiences` is the lasting fix.")
-                emit(BLOCK, finding.message, hint)
-                return
-        # Advice, or a block that has run out of budget. Say it once per text and move on: giving up
-        # on one check must not skip the rest.
-        key = check.NAME + ":" + digest
-        if key not in state["advised"]:
-            state["advised"].append(key)
-            advice.append(finding.message.rstrip(".") + ".")
+        state["verdicts"][check.NAME] = {"digest": digest, "message": finding.message,
+                                     "severity": finding.severity}
+        if say(finding, check, state, path, digest, advice):
+            return
 
-    # The message is going out, so the argument is over: reset for the next one. The session ledger
-    # deliberately survives, so a fresh draft cannot buy a fresh allowance forever.
-    state["passed"] = {}
+    # The message is going out, so the argument is over: a new message gets a fresh allowance and a
+    # fresh budget. The session ledger of total denials deliberately survives, so a fresh draft cannot
+    # buy a fresh allowance for ever.
+    #
+    # What is NOT cleared is what each check made of the text it last saw. That used to be, and it is
+    # what made sending the same text three times cost three model calls: the answer to "what does this
+    # check make of this exact text" cannot change, and the digest stored beside it already separates
+    # one text from the next, so clearing it only bought the same answer again. It holds one entry per
+    # check, so it cannot grow.
     state["denials"] = {}
     state["calls"] = 0
     save_state(path, state)
