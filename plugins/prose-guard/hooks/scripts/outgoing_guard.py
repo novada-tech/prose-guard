@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -73,23 +74,41 @@ def context_for(dest, tool, tool_input, cwd):
 # minute and finds out weeks later it was never turned back on, having believed all along that their
 # prose was being checked. This cannot outlive the command it is written on, and it appears in the
 # transcript beside whatever it let through.
-SKIP = re.compile(r"""(?:^|\s|;|&&|\|\|)PROSE_GUARD_SKIP=(?:"([^"]*)"|'([^']*)'|(\S+))\s""")
+SKIP_VAR = "PROSE_GUARD_SKIP"
 
 
 def skipped(tool_input):
     """The stated reason for skipping this one command, if there is one.
 
+    Only where the shell would read it: an assignment before the command, at the front of the line or
+    just after `;`, `&&` or `||`. It used to be searched for anywhere in the command string, so a
+    command that merely CONTAINED the words switched the guard off — a commit message documenting the
+    escape hatch, a release note explaining it, a message telling a colleague it exists. Those went out
+    unchecked and looked checked, and the ledger recorded a reason their author never claimed. Writing
+    about a thing is not doing it.
+
     A reason is required, and not because it is checked — nothing here can tell a good reason from a bad
     one. It is required because writing one is a sentence someone reads later, which is a different act
     from flipping a switch. `PROSE_GUARD_SKIP=1` does not work.
     """
-    match = SKIP.search(str(tool_input.get("command") or "") + " ")
-    if not match:
-        return None
-    reason = next((g for g in match.groups() if g), "").strip()
-    if len(reason) < 8 or reason.isdigit():
-        return ""                            # present but empty: refuse, and say what is missing
-    return reason
+    for run in re.split(r";|&&|\|\|", str(tool_input.get("command") or "")):
+        try:
+            words = shlex.split(run)
+        except ValueError:
+            continue
+        # Assignments come before the command and stop at the first word that is not one, which is
+        # exactly where the shell stops treating them as assignments.
+        for word in words:
+            if "=" not in word or word.startswith("-"):
+                break
+            name, _, value = word.partition("=")
+            if name != SKIP_VAR:
+                continue
+            reason = value.strip()
+            if len(reason) < 8 or reason.isdigit():
+                return ""                    # present but empty: refuse, and say what is missing
+            return reason
+    return None
 
 
 def default_audience():

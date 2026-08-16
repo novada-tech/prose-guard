@@ -2530,6 +2530,42 @@ def test_a_check_that_could_not_run_says_so_instead_of_reading_as_a_pass():
     notice.forget()
 
 
+def test_writing_about_the_escape_hatch_does_not_use_it():
+    """Only an assignment the shell would act on turns the guard off for a command.
+
+    It used to be searched for anywhere in the command string, so a command that merely CONTAINED the
+    words switched the guard off: a commit message documenting the hatch, a release note explaining it,
+    a message telling a colleague it exists. Each went out unchecked while looking checked, and the
+    session ledger recorded a reason its author never claimed. This was found by a command written to
+    test for it, which skipped its own check while doing so.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "outgoing_guard_for_test", os.path.join(PLUGIN, "hooks", "scripts", "outgoing_guard.py"))
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    reason = "republishing a message I did not write"
+
+    def said(command):
+        return guard.skipped({"command": command})
+
+    check("an assignment before the command is honoured",
+          said(f'PROSE_GUARD_SKIP="{reason}" gh pr create --body x'), reason)
+    check("and one after && is too",
+          said(f'cd /tmp && PROSE_GUARD_SKIP="{reason}" gh pr create'), reason)
+    check("writing ABOUT it does not use it",
+          [said(c) for c in (
+              f'git commit -m "Document the hatch: PROSE_GUARD_SKIP=\\"{reason}\\" excuses one"',
+              f"echo 'set PROSE_GUARD_SKIP=\"{reason}\" to skip one' >> NOTES.md",
+              f'gh pr create PROSE_GUARD_SKIP="{reason}"')], [None, None, None])
+    # A reason is required because writing one is a sentence somebody reads later. Refused rather than
+    # ignored, so nobody believes they switched something off when they did not.
+    check("a reason that says nothing is refused, not ignored",
+          [said("PROSE_GUARD_SKIP=1 gh pr create"), said('PROSE_GUARD_SKIP="meh" gh pr create')],
+          ["", ""])
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
