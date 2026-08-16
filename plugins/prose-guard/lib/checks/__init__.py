@@ -21,13 +21,13 @@ Adding a check is a file here and a line in for_effort. Both callers pick it up.
 """
 import re
 
-from . import config, judgement, mechanics, notice, sequence, terms
+from . import config, judgement, mechanics, sequence, terms
 from .context import Context
 from .finding import ADVISE, BLOCK, EXACT, MODES, POOLED, VERDICT, Finding
 
 __all__ = ["ADVISE", "BLOCK", "EXACT", "POOLED", "VERDICT", "Context", "Finding", "capped",
-           "ceiling_for", "costs_a_call", "for_effort", "mode_of", "notice", "pooled",
-           "written_here", "wrote_which"]
+           "ceiling_for", "costs_a_call", "for_effort", "mode_of", "pooled", "written_here",
+           "wrote_which"]
 
 ORDER = ("disabled", "low", "medium", "high")
 

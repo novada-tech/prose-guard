@@ -29,8 +29,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import paths  # noqa: E402
+import settings  # noqa: E402
 
-LEVELS = ("disabled", "low", "medium", "high")
+LEVELS = settings.LEVELS
 
 
 def _from_file():
@@ -48,20 +49,23 @@ def effort():
     return "disabled"
 
 
-def misspelt():
-    """A level that was set to something that is not a level, or "" if every source is clean.
+def complaints():
+    """Everything wrong with how this level was set, in sentences, or [] when nothing is.
 
-    `userConfig` has no enumerated type — string, number, boolean, directory and file are the whole list
-    — so `/plugin configure` offers a free-text box, and "medim" meant disabled with nothing said. This is
-    what lets the hook say so where the person can see it.
+    The environment is checked here and the file is checked by its declaration in settings.py, because
+    an environment variable has no file to be declared in. `userConfig` has no enumerated type — string,
+    number, boolean, directory and file are the whole list — so `/plugin configure` offers a free-text
+    box, and `medim` in it means disabled with nothing said unless somebody looks.
     """
+    rule = settings.one_of(*LEVELS)
+    out = []
     for name, value in (("PROSE_GUARD_EFFORT", os.environ.get("PROSE_GUARD_EFFORT")),
-                        ("the plugin's effort setting", os.environ.get("CLAUDE_PLUGIN_OPTION_EFFORT")),
-                        ("config.json", _from_file())):
-        text = (value or "").strip().lower()
-        if text and text not in LEVELS:
-            return f"{name} is set to {text!r}, which is not one of {', '.join(LEVELS)}"
-    return ""
+                        ("the plugin's effort setting", os.environ.get("CLAUDE_PLUGIN_OPTION_EFFORT"))):
+        if (value or "").strip():
+            _, complaint = rule(value)
+            if complaint:
+                out.append(f"{name} {complaint}")
+    return out + paths.config_complaints()
 
 
 def save(level):

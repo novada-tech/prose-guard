@@ -23,7 +23,9 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import command  # noqa: E402
 import destinations  # noqa: E402
+import telling  # noqa: E402
 
 # Command-line tools that post prose to people. Extend freely: an entry here only ever becomes a
 # suggestion.
@@ -106,13 +108,15 @@ def from_history(limit=40000):
 
 
 def unclaimed():
-    """Shapes that carried long prose past the hook with no destination claiming them, and what has
-    been decided about each: how many uses, whether it has been mentioned, whether it was declined."""
-    try:
-        with open(destinations._candidates_path()) as fh:
-            return json.load(fh)
-    except Exception:
-        return {}
+    """Shapes seen carrying prose that no destination claims, with what has been decided about each."""
+    out = {}
+    for key, entry in telling.everything().items():
+        if not key.startswith("unclaimed: "):
+            continue
+        out[key[len("unclaimed: "):]] = {"uses": entry.get("seen", 0),
+                                         "mentioned": bool(entry.get("said")),
+                                         "declined": bool(entry.get("declined"))}
+    return out
 
 
 def covered():
@@ -129,6 +133,144 @@ def share(directory):
     return destinations.share(directory)
 
 
+# Passive discovery. A shape is mentioned AT MOST ONCE, ever, and only once it has been used enough
+# times to be worth interrupting for. What "at most once, ever" means is telling.py's job now — this
+# had its own counter, its own `mentioned` flag and its own `declined` flag, which is the same ledger
+# four other places were also keeping in their own way.
+MENTION_AFTER = 3
+
+
+# Fields that carry long text which is not being sent anywhere. `old_string` is what an edit replaces,
+# `prompt` is an instruction to another agent, `pattern` and `command` are code. Long is not the same as
+# outgoing, and discovery gets one mention per shape — spending it on these is spending it on nothing.
+NOT_OUTGOING = ("old_string", "prompt", "pattern", "command", "query", "regex", "expression",
+                "description", "script", "code", "diff", "input")
+# Nothing is excluded for writing a file, and that was a mistake worth recording. The reasoning was
+# that the prose-file destination already decides which files count — but it only claims a file that
+# is TRACKED, and discovery is asked only about calls nothing claimed. So excluding Write silenced the
+# one case that needed saying: a blog plan written to ~/novada, which is not a git repository at all,
+# was never checked and, with the exclusion in place, was never mentioned either.
+
+
+def _reads_like_prose(text):
+    """Long text that is prose rather than a pattern, a script or a payload.
+
+    Passive discovery has one mention per shape and had been spending it on `git grep -E`, on the text
+    an edit replaces, and on subagent prompts — six mentions in real use, none of them a destination.
+    Word count alone cannot tell a paragraph from a regex; sentences and ordinary words can.
+    """
+    words = text.split()
+    if len(words) < destinations.MIN_WORDS:
+        return False
+    if sum(text.count(c) for c in ".!?") < 2:
+        return False                         # a paragraph has sentences; a pattern does not
+    alpha = sum(1 for w in words if w.strip(".,;:!?()[]\"'").isalpha())
+    return alpha >= 0.7 * len(words)
+
+
+# This tool's own commands. Checking a check is circular, and the `--who` argument to check_prose.py is
+# a sentence describing a reader, so it passes the prose test and was offered as a destination to add.
+OWN_COMMANDS = ("check_prose.py", "learn.py", "audiences.py", "discover.py", "install_rule.py",
+                "share_dir.py", "fetch.py", "measure_check.py", "measure_cost.py", "measure_rule.py",
+                "measure_thresholds.py", "measure_destinations.py")
+
+
+def _shape(tool, tool_input):
+    """The SHAPE of a call carrying outgoing prose, never the text.
+
+    For an MCP tool that is the tool name and the field. For Bash it is the binary, its subcommand and
+    the flag that held the long argument, so `git commit -m` becomes discoverable the first time it is
+    used rather than only if someone thought to configure it.
+    """
+    if tool == "Bash":
+        cmd = str(tool_input.get("command") or "")
+        if any(own in cmd for own in OWN_COMMANDS):
+            return None
+        cmd = command.command_itself(cmd)
+        # From before the first quote, or the shape of `echo "<a paragraph>"` becomes `echo "The`.
+        words = re.split(r"['\"]", cmd.strip(), 1)[0].split()
+        head = " ".join(w for w in words[:2] if not w.startswith("-"))
+        for m in re.finditer(r"(--?[A-Za-z][-\w]*)[= ]\s*['\"]([^'\"]{80,})['\"]", cmd):
+            if _reads_like_prose(m.group(2)):
+                return f"bash: {head} {m.group(1)}"
+        # Prose does not always arrive behind a flag. `echo "<a paragraph>"` and `somecli post "<a
+        # paragraph>"` put it in a positional argument, and neither was recorded at all — so the one
+        # example asked about would never have surfaced. The prose test is what keeps a grep pattern out.
+        for m in re.finditer(r"['\"]([^'\"]{80,})['\"]", cmd):
+            if _reads_like_prose(m.group(1)):
+                return f"bash: {head}"
+        return None
+    for field, value in tool_input.items():
+        if field in NOT_OUTGOING:
+            continue
+        if isinstance(value, str) and _reads_like_prose(value):
+            return f"tool: {tool} [{field}]"
+    return None
+
+
+def decline(shape):
+    """Never mention or count this shape again.
+
+    This is what makes passive discovery safe to have at all. Without it, declining a suggestion and
+    then using the tool again would produce the same suggestion a second time, which is the failure
+    that makes people turn a tool off.
+    """
+    return telling.Ledger().decline("unclaimed: " + shape)
+
+
+# Words in a tool or command name that say something about what it does with the text. A suggestion
+# only: never applied without someone confirming it, because a wrong guess here is a destination that
+# quietly stops holding anything back.
+REVIEWED_FIRST = ("draft", "preview", "unsent", "scratch", "compose", "stage")
+# Specific forms, not bare words. "note" on its own matched `glab mr note`, which is a comment on
+# a merge request and has an addressee — the exact mistake this suggestion exists to avoid
+# making silently.
+NO_ADDRESSEE = ("git commit", "git tag", "git notes", "changelog", "release_note",
+                "release-note")
+
+
+def suggest_caps(shape):
+    """What a new destination probably deserves, and why, in words a person can agree or disagree with.
+
+    Discovery used to be a yes-or-no question, so everything it added ran at full effort and blocked.
+    That is the wrong default in two specific cases, and they are the two things only a person knows:
+    whether anybody sees the text before its audience does, and whether it has an addressee at all. The
+    name is weak evidence about both — enough to open with a proposal rather than a blank question.
+    """
+    lowered = shape.lower()
+    out = {}
+    if any(word in lowered for word in REVIEWED_FIRST):
+        out["max_severity"] = ("advise", "the name says draft, so you would read it before it went "
+                                         "anywhere — blocking would argue about text you were about "
+                                         "to read")
+    if any(word in lowered for word in NO_ADDRESSEE):
+        out["max_effort"] = ("low", "this looks like a record rather than a message to somebody, and "
+                                    "the checks above `low` ask whether the reader will care and "
+                                    "whether the ask is clear")
+    return out
+
+
+def record_candidate(tool, tool_input):
+    """Count a call nothing claimed, and return a one-line note if now is the moment to say so.
+
+    Returns None almost always: at most one note per shape for the lifetime of the config.
+    """
+    shape = _shape(tool, tool_input)
+    if not shape:
+        return None
+    ledger = telling.Ledger()
+    key = "unclaimed: " + shape
+    uses = ledger.seen(key)
+    if uses < MENTION_AFTER or not ledger.worth_saying(key, for_good=True):
+        return None
+    caps = suggest_caps(shape)
+    return (f"prose-guard has seen long text go out through `{shape}` {uses} times and "
+            f"does not check it. Add it with /prose-guard:setup if that is worth checking"
+            + (f" — probably as {', '.join(v[0] for v in caps.values())} rather than a block, "
+               f"going by the name" if caps else "")
+            + f". This is the only time it will be mentioned.")
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser(description="What here could be sending prose to a person.")
@@ -140,7 +282,7 @@ def main():
                          "so nobody else has to work them out")
     a = ap.parse_args()
     if a.decline:
-        print("declined for good:", destinations.decline(a.decline))
+        print("declined for good:", decline(a.decline))
         return
     if a.share:
         print(share(a.share))
@@ -176,7 +318,7 @@ def main():
         for shape, entry in sorted(pending.items(), key=lambda kv: -kv[1].get("uses", 0)):
             seen = " (already mentioned once)" if entry.get("mentioned") else ""
             print(f"  {entry.get('uses', 0):5d}x  {shape}{seen}")
-            for field, (value, why) in destinations.suggest_caps(shape).items():
+            for field, (value, why) in suggest_caps(shape).items():
                 print(f"           suggest {field}={value}: {why}")
         print("\n  To rule one out for good, so it is never suggested again:")
         print("    python3 lib/discover.py --decline '<shape>'")

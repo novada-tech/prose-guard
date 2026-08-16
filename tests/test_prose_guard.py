@@ -453,6 +453,7 @@ def test_passive_discovery():
     The failure to avoid is: tool used, suggestion made, user declines, tool used again, same
     suggestion. That is what makes people turn a tool off.
     """
+    import discover as V
     with tempfile.TemporaryDirectory() as home:
         _, D = fresh(home)
         secret = ("The exporter line was removed because nothing on a laptop reads swordfish. "
@@ -461,37 +462,33 @@ def test_passive_discovery():
         bash = ("Bash", {"command": f'my-cli notify --text "{secret}"'})
         mcp = ("mcp__example__post_update", {"body": secret})
 
-        notes = [D.record_candidate(*mcp) for _ in range(6)]
+        notes = [V.record_candidate(*mcp) for _ in range(6)]
         check("silent until it has been used enough to matter", notes[:2], [None, None])
         check("speaks up on the third use", notes[2] is not None, True)
         check("and never again", notes[3:], [None, None, None])
 
-        raw = open(os.path.join(home, "unclaimed-destinations.json")).read()
-        seen = json.loads(raw)
+        import telling
+        raw = open(telling._path()).read()
+        seen = telling.everything()
         check("no message text is ever written down", "swordfish" in raw, False)
         check("an mcp shape is the tool and the field",
-              "tool: mcp__example__post_update [body]" in seen, True)
-        D.record_candidate(*bash)
+              "unclaimed: tool: mcp__example__post_update [body]" in seen, True)
+        V.record_candidate(*bash)
         check("a bash shape is binary, subcommand and flag",
-              "bash: my-cli notify --text" in json.loads(
-                  open(os.path.join(home, "unclaimed-destinations.json")).read()), True)
+              "unclaimed: bash: my-cli notify --text" in telling.everything(), True)
 
         # declining is permanent, and stops the counting
-        D.decline("bash: my-cli notify --text")
-        after = [D.record_candidate(*bash) for _ in range(5)]
+        V.decline("bash: my-cli notify --text")
+        after = [V.record_candidate(*bash) for _ in range(5)]
         check("a declined shape is never mentioned", after, [None] * 5)
-        entry = json.loads(open(os.path.join(home,
-                                             "unclaimed-destinations.json")).read())[
-            "bash: my-cli notify --text"]
-        check("and stops being counted", entry["uses"], 1)
+        entry = telling.everything()["unclaimed: bash: my-cli notify --text"]
+        check("and stops being counted", entry["seen"], 1)
 
-        # and the tracked set is bounded
-        for i in range(80):
-            D.record_candidate(f"mcp__example__tool{i}", {"body": secret})
-        check("the tracked set is bounded",
-              len(json.loads(open(os.path.join(home,
-                                               "unclaimed-destinations.json")).read()))
-              <= D.MAX_TRACKED, True)
+        # and the remembered set is bounded
+        for i in range(telling.MOST_REMEMBERED + 30):
+            V.record_candidate(f"mcp__example__tool{i}", {"body": secret})
+        check("the remembered set is bounded",
+              len(telling.everything()) <= telling.MOST_REMEMBERED, True)
 
 
 def test_discovery_proposes_how_hard_to_check_a_new_destination():
@@ -503,18 +500,19 @@ def test_discovery_proposes_how_hard_to_check_a_new_destination():
     without asking would quietly stop a destination holding anything back.
     """
     import destinations as D
+    import discover as V
     check("a draft should advise rather than block",
-          list(D.suggest_caps("tool: mcp__slack__slack_send_message_draft [message]")),
+          list(V.suggest_caps("tool: mcp__slack__slack_send_message_draft [message]")),
           ["max_severity"])
     check("a record should not pay for the reader checks",
-          list(D.suggest_caps("bash: git commit -m")), ["max_effort"])
+          list(V.suggest_caps("bash: git commit -m")), ["max_effort"])
     # `note` on its own matched `glab mr note`, which is a comment on a merge request and has a reader.
     # A wrong suggestion here is a destination that silently stops blocking.
     check("a merge request comment is a message to somebody",
-          D.suggest_caps("bash: glab mr note --message"), {})
+          V.suggest_caps("bash: glab mr note --message"), {})
     check("and an ordinary send gets no suggestion",
-          D.suggest_caps("tool: mcp__example__post_update [body]"), {})
-    for field, (value, why) in D.suggest_caps("bash: git commit -m").items():
+          V.suggest_caps("tool: mcp__example__post_update [body]"), {})
+    for field, (value, why) in V.suggest_caps("bash: git commit -m").items():
         check("a suggestion carries a reason to agree or disagree with", len(why) > 30, True)
 
 
@@ -574,6 +572,7 @@ def test_destinations_are_managed_the_way_audiences_are():
     moved out of — a typo there stops a destination matching with nothing to show for it.
     """
     import destinations as D
+    import discover as V
     with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as team:
         os.environ["PROSE_GUARD_HOME"] = home
         with open(os.path.join(home, "config.json"), "w") as fh:
@@ -649,6 +648,7 @@ def test_destinations_can_be_shared_like_audiences():
     agent listing tools only it can see, confirmed by a person. Nobody should do that twice.
     """
     import destinations as D
+    import discover as V
     with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as team:
         os.environ["PROSE_GUARD_HOME"] = home
         mine = {"destinations": [{"name": "wiki page", "tool": ["wiki_write"],
@@ -690,14 +690,15 @@ def test_discovery_ignores_this_tool_talking_to_itself():
     """`--who` is a sentence describing a reader, so it passes the prose test, and the checker's own
     invocation was offered as a destination to add. Checking a check is circular."""
     import destinations as D
+    import discover as V
     prose = ("Engineers on this team read a pull request description for a plugin they use but did not "
              "write. They know git and the shell. They have not read this plugin internals at all.")
     for own in (f'python3 lib/check_prose.py draft.md --who "{prose}"',
                 f'python3 measure/measure_rule.py --rule x --who "{prose}"',
                 f'python3 lib/learn.py create team cand.json --who "{prose}"'):
-        check(f"not a destination: {own.split()[1]}", D._shape("Bash", {"command": own}), None)
+        check(f"not a destination: {own.split()[1]}", V._shape("Bash", {"command": own}), None)
     check("but a real command still is",
-          D._shape("Bash", {"command": f'git commit -m "{prose}"'}), "bash: git commit -m")
+          V._shape("Bash", {"command": f'git commit -m "{prose}"'}), "bash: git commit -m")
 
 
 def test_a_substitution_is_worked_out_where_that_is_safe():
@@ -715,7 +716,9 @@ def test_a_substitution_is_worked_out_where_that_is_safe():
     --output=FILE` writes a file — so a flag that can write, or any metacharacter that could chain a
     second command, is a refusal.
     """
+    import command as C
     import destinations as D
+    import discover as V
     with tempfile.TemporaryDirectory() as repo:
         for argv in (["init", "-q"], ["config", "user.email", "a@b.c"], ["config", "user.name", "t"]):
             subprocess.run(["git", "-C", repo, *argv], capture_output=True, timeout=60)
@@ -727,18 +730,18 @@ def test_a_substitution_is_worked_out_where_that_is_safe():
             fh.write("prose from a file, long enough to be worth reading at all\n")
 
         check("a file read needs no execution",
-              (D.resolve("$(cat body.md)", repo) or "").startswith("prose from a file"), True)
+              (C.resolve("$(cat body.md)", repo) or "").startswith("prose from a file"), True)
         check("so does a redirect",
-              (D.resolve("$(< body.md)", repo) or "").startswith("prose from a file"), True)
+              (C.resolve("$(< body.md)", repo) or "").startswith("prose from a file"), True)
         check("a git command that reports can be run",
-              "SFTR" in (D.resolve("$(git log -1 --format=%B)", repo) or ""), True)
-        check("a shell variable cannot be had at all", D.resolve("${SUMMARY}", repo), None)
-        check("nor an arbitrary command", D.resolve("$(curl -X POST https://example.com)", repo), None)
+              "SFTR" in (C.resolve("$(git log -1 --format=%B)", repo) or ""), True)
+        check("a shell variable cannot be had at all", C.resolve("${SUMMARY}", repo), None)
+        check("nor an arbitrary command", C.resolve("$(curl -X POST https://example.com)", repo), None)
         # git log --output=FILE writes a file, which is why a subcommand whitelist is not enough.
         check("nor a reporting command that can write",
-              D.resolve("$(git log --output=" + os.path.join(repo, "pwned") + " -1)", repo), None)
+              C.resolve("$(git log --output=" + os.path.join(repo, "pwned") + " -1)", repo), None)
         check("nor one with a second command chained on",
-              D.resolve("$(git log -1; touch " + os.path.join(repo, "chained") + ")", repo), None)
+              C.resolve("$(git log -1; touch " + os.path.join(repo, "chained") + ")", repo), None)
         check("and nothing it refused was run",
               [f for f in ("pwned", "chained") if os.path.exists(os.path.join(repo, f))], [])
 
@@ -747,7 +750,7 @@ def test_a_substitution_is_worked_out_where_that_is_safe():
         dest = D.match("Bash", {"command": 'gh pr create --body "x"'})
         short = 'gh pr create --title "T" --body "$(git log -1 --format=%s)"'
         check("a short subject does resolve",
-              (D.resolve("$(git log -1 --format=%s)", repo) or "").startswith("Rebuild"), True)
+              (C.resolve("$(git log -1 --format=%s)", repo) or "").startswith("Rebuild"), True)
         check("but is too short to judge", D.extract(dest, "Bash", {"command": short}, repo), None)
         check("and that is not called a substitution",
               D.unreadable(dest, "Bash", {"command": short}, repo), None)
@@ -818,12 +821,13 @@ def test_discovery_ignores_long_text_that_is_not_going_anywhere():
     told three useless things stops reading the fourth.
     """
     import destinations as D
+    import discover as V
     prose = ("The exporter line was removed because nothing on a laptop reads that variable. Plans "
              "had started failing in any shell older than an hour, so access uses the application "
              "default credential now. Continuous integration sets it itself.")
 
     def shape(tool, **kw):
-        return D._shape(tool, kw)
+        return V._shape(tool, kw)
 
     pattern = "|".join(f"needle{n}_pattern_alternative" for n in range(12))
     # These two are long in words, which is why word count alone could not tell them from a paragraph.
@@ -851,7 +855,7 @@ def test_discovery_ignores_long_text_that_is_not_going_anywhere():
           shape("Write", file_path="/x/y.md", content=prose), "tool: Write [content]")
     # The field an edit replaces is still not outgoing, whatever tool carries it.
     check("but not the text an edit replaces",
-          D._shape("Edit", {"file_path": "/x/y.md", "old_string": prose}), None)
+          V._shape("Edit", {"file_path": "/x/y.md", "old_string": prose}), None)
 
     # And the things that are, still are.
     check("a commit message is", shape("Bash", command='git commit -m "' + prose + '"'),
@@ -1789,7 +1793,9 @@ def test_an_edit_is_judged_inside_its_document():
     is not grounds for refusing the edit, so the caller is told which sentences this call wrote.
     """
     import checks
+    import command as C
     import destinations as D
+    import discover as V
     with tempfile.TemporaryDirectory() as repo:
         subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True, timeout=60)
         path = os.path.join(repo, "names.txt")
@@ -2501,24 +2507,25 @@ def test_a_check_that_could_not_run_says_so_instead_of_reading_as_a_pass():
     failure, and they now get the same treatment — recorded, and read out by whoever can reach a person.
     """
     import checks
-    from checks import model, notice, sequence
+    import telling
+    from checks import model, sequence
 
-    notice.forget()
+    telling.ran_everything()
     check("nothing to say when everything is readable",
-          (len(sequence.phases()) > 0, notice.noted()), (True, []))
+          (len(sequence.phases()) > 0, telling.never_ran()), (True, []))
 
-    notice.forget()
+    telling.ran_everything()
     moved = sequence.PHASE_DIR + ".moved-by-test"
     os.rename(sequence.PHASE_DIR, moved)
     try:
         got = sequence.phases()
     finally:
         os.rename(moved, sequence.PHASE_DIR)
-    check("no checks, and it is said", (got, len(notice.noted())), ([], 1))
+    check("no checks, and it is said", (got, len(telling.never_ran())), ([], 1))
     check("naming the directory it could not read",
-          sequence.PHASE_DIR in notice.noted()[0], True)
+          sequence.PHASE_DIR in telling.never_ran()[0], True)
 
-    notice.forget()
+    telling.ran_everything()
     was = os.environ["PATH"]
     os.environ["PATH"] = "/nonexistent-so-there-is-no-checker"
     try:
@@ -2526,8 +2533,8 @@ def test_a_check_that_could_not_run_says_so_instead_of_reading_as_a_pass():
     finally:
         os.environ["PATH"] = was
     check("a missing checker still allows the call", (ok, why), (True, ""))
-    check("and says that it never ran", any("PATH" in n for n in notice.noted()), True)
-    notice.forget()
+    check("and says that it never ran", any("PATH" in n for n in telling.never_ran()), True)
+    telling.ran_everything()
 
 
 def test_writing_about_the_escape_hatch_does_not_use_it():
@@ -2566,6 +2573,57 @@ def test_writing_about_the_escape_hatch_does_not_use_it():
           ["", ""])
 
 
+def test_a_bad_value_in_a_hand_written_file_is_reported_not_ignored():
+    """Every one of these used to pass silently, and always in the same direction.
+
+    `max_effort` and `max_severity` exist to make the guard LESS aggressive, so a typo in either
+    produced a destination that blocked when it was configured not to. `effort: "medim"` meant disabled
+    with nothing said. A typo in a key name was quieter still, because nothing looked at key names at
+    all. And valid JSON of the wrong shape was an AttributeError at import — which, for a PreToolUse
+    hook, means exiting non-zero and letting the tool call through unchecked.
+    """
+    import settings
+
+    bad = [({"effort": "medim"}, settings.CONFIG, "effort"),
+           ({"name": "x", "max_effort": "lo"}, settings.DESTINATION, "max_effort"),
+           ({"name": "x", "max_severity": "Advise "}, settings.DESTINATION, None),
+           ({"name": "x", "max_effot": "low"}, settings.DESTINATION, "max_effort"),
+           ({"shared_context": "sdwys"}, settings.ASSUMPTIONS, "shared_context")]
+    for data, shape, expected in bad:
+        clean, complaints = settings.checked(data, shape, "a file")
+        if expected is None:                 # `Advise ` is a person typing, not a mistake
+            check("a value that only needs tidying is used", clean.get("max_severity"), "advise")
+            continue
+        check(f"{list(data)[-1]} is complained about", len(complaints), 1)
+        check(f"and the complaint names {expected}", expected in complaints[0], True)
+        check("and the bad value is not used", list(data)[-1] in clean, False)
+
+    check("one name written without brackets is one name",
+          settings.checked({"off": "commit message"}, settings.DESTINATIONS_FILE, "f")[0]["off"],
+          ["commit message"])
+    clean, complaints = settings.checked([1, 2], settings.CONFIG, "config.json")
+    check("valid JSON of the wrong shape is refused, not crashed on", (clean, len(complaints)), ({}, 1))
+
+    # And it reaches a person, once, through the channel that reaches them rather than the model.
+    with tempfile.TemporaryDirectory() as home:
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"effort": "medim"}, fh)
+        env = dict(os.environ, PROSE_GUARD_HOME=home)
+        env.pop("PROSE_GUARD_EFFORT", None)
+        env.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
+        payload = {"session_id": "s", "tool_name": "Bash",
+                   "tool_input": {"command": 'git commit -m "' + "word " * 40 + '"'}}
+        said = []
+        for _ in range(2):
+            r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
+                               text=True, env=env, timeout=120)
+            assert r.returncode == 0, r.stderr[-500:]
+            out = json.loads(r.stdout or "{}").get("hookSpecificOutput", {})
+            said.append(out.get("systemMessage", ""))
+        check("the person is told what is wrong with their own file", "medim" in said[0], True)
+        check("and told once", said[1], "")
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
@@ -2589,7 +2647,9 @@ def test_nothing_a_substitution_runs_can_change_the_repository():
     which a tag deletion does not create. So this asserts on the state of the repository instead: tags,
     notes, branch and working tree, before and after.
     """
+    import command as C
     import destinations as D
+    import discover as V
     with tempfile.TemporaryDirectory() as repo:
         for argv in (["init", "-q"], ["config", "user.email", "a@b.c"], ["config", "user.name", "t"]):
             subprocess.run(["git", "-C", repo, *argv], capture_output=True, timeout=60)
@@ -2614,7 +2674,7 @@ def test_nothing_a_substitution_runs_can_change_the_repository():
                   "$(git notes add -f -m planted HEAD)", "$(git checkout -b planted)",
                   "$(git clean -xdf)", "$(git commit --amend -m planted)")
         check("no substitution that writes is resolved",
-              [v for v in writes if D.resolve(v, repo) is not None], [])
+              [v for v in writes if C.resolve(v, repo) is not None], [])
         check("and the repository is exactly as it was", state(), before)
 
         # A repository can name a command to run through its own configuration, and both routes are
@@ -2623,20 +2683,22 @@ def test_nothing_a_substitution_runs_can_change_the_repository():
                         "touch " + os.path.join(repo, "ext-diff-ran")], capture_output=True, timeout=60)
         check("no patch, so no configured diff command",
               [v for v in ("$(git log -p --ext-diff)", "$(git log -p)", "$(git show --textconv HEAD)")
-               if D.resolve(v, repo) is not None], [])
+               if C.resolve(v, repo) is not None], [])
         check("and it did not run", os.path.exists(os.path.join(repo, "ext-diff-ran")), False)
 
         # What must still work, including the quoting that used to reach git as literal characters.
         check("a reporting command still resolves",
-              "SFTR" in (D.resolve("$(git log -1 --format=%B)", repo) or ""), True)
+              "SFTR" in (C.resolve("$(git log -1 --format=%B)", repo) or ""), True)
         check("and quotes around the format do not reach git",
-              (D.resolve('$(git log -1 --format="%B")', repo) or "").startswith("Rebuild"), True)
+              (C.resolve('$(git log -1 --format="%B")', repo) or "").startswith("Rebuild"), True)
 
 
 def test_a_substitution_runs_once_per_tool_call():
     """`extract` resolved it and `unreadable` resolved it again, so every side effect the whitelist
     exists to prevent happened twice. Nothing in the old shape said so, because nothing counted."""
+    import command as C
     import destinations as D
+    import discover as V
     with tempfile.TemporaryDirectory() as repo:
         counter = os.path.join(repo, "runs")
         shim = os.path.join(repo, "bin")
@@ -2648,7 +2710,7 @@ def test_a_substitution_runs_once_per_tool_call():
         os.environ["PATH"] = shim + os.pathsep + was
         try:
             for _ in range(4):
-                D.resolve("$(git log -1 --format=%B)", repo)
+                C.resolve("$(git log -1 --format=%B)", repo)
             runs = len(open(counter).read().split()) if os.path.exists(counter) else 0
         finally:
             os.environ["PATH"] = was
@@ -2665,7 +2727,9 @@ def test_only_the_command_itself_names_a_file_to_read():
     An agent writes documents like that out of web pages and issue comments, so what is inside one is
     not the agent's own choice — which is what made this a way in rather than an oddity.
     """
+    import command as C
     import destinations as D
+    import discover as V
     with tempfile.TemporaryDirectory() as work:
         body = "PLACEHOLDER " + "word " * 60
         open(os.path.join(work, "notes.md"), "w").write(body)
@@ -2692,13 +2756,13 @@ def test_only_the_command_itself_names_a_file_to_read():
         # Reading is not executing, but it is still sending the contents to a model, so what can be read
         # is bounded: a hidden path is never prose, and a device or a pipe is not a message. The pipe has
         # no writer, so anything that opens it and reads would hang until the harness killed the hook.
-        check("a hidden path is refused", D.read_prose_file(".hidden/key", work), None)
-        check("a symlink is refused", D.read_prose_file("link.md", work), None)
-        check("a pipe is refused rather than waited on", D.read_prose_file("pipe.md", work), None)
+        check("a hidden path is refused", C.read_prose_file(".hidden/key", work), None)
+        check("a symlink is refused", C.read_prose_file("link.md", work), None)
+        check("a pipe is refused rather than waited on", C.read_prose_file("pipe.md", work), None)
         big = os.path.join(work, "big.md")
         with open(big, "w") as fh:
-            fh.write("x" * (D.MOST_BYTES + 1))
-        check("and a file larger than a message is refused", D.read_prose_file("big.md", work), None)
+            fh.write("x" * (C.MOST_BYTES + 1))
+        check("and a file larger than a message is refused", C.read_prose_file("big.md", work), None)
 
 
 def test_a_destination_claims_only_its_own_tool():
@@ -2706,6 +2770,7 @@ def test_a_destination_claims_only_its_own_tool():
     only because the draft is listed first, so an ordinary chat destination in your own layer — read
     before the shipped one — removed the draft's advise-only cap and started blocking drafts."""
     import destinations as D
+    import discover as V
     was = D.DESTINATIONS
     D.DESTINATIONS = [dict(name="mine", tool=["slack_send_message"], _origin="yours"), *was]
     try:
@@ -2722,13 +2787,14 @@ def test_one_name_switched_off_does_not_have_to_be_a_list():
     """`"off": "chat message"` was iterated character by character, so it switched nothing off and said
     nothing about it — the one shape where being ignored in silence is exactly the wrong answer."""
     import destinations as D
+    import discover as V
     with tempfile.TemporaryDirectory() as home:
         was = os.environ.get("PROSE_GUARD_HOME")
         os.environ["PROSE_GUARD_HOME"] = home
         try:
             with open(os.path.join(home, "destinations.json"), "w") as fh:
                 json.dump({"off": "commit message"}, fh)
-            found, _, switched = D.load()
+            found, _, switched, _ = D.load()
         finally:
             os.environ.pop("PROSE_GUARD_HOME") if was is None else os.environ.update(PROSE_GUARD_HOME=was)
         check("the name is read as one name", switched, ["commit message"])

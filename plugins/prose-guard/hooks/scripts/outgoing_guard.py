@@ -32,6 +32,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..", "..", "lib")))
 import audiences  # noqa: E402
 import paths  # noqa: E402
 import destinations  # noqa: E402
+import discover  # noqa: E402
+import telling  # noqa: E402
 import checks as checks_module  # noqa: E402
 from checks import (BLOCK, EFFORT, IN_ORDER as CHECKS, Context, ceiling_for,  # noqa: E402
                     costs_a_call, pooled, written_here, wrote_which)
@@ -170,27 +172,23 @@ def emit(decision, message, hint="", for_user=""):
 
 
 def main():
-    if not CHECKS:
-        # A level set to something that is not a level reads exactly like being switched off. Say so once
-        # a session, where the person can see it, because the setting is theirs.
-        from checks import config as _config
-        wrong = _config.misspelt()
-        if wrong:
-            try:
-                payload = json.load(sys.stdin)
-            except Exception:
-                payload = {}
-            path, state = load_state(str(payload.get("session_id") or "no-session"))
-            if not state.get("told_misspelt"):
-                state["told_misspelt"] = True
-                save_state(path, state)
-                emit("advise", "", for_user=f"prose-guard is doing nothing: {wrong}.")
-                return
-        allow()                              # disabled, or nothing configured
     try:
         payload = json.load(sys.stdin)
     except Exception:
-        allow()
+        payload = {}
+    path, state = load_state(str(payload.get("session_id") or "no-session"))
+    ledger = telling.Ledger(state)
+
+    # Anything wrong with a file somebody hand-wrote, said once a session because they can fix it and
+    # it stops being true when they do. Every one of these used to pass silently and in the same
+    # direction: the guard more aggressive than asked, or absent while looking present.
+    wrong = checks_module.config.complaints() + destinations.COMPLAINTS
+    if wrong and ledger.worth_saying("bad settings"):
+        save_state(path, state)
+        emit("advise", "", for_user="prose-guard: " + "; ".join(wrong[:3]) + ".")
+        return
+    if not CHECKS:
+        allow()                              # disabled, or nothing configured
     tool = payload.get("tool_name") or ""
     tool_input = payload.get("tool_input") or {}
     cwd = payload.get("cwd")
@@ -202,7 +200,6 @@ def main():
                      'one command'))
         return
     if reason:
-        path, state = load_state(str(payload.get("session_id") or "no-session"))
         state["skipped"] = state.get("skipped", []) + [reason]
         save_state(path, state)
         count = len(state["skipped"])
@@ -216,8 +213,8 @@ def main():
     if not dest:
         # Passive discovery: count anything carrying long prose that nothing claims, so setup can
         # offer to add it later. Records the shape only, never the text, and makes no model call.
-        # It speaks up at most once per shape, ever — see destinations.record_candidate.
-        note = destinations.record_candidate(tool, tool_input)
+        # It speaks up at most once per shape, ever — see discover.record_candidate.
+        note = discover.record_candidate(tool, tool_input)
         if note:
             emit("advise", note, for_user=note)
             return
@@ -235,7 +232,6 @@ def main():
             #
             # Bounded like every other denial, so a caller that cannot comply is not stuck: after
             # MAX_UNREADABLE it is said as advice and the call goes through.
-            path, state = load_state(str(payload.get("session_id") or "no-session"))
             held = state.get("unreadable", 0)
             state["unreadable"] = held + 1
             save_state(path, state)
@@ -256,9 +252,7 @@ def main():
     if not running:
         allow()
 
-    session = str(payload.get("session_id") or "no-session")
     digest = hashlib.sha1(text.encode()).hexdigest()[:16]
-    path, state = load_state(session)
     ctx = context_for(dest, tool, tool_input, cwd)
 
     # Walk the checks in order, skipping the ones this exact text already satisfied. A pass belongs
@@ -348,9 +342,8 @@ def main():
     # A check that could not run reads exactly like a check that passed. Said to the person, once a
     # session, because it is their install that is not doing what they set it to do — the same bargain
     # a misspelt effort level gets.
-    missed = [m for m in checks_module.notice.noted() if m not in state.get("told_missing", [])]
+    missed = [m for m in telling.never_ran() if ledger.worth_saying("never ran: " + m)]
     if missed:
-        state.setdefault("told_missing", []).extend(missed)
         save_state(path, state)
     for_user = "prose-guard: " + "; ".join(missed) + "." if missed else ""
 

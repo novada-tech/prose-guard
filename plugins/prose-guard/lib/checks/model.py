@@ -9,10 +9,14 @@ reported from there.
 Both callers used to do the read-the-prompt-then-ask pair themselves, which is why neither noticed
 that a prompt file it could not read was a pass.
 """
+import os
 import shutil
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import telling  # noqa: E402
 
 from . import ask as _ask
-from . import notice
 
 # The command `ask.py` invokes. Repeated here rather than imported because ask.py builds the name into
 # its argument list; one constant there would be the place for it.
@@ -23,11 +27,11 @@ def verdict(name, prompt_path, text, ctx):
     """(ok, why) from the model, and a notice instead of a silent pass where it never got asked."""
     prompt = _ask.read_prompt(prompt_path)
     if not prompt:
-        notice.note(f"the {name} check has no prompt to ask ({prompt_path} could not be read), "
-                    f"so it passed everything without looking")
+        telling.could_not_run(f"the {name} check has no prompt to ask ({prompt_path} could not be "
+                              f"read), so it passed everything without looking")
         return True, ""
     if not shutil.which(BINARY):
-        notice.note(f"`{BINARY}` is not on PATH, so no model-backed check ran — at this level that "
-                    f"leaves only the deterministic checks")
+        telling.could_not_run(f"`{BINARY}` is not on PATH, so no model-backed check ran — at this "
+                              f"level that leaves only the deterministic checks")
         return True, ""
     return _ask.ask(name, prompt, text, ctx)

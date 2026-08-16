@@ -30,8 +30,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import audiences  # noqa: E402
 import paths  # noqa: E402
-from checks import (BLOCK, Context, ceiling_for, config, costs_a_call, for_effort,  # noqa: E402
-                    notice, pooled)
+import telling  # noqa: E402
+from checks import (BLOCK, Context, ceiling_for, config, costs_a_call,  # noqa: E402
+                    for_effort, pooled)
 
 
 # The budget a deliberate run may spend, in model calls. There was none: five pooled checks each free
@@ -179,7 +180,7 @@ def main():
             print(f"  {check.NAME:10s} [{mark}] {finding.message}" if n == 0
                   else f"  {'':10s}            {finding.message}")
     print()
-    for missed in notice.noted():
+    for missed in telling.never_ran():
         # A check that never ran reads exactly like a check that passed, so it is said out loud rather
         # than left to be inferred from a clean report.
         print(f"  NOT CHECKED: {missed}")

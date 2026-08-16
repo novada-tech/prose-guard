@@ -34,13 +34,23 @@ def config():
     outside its own try and put an AttributeError in front of anyone whose config.json had been
     hand-edited to `[1, 2]`. Anything that is not a JSON object is no configuration at all, and that is
     decided here so a caller cannot be the one that forgot.
+
+    Checked against settings.CONFIG, so `effort: "medim"` is a sentence somebody can act on rather than
+    a silent disabling. `complaints()` is the same read, returning what was wrong instead of what was
+    right; the two are separate calls because almost every caller wants a value and only the hook is in
+    a position to tell anybody.
     """
-    try:
-        with open(at("config.json")) as fh:
-            got = json.load(fh)
-    except Exception:
-        return {}
-    return got if isinstance(got, dict) else {}
+    return _config()[0]
+
+
+def config_complaints():
+    """What is wrong with config.json, in sentences. Empty when there is nothing to say."""
+    return _config()[1]
+
+
+def _config():
+    import settings
+    return settings.read(at("config.json"), settings.CONFIG, "config.json")
 
 
 def update_config(**values):

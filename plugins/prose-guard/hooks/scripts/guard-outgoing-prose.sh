@@ -24,9 +24,21 @@ if [ -z "${PROSE_GUARD_EFFORT:-}${CLAUDE_PLUGIN_OPTION_EFFORT:-}" ]; then
     #
     # To the person AND to the model, like every other note about what this tool should check in
     # future: the person decides, and the model needs to know enough to offer to do it.
-    SAID="$CFG_HOME/setup-mentioned"
-    [ -f "$SAID" ] && exit 0
-    mkdir -p "$CFG_HOME" 2>/dev/null && : > "$SAID" 2>/dev/null || exit 0
+    # Remembered in told.json, the one ledger of what this tool has already said — see lib/telling.py.
+    # A marker of its own was a fifth way of remembering the same kind of fact.
+    SAID="$CFG_HOME/told.json"
+    grep -q '"setup never run"' "$SAID" 2>/dev/null && exit 0
+    mkdir -p "$CFG_HOME" 2>/dev/null || exit 0
+    python3 - "$SAID" <<'MARK' 2>/dev/null || exit 0
+import json, sys
+try:
+    data = json.load(open(sys.argv[1]))
+    data = data if isinstance(data, dict) else {}
+except Exception:
+    data = {}
+data.setdefault("setup never run", {})["said"] = True
+json.dump(data, open(sys.argv[1], "w"), indent=1, sort_keys=True)
+MARK
     NOTE='prose-guard is installed but has never been set up, so it is checking nothing. Run /prose-guard:setup to choose a level — medium is the one the measurements support. This is the only time it will be mentioned.'
     printf '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "systemMessage": "%s", "additionalContext": "%s"}}\n' "$NOTE" "$NOTE"
     exit 0
