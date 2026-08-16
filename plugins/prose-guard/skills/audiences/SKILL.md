@@ -127,7 +127,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/learn.py" create <name> /tmp/candidates.json 
 ```
 
 The `--match-*` flags say when the audience applies. They are not sources — reading them as "learn
-from this channel" is the mistake to avoid. To change them later, without editing the file by hand:
+from this channel" is the mistake to avoid. Four kinds, and the last two are easy to miss:
+`--match-channel`, `--match-repo`, `--match-owner OWNER` for every repository under one owner, and
+`--match-path GLOB` for an audience that reads particular files.
+
+Two more worth knowing, both of which a scan cannot decide for you:
+
+- `--not-known TERM` is the opposite of `--also-known`: a term the count made look shared because a
+  few people use it in one corner. Use it when somebody says "that one is not general".
+- `--shared-context low|medium|high` is how much of the thread these readers already have. `low` is
+  the default and assumes they are reading cold, which is the safe end. It is worth setting
+  deliberately when an audience is a small group who talk all day — where every audience carries the
+  default, the rule that the least-informed reader decides is ranking a constant.
+
+To change the routing later, without editing the file by hand:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/lib/audiences.py" match <name> channel C0123

@@ -542,9 +542,16 @@ def main():
                    help="file paths this audience reads")
     c.add_argument("--force", action="store_true",
                    help="rebuild even though it drops routing the existing audience had")
-    c.add_argument("--also-known", nargs="*", default=[])
-    c.add_argument("--not-known", nargs="*", default=[])
-    c.add_argument("--shared-context", choices=audiences.CONTEXT_ORDER, default="low")
+    c.add_argument("--also-known", nargs="*", default=[], metavar="TERM",
+                   help="terms this audience knows that the count did not reach — the borderline "
+                        "pile, and anything a person confirms")
+    c.add_argument("--not-known", nargs="*", default=[], metavar="TERM",
+                   help="the opposite: a term the count made look shared that a few people happen "
+                        "to use in one corner")
+    c.add_argument("--shared-context", choices=audiences.CONTEXT_ORDER, default="low",
+                   help="how much of the thread these readers already have. `low` assumes they are "
+                        "reading it cold, which is the safe default; a destination can raise it per "
+                        "call, as a direct message does")
 
     a = ap.parse_args()
     (cmd_scan if a.cmd == "scan" else cmd_create)(a)
