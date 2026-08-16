@@ -167,6 +167,13 @@ Numbers with the command that produced them, so a reviewer can re-run it. That i
 - **No new dependencies.** Standard library only, on purpose: it means the tool needs `python3` and
   nothing else, which is most of why it is easy to adopt. If you genuinely need a package, open an issue
   first and argue for it.
+- **Annotate what you write, and put `from __future__ import annotations` at the top of the file.**
+  That is what makes `list[str]` and `X | None` safe here: with it, no annotation is ever evaluated, so
+  the floor stays at whatever `python3` the machine already has. Without it, `X | None` raises before
+  3.10 — and the interpreter this was checked against, `/usr/bin/python3` on macOS, is 3.9.6. An
+  annotation that needs a type from another module can pull in an import the module deliberately does
+  not have; put that import under `if TYPE_CHECKING:` and say in a comment what the runtime import
+  would have cost.
 - **Comments say why, not what.** The code says what. Where a decision cost something to learn, the
   comment is where that goes — several in here exist because a plausible alternative turned out to be
   wrong, and the next person deserves to know which.
