@@ -335,12 +335,27 @@ def cmd_scan(a):
            # this audience uses for two things.
            "expansions": _folded(expansions),
            "known": known, "borderline": borderline, "needs_explaining": rest, "counts": rows}
+    if not docs:
+        named = ", ".join(f"--{flag} {value}" for flag, values in
+                          (("gh", a.gh), ("git", a.git or []), ("command", a.command),
+                           ("jsonl", a.jsonl), ("text", a.text))
+                          for value in values)
+        # Nothing written. A candidates file listing nobody used to be produced anyway, and `create`
+        # accepted it — so a mistyped repository slug yielded an audience that knew nothing and
+        # therefore held back every term in the house vocabulary. The file was the bridge between a
+        # failed read and a working-looking audience, so there is no file.
+        #
+        # And the old wording sent people to look for warnings that were not there: a source that
+        # cannot be reached at all prints one, but `--gh` on a slug that does not exist prints
+        # nothing, because nothing failed — the repository simply had no issues to read.
+        raise SystemExit(
+            "no documents were read, so there is nothing to measure and nothing was written.\n"
+            "  Every source was either unreachable or held nothing readable. Check the source names "
+            "for a typo, and that the credential in use can see them.\n"
+            f"  Sources given: {named or 'none'}")
     with open(out_path, "w") as fh:
         json.dump(out, fh, indent=1)
         fh.write("\n")
-    if not docs:
-        raise SystemExit("no documents were read, so there is nothing to measure. Check the warnings "
-                         "above: every source either failed or produced no usable lines.")
     print(f"{docs} documents from {len(people)} people; {len(rows)} terms not already inherited.")
     print(f"  {len(known):4d} reached {cut}+ people — shared knowledge")
     print(f"  {len(borderline):4d} at exactly {cut - 1} — worth a human look: "
@@ -443,6 +458,18 @@ def cmd_create(a):
     if not matches:
         raise SystemExit("an audience needs at least one identifier to match on, or it can never "
                          "apply: --match-channel, --match-repo, --match-owner or --match-path")
+    # An audience nobody was measured for is not an audience, and the direction it fails in is the
+    # expensive one: creating it makes the term check ENFORCE — so it holds back every term in the
+    # house vocabulary, having no evidence that anyone knows any of them. A mistyped repository slug
+    # used to produce exactly that, and the message said "terms will now be held back" as though the
+    # measurement had worked.
+    if not vocab and not (cand.get("members") or []):
+        raise SystemExit(
+            f"{a.name} would know nothing: the candidates file records no terms and no people.\n"
+            f"  Creating it would hold back every term in your house vocabulary, because nothing "
+            f"shows anyone knows any of them.\n"
+            f"  Re-run `scan` against a source that has writing in it, or pass --also-known to name "
+            f"the terms yourself.")
     data = {"name": a.name, "who": a.who or "",
             "expansions": cand.get("expansions") or {},
             "matches": matches,

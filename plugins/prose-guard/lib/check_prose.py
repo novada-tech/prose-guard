@@ -111,7 +111,11 @@ def verdict(path, problems, passes=1):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description="Check a draft the way the guard checks a message, and say what it would "
+                    "say. Spends real model calls above `low` — up to 40 for one run — and "
+                    "writes nothing except a record of how many findings each pass confirmed, "
+                    "which is what tells you whether the last edit helped.")
     ap.add_argument("file", nargs="?", help="file to check; omit to read stdin")
     ap.add_argument("--for", dest="audience",
                     help="an audience or baseline name — this is what sets the vocabulary. "
@@ -120,7 +124,11 @@ def main():
                     help="describe the reader in a sentence, for the model-based checks. It cannot "
                          "change which terms are known; use --for for that")
     ap.add_argument("--effort", choices=[x for x in config.LEVELS if x != "disabled"],
-                    default="high")
+                    default="high",
+                    help="how hard to look, and what it costs. `low` is the two arithmetic checks and "
+                         "no model call; `medium` adds one combined judgement call; `high` (the "
+                         "default here, because this is one deliberate run) asks each concern "
+                         "separately and re-asks while the answers keep changing")
     a = ap.parse_args()
 
     text = open(a.file).read() if a.file else sys.stdin.read()

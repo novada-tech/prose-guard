@@ -2710,6 +2710,223 @@ def test_what_the_hook_adds_to_the_conversation_is_bounded_and_ordered():
     check("and it is the actionable one", '"number 7 ' in last.splitlines()[0], True)
 
 
+def test_a_team_can_retire_a_destination_as_well_as_add_one():
+    """`off` was read from your own file only, and every other layer's was dropped in silence.
+
+    So a directory a team keeps could add a destination for everybody and could not stop one for
+    anybody — the whole mechanism for retiring something had no team-wide form, and `share` did not
+    copy it either. The layer that gains destinations each release is the layer that has to be able to
+    retire one.
+    """
+    import destinations as D
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as team:
+        os.environ["PROSE_GUARD_HOME"] = home
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"shared": [team]}, fh)
+        with open(os.path.join(team, "destinations.json"), "w") as fh:
+            json.dump({"off": ["commit message"],
+                       "destinations": [{"name": "team chat", "tool": ["chat_post"],
+                                         "text_fields": ["message"]}]}, fh)
+        _, D = fresh(home)
+        check("a name the team switched off is not checked here",
+              [d["name"] for d in D.DESTINATIONS if d["name"] == "commit message"], [])
+        check("and which layer switched it off is recorded",
+              [(n, o) for n, o, _ in D.SWITCHED_OFF], [("commit message", "shared")])
+        # Not yours to switch back on: the file it is in is everybody's, and saying "already on" while
+        # it stays off is the answer that wastes somebody's afternoon.
+        try:
+            D.switch("commit message", on=True)
+            check("switching a team-wide off back on is refused", "no error", "PermissionError")
+        except PermissionError:
+            pass
+        D.switch("github cli", on=False)
+        _, D = fresh(home)
+        check("your own file adds to that list rather than being the whole of it",
+              sorted(n for n, _, _ in D.SWITCHED_OFF), ["commit message", "github cli"])
+
+        # An off name matching nothing is a rename or a removal. `list` printed it as switched off,
+        # so somebody could believe a destination was off while it was being checked every time.
+        with open(os.path.join(home, "destinations.json"), "w") as fh:
+            json.dump({"off": ["commit mesage"]}, fh)
+        _, D = fresh(home)
+        check("an off name that stops nothing is recorded as stopping nothing",
+              [hits for n, _, hits in D.SWITCHED_OFF if n == "commit mesage"], [0])
+        check("and one that stops something says how much",
+              [hits for n, _, hits in D.SWITCHED_OFF if n == "commit message"], [1])
+
+        # Sharing it is what gives the mechanism its team-wide form.
+        with tempfile.TemporaryDirectory() as elsewhere:
+            with open(os.path.join(home, "destinations.json"), "w") as fh:
+                json.dump({"off": ["gitlab cli"],
+                           "destinations": [{"name": "our chat", "tool": ["ours_post"],
+                                             "text_fields": ["message"]}]}, fh)
+            _, D = fresh(home)
+            D.share(elsewhere)
+            landed = json.load(open(os.path.join(elsewhere, "destinations.json")))
+            check("what you switched off stays here unless you ask", landed.get("off"), None)
+            D.share(elsewhere, with_off=True)
+            landed = json.load(open(os.path.join(elsewhere, "destinations.json")))
+            check("and travels when you do", landed.get("off"), ["gitlab cli"])
+
+
+def test_a_shared_audience_says_what_it_replaced():
+    """A user or shared `engineers.json` displaced the shipped 227-term baseline with no marker.
+
+    `destinations.py list` prints `(shadowed by yours)` and `share` warns when you create that
+    situation; `audiences.py list` said only "shared". The scaffolding was built for the layer where a
+    stale copy costs least and was missing on the one that gains terms every release.
+    """
+    import audiences as A
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as team:
+        os.environ["PROSE_GUARD_HOME"] = home
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"shared": [team]}, fh)
+        with open(os.path.join(team, "engineers.json"), "w") as fh:
+            json.dump({"name": "engineers", "who": "us", "vocabulary": {"FOO": 9},
+                       "expansions": {}}, fh)
+        A, _ = fresh(home)
+        check("the shared copy is the one in scope", A.ALL["engineers"].origin, "shared")
+        check("and it says what it displaced", A.ALL["engineers"].replaces, "built in")
+        write_audience(home, "engineers", vocabulary={"FOO": 9}, expansions={})
+        A, _ = fresh(home)
+        check("yours displaces the team's in turn", A.ALL["engineers"].replaces, "shared")
+        r = subprocess.run([sys.executable, os.path.join(LIB, "audiences.py"), "list"],
+                           capture_output=True, text=True,
+                           env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=120)
+        check("and the person reading `list` is told", "replaces the shared one" in r.stdout, True)
+        check("an audience that displaced nothing says nothing", A.ALL["platform-team"].replaces
+              if "platform-team" in A.ALL else "", "")
+
+
+def test_a_shared_directory_can_hold_both_kinds():
+    """One flat namespace for two kinds of file, and only one of the two readers knew it.
+
+    `share_dir.py` excluded `destinations.json` and `audiences.load()` globbed `*.json`, so a team
+    directory holding both produced a phantom audience called `destinations` — a baseline with no
+    terms, listed for a person to inherit.
+    """
+    import audiences as A
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as team:
+        os.environ["PROSE_GUARD_HOME"] = home
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"shared": [team]}, fh)
+        with open(os.path.join(team, "destinations.json"), "w") as fh:
+            json.dump({"destinations": [{"name": "team chat", "tool": ["chat_post"],
+                                         "text_fields": ["message"]}]}, fh)
+        with open(os.path.join(team, "platform.json"), "w") as fh:
+            json.dump({"name": "platform", "who": "them", "matches": {"channels": ["C1"]},
+                       "vocabulary": {"GKE": 9}, "expansions": {}}, fh)
+        A, _ = fresh(home)
+        check("the team's destinations file is not an audience", "destinations" in A.ALL, False)
+        check("the audience beside it still is", A.ALL["platform"].origin, "shared")
+        r = subprocess.run([sys.executable, os.path.join(LIB, "share_dir.py")],
+                           capture_output=True, text=True,
+                           env={**os.environ, "PROSE_GUARD_HOME": home}, timeout=120)
+        check("and the two are counted apart", "1 audience(s), 1 destination(s)" in r.stdout, True)
+
+
+def test_add_is_the_one_writer_of_the_destination_schema():
+    """The thing that created a destination was prose: the setup skill told an agent to write JSON.
+
+    Nothing checked what it wrote, and the fields that exist to make the guard LESS aggressive fail
+    open — `max_effort: "lo"` ran at full effort and could block. The declaration is checked on the way
+    in now, so the file has one reader and one writer and they agree by construction.
+    """
+    import destinations as D
+    long = ("The exporter line went because nothing on a laptop reads that variable. Plans had "
+            "started failing in any shell older than an hour. Access uses the credential now.")
+    with tempfile.TemporaryDirectory() as home:
+        os.environ["PROSE_GUARD_HOME"] = home
+        _, D = fresh(home)
+        D.add({"name": "our wiki", "tool": ["wiki_write"], "text_fields": ["content"],
+               "max_severity": "advise"})
+        _, D = fresh(home)
+        check("it is there, and it is yours", (D.find("our wiki") or {}).get("_origin"), "yours")
+        check("and it claims the call it was written for",
+              (D.match("mcp__team__wiki_write", {"content": long}) or {}).get("name"), "our wiki")
+        for why, entry in (
+                ("a cap that is not a level", {"name": "a", "tool": ["t"], "text_fields": ["c"],
+                                               "max_effort": "lo"}),
+                ("a cap that is not a severity", {"name": "a", "tool": ["t"], "text_fields": ["c"],
+                                                  "max_severity": "warn"}),
+                ("a misspelt key", {"name": "a", "tool": ["t"], "text_fields": ["c"],
+                                    "max_effot": "low"}),
+                ("no name", {"tool": ["t"], "text_fields": ["c"]}),
+                ("nothing to recognise it by", {"name": "a", "text_fields": ["c"]}),
+                ("a tool with no field carrying the prose", {"name": "a", "tool": ["t"]}),
+                ("a command with no flag carrying the prose", {"name": "a", "bash": r"\bgh\b"}),
+                ("a pattern that does not compile", {"name": "a", "bash": "gh pr (",
+                                                     "text_arg": ["--body"]}),
+                ("a name you already have", {"name": "our wiki", "tool": ["t"],
+                                             "text_fields": ["c"]})):
+            try:
+                D.add(entry)
+                check(f"refused: {why}", "written", "ValueError")
+            except ValueError:
+                pass
+        _, D = fresh(home)
+        check("and nothing that was refused landed in the file",
+              [d["name"] for d in D.DESTINATIONS if d["_origin"] == "yours"], ["our wiki"])
+
+        # The same declaration, reached the other way: a pattern somebody hand-wrote that does not
+        # compile used to raise out of `match`, and a PreToolUse hook that exits non-zero lets the call
+        # through unchecked — the schema failing open in the one direction that matters.
+        with open(os.path.join(home, "destinations.json"), "w") as fh:
+            json.dump({"destinations": [{"name": "broken", "bash": "gh pr (", "text_arg": ["-m"]}]}, fh)
+        _, D = fresh(home)
+        check("a pattern that does not compile is dropped, not raised",
+              (D.match("Bash", {"command": 'git commit -m "' + long + '"'}) or {}).get("name"),
+              "commit message")
+        check("and the reason is a sentence somebody can act on",
+              any("does not compile" in c for c in D.COMPLAINTS), True)
+
+
+def test_a_scan_that_read_nothing_cannot_become_an_audience_that_blocks_everything():
+    """The compound failure: a mistyped source, and a working-looking audience that knows nothing.
+
+    `scan` against a slug that does not exist read no documents, said "check the warnings above" when
+    there were none to check, and wrote a candidates file anyway. `create` accepted that file and
+    reported that terms would now be held back — so the tool went from a typo to an audience with no
+    evidence that anyone knows any term, which therefore holds back the entire house vocabulary. The
+    file was the bridge between the two, so there is no file.
+    """
+    learn = os.path.join(LIB, "learn.py")
+    with tempfile.TemporaryDirectory() as home:
+        env = dict(os.environ, PROSE_GUARD_HOME=home)
+        out = os.path.join(home, "candidates.json")
+        # A source that exists and holds nothing readable, so nothing "fails" and nothing warns.
+        empty = os.path.join(home, "empty.jsonl")
+        open(empty, "w").close()
+        r = subprocess.run([sys.executable, learn, "scan", "--jsonl", empty, "--out", out],
+                           capture_output=True, text=True, env=env, timeout=180)
+        check("it says nothing was written", "nothing was written" in r.stdout + r.stderr, True)
+        check("it does not send you looking for warnings that are not there",
+              "warnings above" in r.stdout + r.stderr, False)
+        check("and it names the source it was given", "--jsonl" in r.stdout + r.stderr, True)
+        check("no candidates file exists to be handed on", os.path.exists(out), False)
+
+        # And if one is produced some other way, create still refuses it.
+        with open(out, "w") as fh:
+            json.dump({"_meta": {}, "members": [], "expansions": {}, "known": [],
+                       "borderline": [], "needs_explaining": [], "counts": {}}, fh)
+        r = subprocess.run([sys.executable, learn, "create", "ghost", out, "--who", "them",
+                            "--match-channel", "C1"], capture_output=True, text=True, env=env,
+                           timeout=180)
+        check("an audience that would know nothing is refused",
+              "would know nothing" in r.stdout + r.stderr, True)
+        check("and it says what that would cost",
+              "hold back every term" in r.stdout + r.stderr, True)
+        check("nothing was written", os.path.exists(os.path.join(home, "audiences", "ghost.json")),
+              False)
+
+        # Naming the terms by hand is a deliberate act and still works.
+        r = subprocess.run([sys.executable, learn, "create", "byhand", out, "--who", "them",
+                            "--match-channel", "C2", "--also-known", "ADC", "SFTR"],
+                           capture_output=True, text=True, env=env, timeout=180)
+        check("but naming them yourself is allowed",
+              os.path.exists(os.path.join(home, "audiences", "byhand.json")), True)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
