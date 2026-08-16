@@ -321,9 +321,11 @@ def test_combination():
     with tempfile.TemporaryDirectory() as home:
         write_audience(home, "eng", matches={"channels": ["C1"]},
                        vocabulary={"JVM": 9, "SHARED": 9},
+                       expansions={"LF": {"Linux Foundation": 3}},
                        assumptions={"shared_context": "high"})
         write_audience(home, "clients", matches={"channels": ["C1"]},
                        vocabulary={"SHARED": 9, "SWAP": 9},
+                       expansions={"LF": {"Linux Foundation": 2, "line feed": 4}},
                        assumptions={"shared_context": "low"})
         A, _ = fresh(home)
         r = A.resolve({"channel": "C1"})
@@ -331,6 +333,12 @@ def test_combination():
         check("vocabulary intersects", sorted(r.known), ["SHARED"])
         check("shared context takes the minimum", r.shared_context, "low")
         check("the description names both", "several groups" in r.describe(), True)
+        # A third dimension, and a third combinator: how many people wrote a term out this way is a
+        # count of people, so two audiences writing it the same way add up. Taking one audience's count
+        # over the other's under-reports the sense that is actually the common one — and the counts are
+        # what a reader is shown to decide which sense a message means.
+        check("what a term was written out as adds up across the audiences in scope",
+              r.meanings("LF"), {"Linux Foundation": 5, "line feed": 4})
 
 
 def test_a_term_is_known_at_four_people_and_not_at_three():
@@ -360,15 +368,18 @@ def test_no_subset_elimination():
     """
     with tempfile.TemporaryDirectory() as home:
         write_audience(home, "big", matches={"channels": ["C1"]},
-                       members=["alice", "bobby", "carol", "dave"],
+                       members=["alice", "bobby", "carol", "dave", "sam"],
                        vocabulary={"WIDE": 9, "NARROW": 9})
         write_audience(home, "small", matches={"channels": ["C1"]},
-                       members=["alice", "bobby"], vocabulary={"WIDE": 9})
+                       members=["alice", "bobby", "samantha"], vocabulary={"WIDE": 9})
         A, _ = fresh(home)
         r = A.resolve({"channel": "C1"})
         check("the contained audience still constrains", sorted(r.known), ["WIDE"])
         # overlap is a HINT, not a fact: sources name people differently, so it is reported for a
         # person to confirm and nothing depends on it
+        # `sam` and `samantha` are three letters of agreement, which is a guess about a person rather
+        # than a hint about a name — and this is reported to somebody as a list to confirm, so a pair
+        # that is wrong costs more attention than a pair that is missing. Four letters is the floor.
         rows = A.possible_overlap()
         check("possible overlap is reported for a human instead",
               [(x, y, len(h)) for x, y, h, _, _ in rows], [("big", "small", 2)])
@@ -1203,6 +1214,17 @@ def test_one_config_location():
         check("CLAUDE_PLUGIN_DATA does not move the config",
               got, os.path.join(tmp, ".config", "prose-guard"))
 
+        # The order the three are tried in, asked with all three set. Asked with only one, any order
+        # answers the same, so which of them wins was decided by nothing: PROSE_GUARD_HOME is what a
+        # test and a person point somewhere else with, and it has to beat a machine-wide XDG setting.
+        both = {**env_hookish, "PROSE_GUARD_HOME": os.path.join(tmp, "asked-for"),
+                "XDG_CONFIG_HOME": os.path.join(tmp, "xdg")}
+        got = subprocess.run(
+            [sys.executable, "-c",
+             f"import sys; sys.path.insert(0, {LIB!r}); import paths; print(paths.home())"],
+            capture_output=True, text=True, env=both, timeout=60).stdout.strip()
+        check("PROSE_GUARD_HOME wins over XDG_CONFIG_HOME", got, os.path.join(tmp, "asked-for"))
+
         # and the shell wrapper agrees with paths.py
         wrapper = open(GUARD).read()
         check("the wrapper resolves the same directory",
@@ -1341,6 +1363,7 @@ def test_levels():
     import importlib
 
     import checks
+    import host
     import paths
     from checks import config
     for level, names in (("disabled", []),
@@ -1358,7 +1381,28 @@ def test_levels():
         for bad in ("", "nonsense", "LOW "):
             os.environ["PROSE_GUARD_EFFORT"] = bad
             check(f"an unrecognised level is disabled ({bad!r})", config.effort(), "disabled")
+        # ...and disabling is not enough on its own. A setting that silently switches the tool off is
+        # the worst failure it has, because working correctly and doing nothing look identical from
+        # outside, so the value has to come back as a sentence somebody can act on.
+        os.environ["PROSE_GUARD_EFFORT"] = "medim"
+        check("and it is complained about by name",
+              [c for c in config.complaints() if "medim" in c and "PROSE_GUARD_EFFORT" in c] != [],
+              True)
         del os.environ["PROSE_GUARD_EFFORT"]
+        check("while a level nobody set is nothing to complain about", config.complaints(), [])
+
+        # Precedence, which the module docstring states and nothing checked: the environment, then the
+        # plugin's own setting, then the file. Reversed, a level written into a file once quietly
+        # overrides the one this session was started with, at whichever end is less safe.
+        with open(os.path.join(tmp, "config.json"), "w") as fh:
+            json.dump({"effort": "high"}, fh)
+        check("the file decides when nothing else does", config.effort(), "high")
+        os.environ[host.EFFORT_VAR] = "medium"
+        check("the plugin's own setting beats the file", config.effort(), "medium")
+        os.environ["PROSE_GUARD_EFFORT"] = "low"
+        check("and the environment beats both", config.effort(), "low")
+        del os.environ["PROSE_GUARD_EFFORT"]
+        del os.environ[host.EFFORT_VAR]
     del os.environ["PROSE_GUARD_HOME"]
     importlib.reload(paths)
     importlib.reload(config)
