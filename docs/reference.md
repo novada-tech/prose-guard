@@ -111,6 +111,30 @@ You see these, not just the agent. A hook has two channels — `additionalContex
 only the first, so a decision that is yours was being made available only to whatever agent happened to be
 running. It goes to both now: you see the notice, and the agent knows enough to offer to act on it.
 
+## What you see when a message is checked
+
+One line, on the message that goes out:
+
+```
+prose-guard high: 2 rewrites, 1 note (7 model calls).
+prose-guard low: nothing to say.
+```
+
+`rewrites` is how many times the agent was sent back before this text passed. A denial carries no such
+line, because a denial is a permission prompt and you have already seen it.
+
+The point of printing it when there is nothing to say is what silence then means. Advice goes to the
+model and not to you, so before this the only outcome you ever saw was a block — and a check that had
+quietly stopped covering something looked exactly like a check with nothing to object to. Now the
+absence of that line means one thing: nothing was checked. That is how a gap becomes visible without
+reading a transcript, and it is worth knowing which gaps are deliberate: under 25 words, a `git commit`
+with no `-m`, and text the guard could not read and said so about.
+
+It costs the agent nothing. `systemMessage` never enters the conversation the model is paying for.
+
+A deliberate run of `check_prose.py` needs none of this — it prints every finding, the ceiling it was
+working to, and what it actually spent, straight to the terminal you ran it in.
+
 Long is not the same as outgoing, and getting that wrong is expensive: one mention per shape means a
 mention spent on a search pattern is a mention gone. In real use it spent all six of them on nothing —
 `git grep -E` with a long alternation, the text an `Edit` replaces, an `Agent` prompt, a `Write` to a

@@ -75,13 +75,18 @@ def verdict_on(payload, home, timeout=120):
     Five tests had their own copy of this, differing only in a timeout and in whether they called
     saying nothing "allowed" or "silent". Saying nothing IS allowing — a PreToolUse hook that prints
     nothing lets the call through — so there is one word for it here.
+
+    Only what reaches the MODEL counts as advice. Every checked message also carries a line to the
+    person saying it was checked, and reading both channels as one reported a clean message as an
+    objection.
     """
     out = hook_reply(payload, {**os.environ, "PROSE_GUARD_HOME": home}, timeout)
     if out is None:
         return "allowed", ""
     if out.get("permissionDecision") == "deny":
         return "deny", out["permissionDecisionReason"]
-    return "advise", str(out.get("additionalContext") or "")
+    told = str(out.get("additionalContext") or "")
+    return ("advise", told) if told else ("allowed", "")
 
 
 def fresh(home):
@@ -1080,12 +1085,21 @@ def env(home, state, effort="low"):
 
 
 def run_guard(payload, home, state, effort="low"):
+    """What the hook did about a call, and what it said to the MODEL about it.
+
+    The two channels are separate on purpose and this reads only one of them. Every checked message now
+    carries a line to the person saying it was checked — see
+    `test_you_are_told_when_a_message_was_checked_and_what_it_cost` — so treating any output at all as
+    "advice" would report a clean message as an objection, which is what happened when that line landed.
+    Read `systemMessage` when the question is what the PERSON sees.
+    """
     h = hook_reply(payload, env(home, state, effort))
     if h is None:
         return "allow", ""
     if h.get("permissionDecision") == "deny":
         return "deny", h["permissionDecisionReason"]
-    return "advise", h.get("additionalContext", "")
+    told = h.get("additionalContext", "")
+    return ("advise", told) if told else ("allow", "")
 
 
 def test_hook_end_to_end():
@@ -3729,6 +3743,52 @@ def test_the_shipped_floor_carries_what_the_system_dictionary_would():
     finally:
         jargon._words = was
     check("and nothing that needs explaining was swallowed", still_jargon, [])
+
+
+def test_you_are_told_when_a_message_was_checked_and_what_it_cost():
+    """Until now the only outcome a person saw was a block.
+
+    Advice goes to `additionalContext`, which reaches the model and not them; a denial is a permission
+    prompt, which is loud. Everything else was silent — so a check that quietly stopped covering
+    something looked exactly like a check with nothing to say, and there was no way to notice from the
+    outside. Silence now means one thing: nothing was checked.
+
+    It costs the agent nothing, because `systemMessage` reaches the person and not the model.
+    """
+    with tempfile.TemporaryDirectory() as home:
+        repo = os.path.join(home, "repo")
+        os.makedirs(os.path.join(home, "audiences"))
+        os.makedirs(repo)
+        for argv in (["init", "-q"], ["config", "user.email", "a@b.c"], ["config", "user.name", "t"],
+                     ["remote", "add", "origin", "git@github.com:acme/infra.git"]):
+            subprocess.run(["git", "-C", repo, *argv], capture_output=True, timeout=60)
+        with open(os.path.join(home, "audiences", "team.json"), "w") as fh:
+            json.dump({"name": "team", "who": "engineers here", "matches": {"repos": ["acme/infra"]},
+                       "inherits": ["engineers"], "members": ["a", "b", "c", "d"],
+                       "vocabulary": {"PAYLOAD": 5}, "expansions": {}}, fh)
+        env = {**os.environ, "PROSE_GUARD_HOME": home, "PROSE_GUARD_EFFORT": "low"}
+        pad = (" so anyone rebuilding it later can tell which figures were used and why the whole "
+               "index had to be rewritten before it could be signed off at all")
+
+        def send(text):
+            out = hook_reply({"session_id": "s", "tool_name": "Bash", "cwd": repo,
+                              "tool_input": {"command": f'git commit -m "{text}"'}}, env, 120) or {}
+            return out.get("permissionDecision", "allow"), out.get("systemMessage", "")
+
+        first = send("Rebuild the SFTR index after the ADC migration" + pad)
+        second = send("Rebuild the SFTR index after the ADC job" + pad)
+        third = send("Rebuild the payload index after the credential job" + pad)
+
+        check("a denial is its own notice, so it does not also carry a tally",
+              [s for _, s in (first, second)], ["", ""])
+        check("the message that goes out says how many rewrites it took",
+              third[1], "prose-guard low: 2 rewrites.")
+
+        # And a clean message says so, which is the half that makes a miss visible: if this line is
+        # absent, nothing was checked, and that is now the only thing absence can mean.
+        clean = send("Rebuild the payload index after the credential job once more" + pad)
+        check("a message nobody objected to says it was checked",
+              clean, ("allow", "prose-guard low: nothing to say."))
 
 
 def teardown_function(_fn):

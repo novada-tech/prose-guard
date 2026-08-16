@@ -243,6 +243,21 @@ def say(finding, check, state, path, digest, advice):
     return False
 
 
+def tally(level, rewrites, notes, calls):
+    """The one line the person sees when a message has been checked.
+
+    Written as counts rather than a verdict because the useful reading is comparative: three rewrites
+    on one message is worth looking at, and so is a level nobody meant to be running.
+    """
+    said = []
+    if rewrites:
+        said.append(f"{rewrites} rewrite" + ("s" if rewrites != 1 else ""))
+    if notes:
+        said.append(f"{notes} note" + ("s" if notes != 1 else ""))
+    return (f"prose-guard {level}: " + (", ".join(said) if said else "nothing to say")
+            + (f" ({calls} model call{'s' if calls != 1 else ''})" if calls else "") + ".")
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -320,7 +335,8 @@ def main():
     # reader will care and whether the ask is clear; a commit message has no addressee and no ask, and
     # paying four model calls for one is the wrong trade for something read years later, by someone
     # looking for when a line changed. See data/destinations.json.
-    running = checks_module.for_effort(checks_module.capped(EFFORT, dest.get("max_effort")))
+    level = checks_module.capped(EFFORT, dest.get("max_effort"))
+    running = checks_module.for_effort(level)
     if not running:
         allow()
 
@@ -400,6 +416,9 @@ def main():
     # check make of this exact text" cannot change, and the digest stored beside it already separates
     # one text from the next, so clearing it only bought the same answer again. It holds one entry per
     # check, so it cannot grow.
+    # Read before they are cleared: this is the whole argument that led to the message going out.
+    rewrites = sum(state["denials"].values())
+    calls = state["calls"]
     state["denials"] = {}
     state["calls"] = 0
     save_state(path, state)
@@ -411,6 +430,15 @@ def main():
     if missed:
         save_state(path, state)
     for_user = "prose-guard: " + "; ".join(missed) + "." if missed else ""
+
+    # One line to the person, every time a message is actually checked, whether or not anything was
+    # wrong with it. Advice goes to the model and a denial is a permission prompt, so until now the
+    # only outcome the person saw was a block — and a check that quietly stopped covering something
+    # looked exactly like a check that had nothing to say. Silence here now means one thing: nothing
+    # was checked. That is what makes a miss visible without reading a transcript.
+    #
+    # It costs the agent nothing. `systemMessage` reaches the person and not the model.
+    for_user = " ".join(x for x in (for_user, tally(level, rewrites, len(advice), calls)) if x)
 
     if not advice and not for_user:
         allow()
