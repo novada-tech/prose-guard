@@ -14,8 +14,8 @@ comment, a commit message, a document — against two questions:
 **Who is going to read this?**
 **Why should they care?**
 
-From these two central questions of effective communication, seven checks follow, and they are what
-actually runs. Two are arithmetic — no model call, and they run at every level. Five are judgement.
+Seven checks follow from those two questions, and they are what actually runs. Two are arithmetic — no
+model call, and they run at every level. Five are judgement.
 
 | | | |
 |---|---|---|
