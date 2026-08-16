@@ -4286,11 +4286,20 @@ def main():
     # Every test this file defines has to be one that ran. Three were written, committed and green
     # locally while the runner skipped them, and "all checks passed" is a worse outcome than a red
     # build: it is the same words as a real pass.
+    #
+    # Counted, not named. This compared two SETS of names, and a name defined twice appears in both of
+    # them — so a second `def test_detection` anywhere below the first silently replaced it in
+    # globals(), the first never ran, the count did not move, and the suite printed a clean pass. With
+    # 97 tests whose names run to nine words, that is a plausible mistake and it was invisible.
+    # Counting definitions catches it and the never-reached test with the same subtraction.
+    import collections
     import re
-    defined = set(re.findall(r"^def (test_\w+)", open(__file__).read(), re.M))
-    missed = defined - {fn.__name__ for fn in tests}
+    defined = collections.Counter(re.findall(r"^def (test_\w+)", open(__file__).read(), re.M))
+    missed = defined - collections.Counter(fn.__name__ for fn in tests)
     if missed:
-        print(f"FAIL these tests are defined but were not run: {', '.join(sorted(missed))}")
+        print("FAIL these tests are defined but were not run: " + ", ".join(
+            f"{name} (defined {defined[name]} times, so only the last one runs)"
+            if defined[name] > 1 else name for name in sorted(missed)))
         return 1
     for fn in tests:
         try:
