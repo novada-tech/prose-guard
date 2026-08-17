@@ -150,6 +150,20 @@ with no `-m`, and text the guard could not read and said so about.
 
 It costs the agent nothing. `systemMessage` never enters the conversation the model is paying for.
 
+### Before a level is chosen
+
+The biggest gap of all is the one where no level has been chosen, because then no message produces a
+line and the reasoning above cannot help you: an install checking nothing and an install with nothing to
+object to are the same silence. So that state announces itself instead, at the start of every session,
+until a level exists.
+
+`disabled` is a level. Choosing it ends the notice and is the supported way to keep prose-guard
+installed and quiet.
+
+It used to be said once, on the first guarded tool call, and only if `config.json` did not exist yet —
+which meant registering a team's shared audience directory wrote that file and silenced the notice for
+good, with nothing running. It now asks whether a level was chosen rather than whether a file is there.
+
 ### Reading back an argument
 
 A held message is an exchange you never see: the guard objects, the agent rewrites, and only the last
