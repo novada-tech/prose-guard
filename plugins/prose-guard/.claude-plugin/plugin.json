@@ -1,10 +1,25 @@
 {
   "name": "prose-guard",
   "version": "1.5.0",
-  "description": "Checks a message, review comment, documentation page or document on its way out, and hands it back with one problem named.",
+  "description": "Checks a chat message, review comment, commit message, pull request description or document on its way out — for jargon its readers have never used, and for whether they could act on it — and names one problem at a time.",
   "author": {
     "name": "Simon Cockx"
   },
   "homepage": "https://github.com/novada-tech/prose-guard",
+  "repository": "https://github.com/novada-tech/prose-guard",
+  "keywords": [
+    "writing",
+    "technical-writing",
+    "prose",
+    "jargon",
+    "acronyms",
+    "readability",
+    "code-review",
+    "commit-messages",
+    "pull-requests",
+    "slack",
+    "documentation",
+    "hooks"
+  ],
   "license": "Apache-2.0"
 }
