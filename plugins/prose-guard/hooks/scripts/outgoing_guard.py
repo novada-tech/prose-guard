@@ -178,23 +178,41 @@ def save_state(path: str, state: dict[str, Any]) -> None:
         pass
 
 
+def _one_stop(message: str) -> str:
+    """A finding ending in exactly one full stop, so a sentence can follow it."""
+    return message.rstrip().rstrip(".,;:") + "."
+
+
 def emit(decision: str, message: str, hint: str = "", for_user: str = "") -> None:
     """`additionalContext` reaches the model and not the person; `systemMessage` reaches the person and
     not the model — verified against the hooks reference. A finding is for whoever is writing, so it goes
     to the model. A decision about what this tool should check in future is the person's, so it goes to
     both: they see it, and the model knows enough to offer to do it."""
     out = {"hookEventName": "PreToolUse"}
-    if for_user:
-        out["systemMessage"] = for_user
     if decision == BLOCK:
         out["permissionDecision"] = "deny"
-        # The hint goes after the instruction, not inside it: "then send again" is what to do, and
-        # anything appended before it reads as part of the complaint.
-        out["permissionDecisionReason"] = ("Hold this message. " + message + ", then send again."
-                                          + hint)
+        # Two sentences, not one clause bolted onto another. A model finding is already a sentence
+        # ending in a full stop, so appending ", then send again." produced
+        #
+        #     …unable to tell what it refers to., then send again.
+        #
+        # in front of a person. The finding is normalised to end in exactly one stop and the
+        # instruction follows as its own sentence, which reads the same whether the finding is a
+        # sentence from a model or a phrase from arithmetic.
+        out["permissionDecisionReason"] = ("Hold this message. " + _one_stop(message)
+                                           + " Then send again." + hint)
     elif message:
         out["additionalContext"] = message
-    print(json.dumps({"hookSpecificOutput": out}))
+    said = {"hookSpecificOutput": out}
+    # `systemMessage` is a SIBLING of hookSpecificOutput, not a field inside it — see the common fields
+    # table in the hooks reference. Nested, it is well-formed JSON that Claude Code discards, so every
+    # transparency line this tool has ever emitted was silently dropped: the level, the audience, the
+    # rewrite count, the checks that could not run. The hook exited 0 and the JSON parsed, which is why
+    # nothing looked wrong. Verified by reading the output of a real run rather than the string we put
+    # into it — the mistake this repeats otherwise is checking the value we just set.
+    if for_user:
+        said["systemMessage"] = for_user
+    print(json.dumps(said))
 
 
 # What this tool may add to the conversation about one message, in characters. Everything every check
