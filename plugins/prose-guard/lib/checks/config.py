@@ -46,12 +46,24 @@ def _sources() -> tuple[tuple[str, str | None], ...]:
             ("config.json", paths.config().get("effort")))
 
 
-def effort() -> str:
+def chosen() -> str | None:
+    """The level a source actually names, or None when no source names one.
+
+    `effort()` cannot answer this. It says `disabled` both for somebody who turned the guard off and
+    for somebody who has never been asked, and those two deserve opposite treatment: one has decided
+    and must never be nagged, the other is running an install that checks nothing and looks installed.
+    `hooks/scripts/session_start.py` is the only caller that needs to tell them apart, and it is the
+    one place a person is told their install is doing nothing.
+    """
     for _, value in _sources():
         level, _ = _LEVEL(value)
         if level:
             return level
-    return "disabled"
+    return None
+
+
+def effort() -> str:
+    return chosen() or "disabled"
 
 
 def complaints() -> list[str]:

@@ -367,23 +367,19 @@ def test_every_writer_puts_system_message_where_it_is_read():
     could not run. The hook exited 0 and the JSON parsed, so nothing looked wrong, and nine tests in
     this file agreed with the code because they read the field back out of the same wrong place.
 
-    There are two writers and they are in different languages, so they cannot share the code that
-    builds the envelope: `emit()` in outgoing_guard.py and one `printf` in guard-outgoing-prose.sh,
-    which answers before Python starts precisely so an unconfigured install costs no interpreter.
-    What they can share is this table. A third writer goes in it.
+    There are two writers and they answer different events, so they cannot share the code that builds
+    the envelope: `emit()` in outgoing_guard.py and `session_start.py`, which speaks at the start of a
+    session about an install where nobody has chosen a level. What they can share is this table. A
+    third writer goes in it.
     """
     writers = []
 
-    # The shell pre-filter: nothing configured, so it answers the setup notice itself.
+    # SessionStart: nothing configured, so it says the install is checking nothing.
     with tempfile.TemporaryDirectory() as tmp:
         home = os.path.join(tmp, "home")
         os.makedirs(home)
-        bare = {k: v for k, v in os.environ.items() if not k.startswith("PROSE_GUARD")}
-        bare.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
-        bare["PROSE_GUARD_HOME"] = home
-        writers.append(("guard-outgoing-prose.sh", raw_hook_output(
-            {"tool_name": "mcp__slack__slack_send_message", "session_id": "w1", "cwd": tmp,
-             "tool_input": {"channel_id": "C1", "message": PROSE}}, bare)))
+        writers.append(("session_start.py",
+                        raw_session_start_output(nothing_chosen(home))))
 
     # The Python: a message it actually checks, which always carries the tally.
     with tempfile.TemporaryDirectory() as home:
@@ -574,6 +570,27 @@ def load_guard(as_name):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+SESSION_START = os.path.join(PLUGIN, "hooks", "scripts", "session-start.sh")
+
+
+def nothing_chosen(home):
+    """An environment where no source names a level, which is the state every new install is in."""
+    e = {k: v for k, v in os.environ.items() if not k.startswith("PROSE_GUARD")}
+    e.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
+    e["PROSE_GUARD_HOME"] = home
+    return e
+
+
+def raw_session_start_output(environment, timeout=60):
+    """What the SessionStart hook printed, with NO reshaping, for asserting where a field sits."""
+    r = subprocess.run(["bash", SESSION_START],
+                       input=json.dumps({"hook_event_name": "SessionStart", "session_id": "s"}),
+                       capture_output=True, text=True, env=environment, timeout=timeout)
+    assert r.returncode == 0, f"the hook exited {r.returncode}: {r.stderr}"
+    assert not r.stderr.strip(), f"the hook wrote to stderr: {r.stderr.strip()[-1500:]}"
+    return json.loads(r.stdout) if r.stdout.strip() else {}
 
 
 def raw_hook_output(payload, environment, timeout=300):
@@ -1830,31 +1847,52 @@ def test_a_session_stops_paying_for_model_checks_once_its_budget_is_spent():
         check("and once twenty are spent it is not", asked_after(20), False)
 
 
-def test_an_install_nobody_has_set_up_says_so_once():
-    """Installed, restarted, setup never run — the state every new user is in, and nothing tested it.
+def test_an_install_nobody_has_set_up_says_so_every_session():
+    """Installed, nobody has chosen a level — the state every new user is in, and nothing tested it.
 
     Working correctly and doing nothing are the same output here: somebody installs this, sends a
     message, sees nothing, and concludes it is broken, with no wrong output to report. Which is why
     nobody would file it.
 
-    Said by the shell pre-filter rather than by the Python, so the empty state still costs nobody the
-    interpreter startup that pre-filter exists to save, and remembered in told.json — a notice nobody
-    can dismiss is its own defect.
+    It is said at SessionStart and it repeats, which is the opposite of what the notice this replaces
+    did. That one was printed on the first guarded tool call and once ever, so somebody who missed it
+    was never told again — and somebody who did not send anything that day was never told at all.
+    Repeating costs a person nothing they cannot stop with one word: `disabled` is a level, choosing
+    it silences this, and the message says so.
     """
     with tempfile.TemporaryDirectory() as tmp:
         home = os.path.join(tmp, "home")
         os.makedirs(home)
-        nothing_set = {k: v for k, v in os.environ.items() if not k.startswith("PROSE_GUARD")}
-        nothing_set.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
-        nothing_set["PROSE_GUARD_HOME"] = home
-        payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": "empty", "cwd": tmp,
-                   "tool_input": {"channel_id": "C1", "message": PROSE}}
-        said = [hook_reply(payload, nothing_set) for _ in range(2)]
+        said = [raw_session_start_output(nothing_chosen(home)) for _ in range(2)]
         check("a tool nobody has set up says so, with the command that fixes it",
-              "prose-guard:setup" in (said[0] or {}).get("systemMessage", ""), True)
+              "prose-guard:setup" in said[0].get("systemMessage", ""), True)
         check("to the model too, so it can offer to run it",
-              "prose-guard:setup" in (said[0] or {}).get("additionalContext", ""), True)
-        check("and then never again", said[1], None)
+              "prose-guard:setup" in (said[0].get("hookSpecificOutput") or {})
+              .get("additionalContext", ""), True)
+        check("and it is still said the next session, because it is still true", bool(said[1]), True)
+        # A level, any level, ends it — including the one that turns everything off. The person has
+        # decided, and a notice they cannot stop is its own defect.
+        for level in ("medium", "disabled"):
+            chosen = {**nothing_chosen(home), "PROSE_GUARD_EFFORT": level}
+            check(f"and never again once {level} is chosen",
+                  raw_session_start_output(chosen), {})
+
+
+def test_a_config_file_written_for_another_reason_does_not_silence_the_notice():
+    """The hole the old notice had, and the reason it moved.
+
+    That notice asked whether `config.json` EXISTS, which is not the same question as whether anybody
+    has chosen a level. `share_dir.py` writes that file to register a team's shared audience
+    directory, and `audiences.py never-known` writes it to hold one term — neither puts an `effort`
+    key in it. So the ordinary sequence "install, run /prose-guard:audiences, get to setup later"
+    suppressed the notice permanently, with the guard checking nothing and saying nothing about it.
+    """
+    with tempfile.TemporaryDirectory() as home:
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"shared": ["/somewhere/a-team-shares"]}, fh)
+        said = raw_session_start_output(nothing_chosen(home))
+        check("a config.json with no effort key is not a choice",
+              "prose-guard:setup" in said.get("systemMessage", ""), True)
 
 
 def test_state_stays_out_of_the_plugin():
