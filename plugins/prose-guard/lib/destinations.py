@@ -391,22 +391,27 @@ def previous(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None 
 # to a judgement, and only when every field of the key is present, which keeps each guess narrow.
 #
 # A destination overrides any of it with its own `when`, and `"anchored_to": []` still turns the anchor off.
+#
+# EVERY ENTRY IS A FACT AND NOTHING ELSE. The first version of these told the check what to conclude —
+# "so a term the code there defines is already explained for them, and a fragment of it needs no gloss" —
+# and measured on the six real drafts that had been held, every one of them passed on its first run,
+# including three stacked `file:line` citations and a "these two assertions" that named one. Stacking is a
+# structural fault whatever the reader has open, and a second assertion that does not exist cannot be
+# anchored into existence. A clause about what needs no gloss reads as a general licence to stop
+# objecting, so it silenced complaints its own author agreed with. State where the text sits; the check
+# decides what follows.
 CONTEXT_FROM_FIELDS: dict[tuple[str, ...], str] = {
     # A thread reply. The biggest of these by a wide margin, and the one that made `reference` flag
     # "as I said" as having no antecedent when the antecedent was three messages up.
-    ("thread_ts",): "a reply inside a thread, so the reader has everything above it already and a term "
-                    "explained up there is explained for them",
+    ("thread_ts",): "a reply inside a thread the reader has already read",
     # A review comment on one line of a diff. A path alone is deliberately not a key: a file somebody is
     # writing is not something its reader is looking at yet.
-    ("path", "line"): "attached to line {line} of {path} — the reader is looking at that while they read "
-                      "this, so a term the code there defines is already explained for them, and a "
-                      "fragment of it needs no gloss",
+    ("path", "line"): "attached to line {line} of {path}, which the reader has open beside this",
     # A comment on a pull request or issue the reader has open.
-    ("pullNumber",): "a comment on pull request #{pullNumber}, which the reader has open in front of them",
-    ("issue_number",): "a comment on issue #{issue_number}, which the reader has open in front of them",
+    ("pullNumber",): "a comment on pull request #{pullNumber}",
+    ("issue_number",): "a comment on issue #{issue_number}",
     # A reply to one comment, which the reader wrote or has just read.
-    ("commentId",): "a reply to a comment the reader has just read, so it is one turn of a conversation "
-                    "rather than a standing statement",
+    ("commentId",): "a reply to a comment the reader has just read",
 }
 
 

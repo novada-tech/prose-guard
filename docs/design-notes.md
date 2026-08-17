@@ -14,6 +14,28 @@ docker be explained; the other flags that as padding."*
 I nearly reported the opposite. The first scoring pass showed "0.00 unexplained terms" for both broken
 configurations, which was empty files scoring perfectly.
 
+## Context that tells a check what to conclude silences it
+
+Telling the checks what the reader already has — "attached to line 129 of Diag.java" — was meant to stop
+`reference` flagging terms that the anchored code defines. The first wording added the conclusion too:
+*"so a term the code there defines is already explained for them, and a fragment of it needs no gloss"*.
+
+Re-run against the six real drafts that had been held on one pull request review, **every complaint passed
+on its first run** — including three stacked `file:line` citations and a "these two assertions" that named
+one. Stacking is a structural fault whatever the reader has open, and a second assertion that does not
+exist cannot be anchored into existence. The person who received those complaints had judged five of the
+six fair. A clause about what needs no gloss reads as a general licence to stop objecting.
+
+Every other entry in `situation` is a bare fact — "private: colleagues can open internal links". So are
+these now: where the text sits, and nothing about what follows from it.
+
+**What this measurement could not settle**, and the reason to distrust the numbers above as a comparison:
+the same condition run three times fired on 3 of 6 drafts every time, but on *different* drafts each time
+— `..F.FF`, `F..F.F`, `F..F.F`. The count is stable and the identity is not, so at six drafts and three
+passes a per-draft before/after tells you nothing. The 0-of-6 under the first wording was outside that
+range and is believable; the remaining effect of the bare-fact version is not measurable at this sample
+size. Settling it needs `measure/measure_check.py` against labelled fixtures, not six drafts.
+
 ## A check that fires on everything carries no information
 
 The sentence check originally failed **14 of 15** real messages, including ones written with no guidance

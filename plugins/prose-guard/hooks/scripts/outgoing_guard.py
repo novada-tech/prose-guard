@@ -212,8 +212,11 @@ def emit(decision: str, message: str, hint: str = "", for_user: str = "") -> Non
         # in front of a person. The finding is normalised to end in exactly one stop and the
         # instruction follows as its own sentence, which reads the same whether the finding is a
         # sentence from a model or a phrase from arithmetic.
-        out["permissionDecisionReason"] = ("Hold this message. " + _one_stop(message)
-                                           + " Then send again." + hint)
+        # Each finding on its own line, the first one included. A check reporting several puts newlines
+        # between them, so leaving the first one on the end of "Hold this message." made it the only one
+        # that had to be read out of a run-on line.
+        out["permissionDecisionReason"] = ("Hold this message.\n" + _one_stop(message)
+                                           + "\nThen send again." + hint)
     elif message:
         out["additionalContext"] = message
     said = {"hookSpecificOutput": out}
@@ -273,11 +276,15 @@ def advice_message(advice: list[Advice]) -> str:
     if not advice:
         return ""
     held_back = [a for a in advice if a.would_have_held]
-    said = " ".join(a.text for a in advice)
+    # One per line, as the blocking findings already were. Joined with spaces, several notes from
+    # different checks arrived as one paragraph and had to be picked apart by eye.
+    said = "\n".join(a.text for a in advice)
+    # The sentence about the SET goes on its own line. Appended to the last finding it read as part of
+    # that finding rather than as a statement about all of them.
     if not held_back:
-        return said + " Advice from checks that only ever advise, not blockers."
+        return said + "\nAdvice from checks that only ever advise, not blockers."
     names = ", ".join(sorted({a.check for a in held_back}))
-    return (said + f" Of these, {names} would have held this message back and has already asked twice "
+    return (said + f"\nOf these, {names} would have held this message back and has already asked twice "
                    f"about it, so it is advice now rather than a judgement that it does not matter. "
                    f"The rest are from checks that only ever advise.")
 
@@ -332,7 +339,7 @@ def say(finding: Finding, check: Check, state: dict[str, Any], path: str, digest
             # session ended with no message at all, 0 of 5 usable, twice. Listing the others as context
             # is not the same thing, because nothing is being demanded by two checks at once.
             more = (("\n\nAlso worth fixing while you are here, though none of it is holding this "
-                     "back: ") + " ".join(also)) if also else ""
+                     "back:\n") + "\n".join(also)) if also else ""
             emit(BLOCK, finding.message + more, hint)
             return True
     # Advice, or a block that has run out of complaints about this message. Say it once per text and move

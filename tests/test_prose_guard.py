@@ -607,8 +607,16 @@ def test_a_review_comment_is_judged_with_the_code_it_is_attached_to():
             check("the checks are told which file", "Diagnostics.java" in told.get("situation", ""),
                   True)
             check("and which line", "129" in told.get("situation", ""), True)
-            check("and what that means for a term the code defines",
-                  "already explained" in told.get("situation", ""), True)
+            # A fact about where the text sits, and nothing about what to conclude from it. The first
+            # version added "so a term the code there defines is already explained for them, and a
+            # fragment of it needs no gloss", and measured on six real held drafts every complaint
+            # passed on its first run — including three stacked `file:line` citations and a "these two
+            # assertions" that named one. A clause about what needs no gloss reads as a licence to stop
+            # objecting. Every other entry in `situation` is a bare fact; so is this.
+            check("it says where the text sits", "has open beside this" in told.get("situation", ""), True)
+            check("and does not tell the check what to conclude",
+                  any(w in told.get("situation", "").lower()
+                      for w in ("needs no gloss", "already explained", "is explained for")), False)
 
             # A destination that declares nothing still gets it, because destination discovery records
             # the shape of a call and a use count and never the other field names — so setup has nothing
