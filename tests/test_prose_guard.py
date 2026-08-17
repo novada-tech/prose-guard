@@ -398,6 +398,35 @@ def test_every_writer_puts_system_message_where_it_is_read():
               "systemMessage" in (said.get("hookSpecificOutput") or {}), False)
 
 
+def test_the_shipped_manifests_are_valid_and_agree():
+    """The two files that decide whether anybody's install moves, checked here rather than only in CI.
+
+    Both were emptied to 0 bytes by a careless bump — `open(f, "w").write(open(f).read()…)` truncates
+    the file before the read runs — and the whole suite passed on two interpreters, because nothing here
+    read them. CI caught it, which is the right backstop and the wrong place to find out: the version job
+    only runs on a pull request, so the break travelled through a commit and a push first.
+    """
+    manifests = {"plugin": os.path.join(PLUGIN, ".claude-plugin", "plugin.json"),
+                 "marketplace": os.path.join(os.path.dirname(os.path.dirname(PLUGIN)),
+                                             ".claude-plugin", "marketplace.json")}
+    versions = {}
+    for name, path in manifests.items():
+        with open(path) as fh:
+            body = fh.read()
+        check(f"the {name} manifest is not empty", bool(body.strip()), True)
+        data = json.loads(body)               # raises, and a raise is a failure, which is the point
+        if name == "plugin":
+            versions[name] = data.get("version")
+        else:
+            versions[name] = next((p.get("version") for p in data.get("plugins") or []
+                                   if p.get("name") == "prose-guard"), None)
+        check(f"the {name} manifest names a version", bool(versions[name]), True)
+    check("both manifests claim the same version", versions["plugin"], versions["marketplace"])
+    # Three numbers, so `plugin update` can compare them. A version it cannot order is one nobody moves to.
+    parts = (versions["plugin"] or "").split(".")
+    check("the version is three numbers", len(parts) == 3 and all(p.isdigit() for p in parts), True)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
