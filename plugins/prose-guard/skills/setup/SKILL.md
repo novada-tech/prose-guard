@@ -138,6 +138,23 @@ Until an audience is measured, the tool knows what developers in general know an
 people they write to, so it reports unexplained terms as a guess and does not block. Point at
 `/prose-guard:audiences`. Optional, a few minutes, and it is what turns advice into enforcement.
 
-## 6. Restart
+## 6. Say what is running now, and what is next
 
-Hooks and rules load at startup. Nothing takes effect until then.
+The level is live from the moment it is written — the hook reads it on every call, so nothing has to be
+reloaded for it. The rule is different: `~/.claude/rules/` is read at session start, so a rule installed
+in step 3 does not apply until the next session they open.
+
+End by telling them, in this order, and in one short paragraph rather than a checklist:
+
+- **What is on.** The level, and which of their tools it now watches. Name the two or three they will
+  hit today, not the whole list.
+- **What they will see.** One line on every message that goes out —
+  `prose-guard · medium · no audience · clean` — and that its absence means nothing was checked.
+  Warn them the third field says `no audience` until step 5 happens, which is what stops anything being
+  held back on terms.
+- **The one thing left.** `/prose-guard:audiences` if they skipped it, or a new session if they took the
+  rule. Not both, and not a list of everything they could do.
+
+Do not tell them to restart Claude Code. That was true of an older version of this plugin and is not
+true now: an install is active as soon as Claude Code says `Plugin is now active`, and `/reload-plugins`
+covers the case where it says otherwise.
