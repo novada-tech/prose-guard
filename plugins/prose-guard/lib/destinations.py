@@ -376,6 +376,12 @@ def previous(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None 
     return ""
 
 
+# Where prose sits inside something the reader already has. A path alone is not one: a file being written
+# is not something its reader is looking at yet. A path AND a line is a comment about that line, which is
+# the GitHub review-comment shape and the case this exists for.
+ANCHOR_FIELDS = ("path", "line")
+
+
 def situation(dest: Dest, tool: str, tool_input: dict[str, Any]) -> dict[str, Any]:
     """Facts about the moment rather than the reader: a thread reply, an edit, a public repo."""
     out = {}
@@ -399,6 +405,33 @@ def situation(dest: Dest, tool: str, tool_input: dict[str, Any]) -> dict[str, An
                 out["situation"] = text
         elif tool_input.get(key):
             out["situation"] = text
+    # What the text is pinned to, when it is pinned to anything. A review comment is attached to one line
+    # of one file and the reader is looking at that line while reading it — so a term the anchored code
+    # defines is not undefined for them, and a code fragment sitting in their own diff needs no gloss.
+    #
+    # Without this, `reference` flagged "the markers", "this sweep" and "the branch" as undefined in
+    # comments anchored to the exact lines that define them, and flagged `path().endsWith(uriFile)` as an
+    # unglossed fragment three lines above in the reader's diff. The rewrite then described the behaviour
+    # in prose instead of naming the call, which is the tool being satisfied rather than the message
+    # improved — the worst outcome available to it. The call carried `path`, `line`, `side` and
+    # `subjectType` all along and the destination kept only `body`.
+    #
+    # `anchored_to` names the fields, and ANCHOR_FIELDS is the default so nobody has to configure the
+    # case where it matters. Destination discovery records the shape of a call and a use count, never the
+    # other field names, so setup has nothing to propose this from — a declaration alone would mean only
+    # people who hand-edited their destinations ever benefited.
+    #
+    # Inferring this is safe where inferring an identifier is not. An identifier decides WHICH audience
+    # applies, before any check runs, so a wrong guess corrupts every verdict. This adds one sentence of
+    # context to a judgement, and it is only used when the call carries every field, so the guess is
+    # narrow: prose that arrives with both a path and a line is prose about that line. Override with your
+    # own field names, or `"anchored_to": []` to turn it off.
+    anchor = [str(tool_input.get(field) or "")
+              for field in dest.get("anchored_to", ANCHOR_FIELDS)]
+    if all(anchor) and anchor:
+        out["anchored_to"] = (
+            " ".join(anchor) + " — the reader is looking at that while they read this, so a term the "
+            "code there defines is already explained for them, and a fragment of it needs no gloss")
     owner = str(tool_input.get("owner") or "").lower()
     if owner:
         out["reach"] = ("PUBLIC: readers outside your company can see this, so internal links and "

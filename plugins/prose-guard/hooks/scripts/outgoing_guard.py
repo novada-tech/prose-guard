@@ -28,7 +28,7 @@ import os
 import re
 import shlex
 import sys
-from typing import Any, Callable, NoReturn, TYPE_CHECKING
+from typing import Any, NamedTuple, Callable, NoReturn, TYPE_CHECKING
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..", "..", "lib")))
@@ -48,8 +48,20 @@ if TYPE_CHECKING:
     from checks import Check, Finding
     from destinations import Dest
 
-MAX_PER_CHECK = 2      # one complaint, then one more if the fix did not land
-MAX_DENIALS = 6        # a ceiling across all of them, so one message cannot eat a session
+# One complaint from a check about one message, then one more if the fix did not land. This is the whole
+# anti-loop mechanism and it is enough: measured over 95 real held messages, 74 went out after one round,
+# 13 after two, 6 after three, and none ever needed a fourth.
+MAX_PER_CHECK = 2
+# There used to be a second ceiling of six denials across a whole session, never reset, meant to stop one
+# message eating a session. It stopped the wrong thing. On a real pull request review it was exhausted by
+# SIX DIFFERENT messages that each converged on their first rewrite — nothing ran away — and the next
+# sixteen comments then went out with the guard structurally unable to hold any of them back, saying
+# nothing about it. One of four sessions on this machine hit it.
+#
+# "One message eating a session" and "one long badly written text being legitimately rewritten" are not
+# distinguishable from a count of denials, and the measurement says the pathology does not occur while
+# the cost of guarding against it does. So every message gets the same treatment, and an agent that
+# genuinely loops is the calling session's problem rather than something to fix by turning the guard off.
 # Calls one message may cost, across every check and every run of one. Scaled by length, because a flat
 # number is not a budget for a document — it is a budget for a chat message, silently applied to both.
 #
@@ -153,14 +165,14 @@ def allow() -> NoReturn:
 
 def load_state(session: str) -> tuple[str, dict[str, Any]]:
     path = os.path.join(state_dir(), session + ".json")
-    # passed and denials describe the message being argued about and reset once it goes out.
-    # total_denials is the session ledger and never resets, so the guard cannot keep blocking for a
-    # whole session however many fresh drafts arrive.
+    # passed and denials describe the message being argued about and reset once it goes out, so every
+    # message a session sends gets the same treatment. There was a session-wide `total_denials` ceiling
+    # here and it is gone — see MAX_PER_CHECK for what it actually stopped.
     # `verdicts` maps a check to what it made of one exact text: {"digest": ..., "message": ...,
     # "severity": ...}, with no message meaning it passed. It used to hold the digest alone, so a
     # denial had to forget it to make the check run again — and an identical resend then re-derived
     # the same answer at the price of a model call. Three identical sends cost three calls.
-    state = {"verdicts": {}, "denials": {}, "total_denials": 0, "calls": 0, "advised": []}
+    state = {"verdicts": {}, "denials": {}, "calls": 0, "advised": []}
     try:
         with open(path) as fh:
             state.update(json.load(fh))
@@ -249,8 +261,42 @@ def one_message(found: list[Finding], mine: Callable[[Finding], bool], budget: i
     return "\n".join(lines)
 
 
+def advice_message(advice: list[Advice]) -> str:
+    """Everything said without holding the message back, each with the reason it did not hold it.
+
+    Two situations, and they used to share one sentence: "Advice from a noisy check, not a blocker."
+    An agent reviewing a real pull request read that, took "noisy check" to mean the guard rated these
+    weak, and dismissed three findings it afterwards judged correct — including one on the review body,
+    where "the class passes 60/60" pointed at a class the body never named. Findings a check WANTED to
+    hold the message back for are not noise, and saying so is the whole of this function.
+    """
+    if not advice:
+        return ""
+    held_back = [a for a in advice if a.would_have_held]
+    said = " ".join(a.text for a in advice)
+    if not held_back:
+        return said + " Advice from checks that only ever advise, not blockers."
+    names = ", ".join(sorted({a.check for a in held_back}))
+    return (said + f" Of these, {names} would have held this message back and has already asked twice "
+                   f"about it, so it is advice now rather than a judgement that it does not matter. "
+                   f"The rest are from checks that only ever advise.")
+
+
+class Advice(NamedTuple):
+    """One thing said without holding the message back, and why it is only advice.
+
+    `would_have_held` is the distinction that was missing: a check that only ever advises, and a check
+    that wanted to hold this message back and had already asked about it twice, are different facts and
+    an agent acts differently on them.
+    """
+
+    text: str
+    check: str
+    would_have_held: bool
+
+
 def say(finding: Finding, check: Check, state: dict[str, Any], path: str, digest: str,
-        advice: list[str], keep: Callable[[str, str], None] | None = None,
+        advice: list[Advice], keep: Callable[[str, str], None] | None = None,
         also: list[str] | None = None) -> bool:
     """Deny on this finding, or add it to the advice. True when the call was denied and we are done.
 
@@ -260,9 +306,8 @@ def say(finding: Finding, check: Check, state: dict[str, Any], path: str, digest
     """
     if finding.severity == BLOCK:
         used = state["denials"].get(check.NAME, 0)
-        if used < MAX_PER_CHECK and state["total_denials"] < MAX_DENIALS:
+        if used < MAX_PER_CHECK:
             state["denials"][check.NAME] = used + 1
-            state["total_denials"] += 1
             save_state(path, state)
             # The escape hatch is named only on the last denial this check gets, which is the first
             # moment it is the right answer. Naming it in every denial would teach the cheaper move
@@ -290,12 +335,19 @@ def say(finding: Finding, check: Check, state: dict[str, Any], path: str, digest
                      "back: ") + " ".join(also)) if also else ""
             emit(BLOCK, finding.message + more, hint)
             return True
-    # Advice, or a block that has run out of budget. Say it once per text and move on: giving up on
-    # one check must not skip the rest.
+    # Advice, or a block that has run out of complaints about this message. Say it once per text and move
+    # on: giving up on one check must not skip the rest.
+    #
+    # WHICH of the two it is travels with the finding. One fixed sentence used to cover both — "Advice
+    # from a noisy check, not a blocker" — and an agent reading a real pull request review took it at its
+    # word: it read "noisy check" as the guard rating these weak, and dismissed three findings it later
+    # judged correct, one of them on the review body, the most-read part of the review. The source comment
+    # here was honest about the two cases; the text a reader saw was not.
     key = check.NAME + ":" + digest
     if key not in state["advised"]:
         state["advised"].append(key)
-        advice.append(finding.message.rstrip(".") + ".")
+        advice.append(Advice(finding.message.rstrip(".") + ".", check.NAME,
+                             would_have_held=finding.severity == BLOCK))
     save_state(path, state)
     return False
 
@@ -420,7 +472,7 @@ def tally(level: str, rewrites: int, notes: int, calls: int,
 
 
 def say_together(findings: list[Finding], checks: list[Check], state: dict[str, Any], path: str,
-                 digest: str, advice: list[str], keep: Callable[[str, str], None]) -> bool:
+                 digest: str, advice: list[Advice], keep: Callable[[str, str], None]) -> bool:
     """One interruption carrying what every free check found. True when the call was denied.
 
     Nothing when there is nothing: the caller does not have to check first. The denial is counted
@@ -431,16 +483,12 @@ def say_together(findings: list[Finding], checks: list[Check], state: dict[str, 
     if not findings:
         return False
     joined = findings[0]._replace(message="\n".join(f.message for f in findings))
-    before = state["total_denials"]
     for n, check in enumerate(checks):
-        # Only the first reaches `say`, so only it can emit; the rest just record that they objected.
+        # Only the first reaches `say`, so only it can emit; the rest just record that they objected, so
+        # each is held to its own two complaints about this message.
         if n:
             state["denials"][check.NAME] = state["denials"].get(check.NAME, 0) + 1
-    denied = say(joined, checks[0], state, path, digest, advice, keep)
-    if denied and len(checks) > 1:
-        state["total_denials"] = before + 1
-        save_state(path, state)
-    return denied
+    return say(joined, checks[0], state, path, digest, advice, keep)
 
 
 def main() -> None:
@@ -566,7 +614,7 @@ def main() -> None:
     # Order is editorial, outermost decision first, so no later check creates work for an earlier
     # one. Bounded three ways so two checks that genuinely disagree make a message expensive and
     # then let it go, rather than hanging the turn.
-    advice: list[str] = []
+    advice: list[Advice] = []
     # Findings from the checks that cost nothing, held until all of them have run. Stopping at the
     # first objection is right when the next one costs a model call — and it is what keeps two blocking
     # checks from pulling a message apart, which `docs/design-notes.md` records producing no message at
@@ -627,7 +675,10 @@ def main() -> None:
             return written_here(text, f, ctx.mine)
         blocking = [f for f in firm if f.severity == BLOCK and mine(f)]
         finding = found[0]._replace(
-            message=one_message(found, mine, MOST_TO_SAY - sum(len(a) for a in advice)),
+            # `a.text`, not `a` — advice items carry the reason they are only advice now, and `len()`
+            # of the record is its field count. That would have silently handed every finding the same
+            # room whatever had already been said.
+            message=one_message(found, mine, MOST_TO_SAY - sum(len(a.text) for a in advice)),
             severity=BLOCK if blocking else "advise")
         # A destination can refuse to block at all. Blocking is justified by the text being about to
         # reach a reader unreviewed; where it is not — a draft that lands in your own compose box —
@@ -691,8 +742,7 @@ def main() -> None:
 
     if not advice and not for_user:
         allow()
-    emit("advise", (" ".join(advice) + " Advice from a noisy check, not a blocker.") if advice else "",
-         for_user=for_user)
+    emit("advise", advice_message(advice), for_user=for_user)
 
 
 if __name__ == "__main__":
