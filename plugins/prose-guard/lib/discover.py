@@ -171,6 +171,12 @@ def _reads_like_prose(text: str) -> bool:
 
 # This tool's own commands. Checking a check is circular, and the `--who` argument to check_prose.py is
 # a sentence describing a reader, so it passes the prose test and was offered as a destination to add.
+# Tools whose text has no human reader, so the two questions this tool asks have no answer for them.
+# A prompt to a subagent is instructions to a machine that will act on them and report back; nobody is
+# being asked to care about it or act on it after one read. Proposing these as destinations asks somebody
+# to configure a check against writing that is not for anybody, and they came up on a real install.
+NO_HUMAN_READER = ("SendMessage", "Agent", "Task", "Skill", "TodoWrite", "WebFetch", "AskUserQuestion")
+
 OWN_COMMANDS = ("check_prose.py", "learn.py", "audiences.py", "discover.py", "install_rule.py",
                 "share_dir.py", "fetch.py", "measure_check.py", "measure_cost.py", "measure_rule.py",
                 "measure_thresholds.py", "measure_destinations.py")
@@ -188,18 +194,28 @@ def _shape(tool: str, tool_input: dict[str, Any]) -> str | None:
         if any(own in cmd for own in OWN_COMMANDS):
             return None
         cmd = command.command_itself(cmd)
-        # From before the first quote, or the shape of `echo "<a paragraph>"` becomes `echo "The`.
-        words = re.split(r"['\"]", cmd.strip(), 1)[0].split()
-        head = " ".join(w for w in words[:2] if not w.startswith("-"))
+        # The name comes from the command that holds the text, not from the start of the line. A chain
+        # is several commands and only one of them is sending anything: `cd X && git commit -m "…"` was
+        # recorded as `cd X`, so every checkout path became a permanent entry that could never recur,
+        # and `git add . && git commit -m "…"` was recorded as `git add`. Over 16,058 real tool calls,
+        # 74% of the shapes were unusable and most of the rest named the wrong command. See
+        # `command.carrying` and `command.naming`.
+        def named(at: int) -> str:
+            return command.naming(command.carrying(cmd, at))
+
         for m in re.finditer(r"(--?[A-Za-z][-\w]*)[= ]\s*['\"]([^'\"]{80,})['\"]", cmd):
             if _reads_like_prose(m.group(2)):
-                return f"bash: {head} {m.group(1)}"
+                head = named(m.start())
+                return f"bash: {head} {m.group(1)}" if head else None
         # Prose does not always arrive behind a flag. `echo "<a paragraph>"` and `somecli post "<a
         # paragraph>"` put it in a positional argument, and neither was recorded at all — so the one
         # example asked about would never have surfaced. The prose test is what keeps a grep pattern out.
         for m in re.finditer(r"['\"]([^'\"]{80,})['\"]", cmd):
             if _reads_like_prose(m.group(1)):
-                return f"bash: {head}"
+                head = named(m.start())
+                return f"bash: {head}" if head else None
+        return None
+    if tool in NO_HUMAN_READER:
         return None
     for field, value in tool_input.items():
         if field in NOT_OUTGOING:
