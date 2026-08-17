@@ -577,84 +577,12 @@ def test_advice_says_which_kind_of_advice_it_is():
     check("nothing at all when there is nothing", guard.advice_message([]), "")
 
 
-def test_a_review_comment_is_judged_with_the_code_it_is_attached_to():
-    """The call carries the anchor; the destination used to keep only the body.
+def test_everything_a_destination_says_about_a_call_is_said():
+    """`when` assigned `out["situation"]` each time round its loop, so two facts meant one fact.
 
-    So `reference` flagged "the markers", "this sweep" and "the branch" as undefined in comments attached
-    to the exact lines that define them, and flagged `path().endsWith(uriFile)` as an unglossed fragment
-    three lines above in the reader's own diff. Declared per destination, like identifiers, because a
-    guess about what a call means is wrong before any check runs.
-    """
-    import destinations
-    with tempfile.TemporaryDirectory() as home:
-        with open(os.path.join(home, "destinations.json"), "w") as fh:
-            json.dump({"destinations": [
-                {"name": "github review comment", "tool": ["add_comment_to_pending_review"],
-                 "text_fields": ["body"], "anchored_to": ["path", "line"],
-                 "note": "A review comment on one line of a diff.",
-                 "identifiers": {"repo": ["owner", "repo"]}}]}, fh)
-        was = os.environ["PROSE_GUARD_HOME"]
-        os.environ["PROSE_GUARD_HOME"] = home
-        try:
-            importlib.reload(paths_module()); importlib.reload(destinations)
-            call = {"owner": "finos", "repo": "rune-dsl", "line": 129, "side": "RIGHT",
-                    "path": "rune-ide/src/main/java/Diagnostics.java",
-                    "body": "Key this by language.get(Injector.class) instead of the resource loop."}
-            tool = "mcp__github__add_comment_to_pending_review"
-            dest = destinations.match(tool, call)
-            check("the destination matched", bool(dest), True)
-            told = destinations.situation(dest, tool, call)
-            check("the checks are told which file", "Diagnostics.java" in told.get("situation", ""),
-                  True)
-            check("and which line", "129" in told.get("situation", ""), True)
-            # A fact about where the text sits, and nothing about what to conclude from it. The first
-            # version added "so a term the code there defines is already explained for them, and a
-            # fragment of it needs no gloss", and measured on six real held drafts every complaint
-            # passed on its first run — including three stacked `file:line` citations and a "these two
-            # assertions" that named one. A clause about what needs no gloss reads as a licence to stop
-            # objecting. Every other entry in `situation` is a bare fact; so is this.
-            check("it says where the text sits", "has open beside this" in told.get("situation", ""), True)
-            check("and does not tell the check what to conclude",
-                  any(w in told.get("situation", "").lower()
-                      for w in ("needs no gloss", "already explained", "is explained for")), False)
-
-            # A destination that declares nothing still gets it, because destination discovery records
-            # the shape of a call and a use count and never the other field names — so setup has nothing
-            # to propose this from, and a declaration alone would mean only people who hand-edited their
-            # destinations ever benefited. Every install benefits or the fix is not one.
-            del dest["anchored_to"]
-            check("a destination that declares nothing still gets it",
-                  "Diagnostics.java" in destinations.situation(dest, tool, call).get("situation", ""),
-                  True)
-            # Inferred narrowly: a path AND a line. A path alone is not an anchor — a file being written
-            # is not something its reader is looking at yet — so the review BODY gets nothing.
-            body = {k: v for k, v in call.items() if k not in ("path", "line")}
-            check("prose attached to nothing gets no anchor",
-                  "Diagnostics.java" in destinations.situation(dest, tool, body).get("situation", ""),
-                  False)
-            # A path with no line is not an anchor by default: a file somebody is writing is not
-            # something its reader is looking at yet. A destination where it IS one — a file-level
-            # review comment — says `"anchored_to": ["path"]` and gets it.
-            whole_file = {k: v for k, v in call.items() if k != "line"}
-            check("a path with no line is not an anchor by default",
-                  "Diagnostics.java" in destinations.situation(dest, tool, whole_file).get("situation", ""),
-                  False)
-            # And it can be turned off outright, which a default has to allow.
-            dest["anchored_to"] = []
-            check("an empty declaration turns it off",
-                  "Diagnostics.java" in destinations.situation(dest, tool, call).get("situation", ""),
-                  False)
-        finally:
-            os.environ["PROSE_GUARD_HOME"] = was
-            importlib.reload(paths_module()); importlib.reload(destinations)
-
-
-def test_everything_true_about_a_call_is_said_not_just_the_last_thing():
-    """A threaded review comment is both a thread reply and pinned to a line.
-
-    `when` assigned `out["situation"]` each time round its loop, so a destination declaring two facts got
-    whichever matched last and nothing said which. The defaults have the same problem available to them,
-    since a review comment carries `path`, `line` AND `pullNumber`.
+    A destination can legitimately have several things to say about the same call — a review comment on a
+    line of a diff is also a comment on a pull request — and which one survived was whichever matched
+    last, with nothing saying so.
     """
     import destinations
     with tempfile.TemporaryDirectory() as home:
@@ -662,7 +590,8 @@ def test_everything_true_about_a_call_is_said_not_just_the_last_thing():
             json.dump({"destinations": [
                 {"name": "github mcp", "tool": ["add_comment_to_pending_review"],
                  "text_fields": ["body"], "note": "A review comment.",
-                 "identifiers": {"repo": ["owner", "repo"]}}]}, fh)
+                 "identifiers": {"repo": ["owner", "repo"]},
+                 "when": {"line": "on one line of a diff", "pullNumber": "on a pull request"}}]}, fh)
         was = os.environ["PROSE_GUARD_HOME"]
         os.environ["PROSE_GUARD_HOME"] = home
         try:
@@ -670,20 +599,17 @@ def test_everything_true_about_a_call_is_said_not_just_the_last_thing():
             tool = "mcp__github__add_comment_to_pending_review"
             call = {"owner": "finos", "repo": "rune-dsl", "pullNumber": 1299, "line": 129,
                     "path": "src/Diag.java", "body": "Key this by the injector instead."}
-            dest = destinations.match(tool, call)
-            facts = destinations.what_the_reader_has(dest, call)
-            check("both facts are said", len(facts), 2)
-            check("the line it is pinned to", any("129" in f and "Diag.java" in f for f in facts), True)
-            check("and the pull request it is on", any("#1299" in f for f in facts), True)
-            check("and they reach the checks together",
-                  destinations.situation(dest, tool, call)["situation"].count(";") >= 1, True)
+            told = destinations.situation(destinations.match(tool, call), tool, call)["situation"]
+            check("the first fact is said", "on one line of a diff" in told, True)
+            check("and so is the second", "on a pull request" in told, True)
 
-            # A destination that says it in its own words is not corrected by a default saying it again.
-            dest["when"] = {"pullNumber": "a comment on a pull request, in our own words"}
-            facts = destinations.what_the_reader_has(dest, call)
-            check("a destination's own wording wins", any("#1299" in f for f in facts), False)
-            check("and the fact it did not claim is still said",
-                  any("Diag.java" in f for f in facts), True)
+            # And nothing is added that nobody wrote. A shipped default here was measured suppressing a
+            # blocking check on a real draft — 8 of 8 first runs down to 1 of 8 — so context is something
+            # a destination says deliberately, in a file somebody edited, or it is not said.
+            plain = dict(destinations.match(tool, call))
+            plain.pop("when")
+            check("no context is invented for a destination that says none",
+                  "situation" in destinations.situation(plain, tool, call), False)
         finally:
             os.environ["PROSE_GUARD_HOME"] = was
             importlib.reload(paths_module()); importlib.reload(destinations)

@@ -376,64 +376,17 @@ def previous(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None 
     return ""
 
 
-# What the fields of a call say about what the reader ALREADY HAS in front of them. One table, keyed by
-# the fields that must all be present, valued by what to tell the checks — `{field}` is filled from the
-# call. `anchored_to` was the first instance of this and it is now just the entry with two fields in its
-# key.
+# There is deliberately no default table of "what the reader already has" here. It was built, measured,
+# and did not survive the measurement. On the one draft with a stable baseline, `reference` fires on 8 of 8
+# first runs without a sentence about the anchor and 1 of 8 with it — and the finding it silences is "These
+# two assertions" where only one was introduced, which the agent who wrote that comment called a real error
+# of its own. Removing the clause that told the check what to conclude did not fix it: a bare fact about
+# which file the reader has open suppressed it just as thoroughly.
 #
-# These are defaults, so every install gets them without a conversation. That matters because destination
-# discovery records the shape of a call and a use count and never the other field names, so setup had
-# nothing to propose them from and only a hand-editor would ever have had them. Measured over real
-# transcripts, the calls that carry these: thread_ts 243, pullNumber 103, path+line 83, commentId 14.
-#
-# Inferring this is safe where inferring an identifier is not. An identifier decides WHICH audience
-# applies, before any check runs, so a wrong guess corrupts every verdict. These add a sentence of context
-# to a judgement, and only when every field of the key is present, which keeps each guess narrow.
-#
-# A destination overrides any of it with its own `when`, and `"anchored_to": []` still turns the anchor off.
-#
-# EVERY ENTRY IS A FACT AND NOTHING ELSE. The first version of these told the check what to conclude —
-# "so a term the code there defines is already explained for them, and a fragment of it needs no gloss" —
-# and measured on the six real drafts that had been held, every one of them passed on its first run,
-# including three stacked `file:line` citations and a "these two assertions" that named one. Stacking is a
-# structural fault whatever the reader has open, and a second assertion that does not exist cannot be
-# anchored into existence. A clause about what needs no gloss reads as a general licence to stop
-# objecting, so it silenced complaints its own author agreed with. State where the text sits; the check
-# decides what follows.
-CONTEXT_FROM_FIELDS: dict[tuple[str, ...], str] = {
-    # A thread reply. The biggest of these by a wide margin, and the one that made `reference` flag
-    # "as I said" as having no antecedent when the antecedent was three messages up.
-    ("thread_ts",): "a reply inside a thread the reader has already read",
-    # A review comment on one line of a diff. A path alone is deliberately not a key: a file somebody is
-    # writing is not something its reader is looking at yet.
-    ("path", "line"): "attached to line {line} of {path}, which the reader has open beside this",
-    # A comment on a pull request or issue the reader has open.
-    ("pullNumber",): "a comment on pull request #{pullNumber}",
-    ("issue_number",): "a comment on issue #{issue_number}",
-    # A reply to one comment, which the reader wrote or has just read.
-    ("commentId",): "a reply to a comment the reader has just read",
-}
-
-
-def what_the_reader_has(dest: Dest, tool_input: dict[str, Any]) -> list[str]:
-    """Everything CONTEXT_FROM_FIELDS says about this call, in table order.
-
-    All of them, not the last one to match. `when` used to assign `out["situation"]` in a loop, so two
-    facts about one call meant one fact: a threaded review comment could say it was a thread reply or that
-    it was pinned to a line, never both.
-    """
-    said = []
-    spoken_for = set(dest.get("when") or ())
-    for fields, template in CONTEXT_FROM_FIELDS.items():
-        if fields == ("path", "line") and dest.get("anchored_to") == []:
-            continue                         # explicitly turned off for this destination
-        if spoken_for.intersection(fields):
-            continue                         # the destination says it in its own words; do not say it twice
-        values = {field: tool_input.get(field) for field in fields}
-        if all(v not in (None, "") for v in values.values()):
-            said.append(template.format(**values))
-    return said
-
+# A destination can still say what a call means, in its own words, with `when` — local, deliberate, and
+# visible in a file somebody wrote. What is not available is a shipped default that quietly changes what
+# every blocking check does. docs/design-notes.md has the numbers, and measure/measure_check.py is the
+# shape of the measurement that would have to come first.
 
 def situation(dest: Dest, tool: str, tool_input: dict[str, Any]) -> dict[str, Any]:
     """Facts about the moment rather than the reader: a thread reply, an edit, a public repo."""
@@ -464,7 +417,6 @@ def situation(dest: Dest, tool: str, tool_input: dict[str, Any]) -> dict[str, An
         elif tool_input.get(key):
             facts.append(text)
     # Then the defaults, for anything the destination did not speak for itself.
-    facts += [f for f in what_the_reader_has(dest, tool_input) if f not in facts]
     if facts:
         out["situation"] = "; ".join(facts)
     # What the text is pinned to, when it is pinned to anything. A review comment is attached to one line

@@ -202,33 +202,16 @@ draft tool — `slack_send_message_draft`, if setup added it for you — lands i
 it has a reader already, and holding it back spends a turn arguing about text you were about to read. The finding is identical either way — the
 destination changes what is done about it, never whether the tool noticed.
 
-**What the reader already has.** A review comment is attached to one line of one file; a thread reply
-has everything above it; a comment on a pull request comes with the pull request. The checks are told,
-because a term the anchored code defines is not undefined for that reader, and a fragment of it needs no
-gloss.
+**`when` — what this call means, in your own words.** A field being present can say something the checks
+should know: `"when": {"thread_ts": "a reply inside a thread the reader has already read"}`. Everything
+that matches is said, not the last one to match, so a destination can have several things to say about one
+call.
 
-This costs no configuration. One table, keyed by the fields that must all be present:
-
-| fields on the call | what the checks are told |
-|---|---|
-| `thread_ts` | a reply inside a thread, so the reader has everything above it |
-| `path` + `line` | attached to that line, which the reader is looking at |
-| `pullNumber`, `issue_number` | a comment on something the reader has open |
-| `commentId` | a reply to a comment the reader has just read |
-
-Every fact that is true is said, not the last one to be true: a threaded review comment is both. A
-destination that words one of these itself, with `when`, replaces the default for that field rather than
-being told twice, and `"anchored_to": []` turns the anchor off.
-
-Defaults rather than declarations, because a field only a hand-editor could set reaches almost nobody:
-destination discovery records the shape of a call and a use count and never the other field names.
-Inferring this is safe where inferring an identifier is not — an identifier decides *which audience
-applies* before any check runs, so a wrong guess corrupts every verdict, while this adds a sentence of
-context to a judgement. Each key fires only when every field is present, which keeps the guess narrow. A
-path alone is not one: a file somebody is writing is not something its reader is looking at yet.
-
-Measured over real transcripts on one machine, the calls carrying these: `thread_ts` 243,
-`pullNumber` 103, `path`+`line` 83, `commentId` 14.
+Nothing is added that you did not write. A shipped default for this was built and measured and removed:
+telling `reference` that the reader has the anchored file open took it from firing on 8 of 8 first runs to
+1 of 8, and the finding it silenced was one the comment's own author called a real error. Context that
+changes what a blocking check does is something you say deliberately, in a file you edited, or it is not
+said. [design-notes.md](design-notes.md) has the numbers.
 
 Reproduce the cost table with:
 

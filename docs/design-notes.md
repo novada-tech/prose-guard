@@ -14,27 +14,44 @@ docker be explained; the other flags that as padding."*
 I nearly reported the opposite. The first scoring pass showed "0.00 unexplained terms" for both broken
 configurations, which was empty files scoring perfectly.
 
-## Context that tells a check what to conclude silences it
+## Telling a check what the reader already has silences it
 
-Telling the checks what the reader already has — "attached to line 129 of Diag.java" — was meant to stop
-`reference` flagging terms that the anchored code defines. The first wording added the conclusion too:
-*"so a term the code there defines is already explained for them, and a fragment of it needs no gloss"*.
+Prose is usually attached to something the reader has in front of them: a review comment to a line of a
+diff, a reply to the thread above it. Telling the checks looked obviously right, and it was built as a
+default so every install would get it — `thread_ts` on 243 real calls, `path`+`line` on 83.
 
-Re-run against the six real drafts that had been held on one pull request review, **every complaint passed
-on its first run** — including three stacked `file:line` citations and a "these two assertions" that named
-one. Stacking is a structural fault whatever the reader has open, and a second assertion that does not
-exist cannot be anchored into existence. The person who received those complaints had judged five of the
-six fair. A clause about what needs no gloss reads as a general licence to stop objecting.
+It does not survive measurement. Pick the one draft with a stable baseline — a review comment saying
+"These two assertions" where only one was introduced, which `reference` fires on **8 of 8** first runs:
 
-Every other entry in `situation` is a bare fact — "private: colleagues can open internal links". So are
-these now: where the text sits, and nothing about what follows from it.
+    without the sentence:  FFFFFFFF   8/8
+    with it:               .F......   1/8
 
-**What this measurement could not settle**, and the reason to distrust the numbers above as a comparison:
-the same condition run three times fired on 3 of 6 drafts every time, but on *different* drafts each time
-— `..F.FF`, `F..F.F`, `F..F.F`. The count is stable and the identity is not, so at six drafts and three
-passes a per-draft before/after tells you nothing. The 0-of-6 under the first wording was outside that
-range and is believable; the remaining effect of the bare-fact version is not measurable at this sample
-size. Settling it needs `measure/measure_check.py` against labelled fixtures, not six drafts.
+The finding it silences is one the agent who wrote that comment called a real error of its own. The first
+wording also told the check what to conclude — *"so a term the code there defines is already explained for
+them, and a fragment of it needs no gloss"* — and removing that clause **did not fix it**. A bare fact
+about which file the reader has open suppressed it just as thoroughly.
+
+So there is no shipped default. A destination can still say what a call means with `when`, which is local,
+deliberate, and visible in a file somebody edited.
+
+### What went wrong in the measuring, which is worth more than the result
+
+The first attempt compared six drafts before and after and reported that every complaint disappeared. Then
+the same condition run three times fired on 3 of 6 drafts every time but on *different* drafts each time —
+`..F.FF`, `F..F.F`, `F..F.F` — which reads as the checks being wildly unstable. They are not. Draft 6 fires
+8/8 and draft 3 fires 6/8; the instability was in the harness:
+
+- it used `passes=3` where production uses `ceiling_for(text)`, which is 6 for a review comment;
+- `firm` needs two runs pointing at the same item, so a marginal finding needs two agreeing samples;
+- and `pooled` returns after **one** empty run, so if the first sample is clean there is no second.
+
+That last one is a property of the tool, not of the harness: **for a check that fires half the time,
+whether a message is checked at all rides on one sample.** It is deliberate — a clean first run costs one
+call — and worth knowing when reading any single result.
+
+The lesson for measuring a context change: measure the CHECK's first-run rate over repetitions, on drafts
+whose baseline is 8/8 or 0/8. Measuring `pooled` outcomes bundles early exit, agreement and sampling
+together and tells you nothing at n=6.
 
 ## A check that fires on everything carries no information
 
