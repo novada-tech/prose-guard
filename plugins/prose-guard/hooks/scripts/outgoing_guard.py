@@ -22,6 +22,7 @@ Every failure path allows the call. A broken writing check must never block outb
 from __future__ import annotations
 
 import hashlib
+import concurrent.futures
 import json
 import os
 import re
@@ -249,7 +250,8 @@ def one_message(found: list[Finding], mine: Callable[[Finding], bool], budget: i
 
 
 def say(finding: Finding, check: Check, state: dict[str, Any], path: str, digest: str,
-        advice: list[str], keep: Callable[[str, str], None] | None = None) -> bool:
+        advice: list[str], keep: Callable[[str, str], None] | None = None,
+        also: list[str] | None = None) -> bool:
     """Deny on this finding, or add it to the advice. True when the call was denied and we are done.
 
     Split out because an identical resend re-says what a check already decided, and doing that had to
@@ -274,7 +276,19 @@ def say(finding: Finding, check: Check, state: dict[str, Any], path: str, digest
                     "`/prose-guard:audiences` is the lasting fix.")
             if keep:
                 keep(check.NAME, finding.message)
-            emit(BLOCK, finding.message, hint)
+            # What the other checks found, in the same interruption. Only this one holds the message
+            # back; the rest are context, so the rewrite can address everything in one turn instead of
+            # being sent back once per concern. That is the whole saving now the checks are asked
+            # together: a held message used to cost a round per objecting check, and each round re-ran
+            # every check because the text — and so the digest — had changed.
+            #
+            # Exactly one blocker, still. `docs/design-notes.md` records what two of them did: "explain
+            # every term" and "contains nothing they will not act on" each undid the other and the
+            # session ended with no message at all, 0 of 5 usable, twice. Listing the others as context
+            # is not the same thing, because nothing is being demanded by two checks at once.
+            more = (("\n\nAlso worth fixing while you are here, though none of it is holding this "
+                     "back: ") + " ".join(also)) if also else ""
+            emit(BLOCK, finding.message + more, hint)
             return True
     # Advice, or a block that has run out of budget. Say it once per text and move on: giving up on
     # one check must not skip the rest.
@@ -299,6 +313,73 @@ def reader(level: str, audience: Resolved | None) -> str:
         return f"prose-guard {level} for {' + '.join(audience.names)}"
     guess = getattr(audience, "fallback", None) or "the shipped baseline"
     return f"prose-guard {level}, no audience for this — guessing against {guess}"
+
+
+# How many checks may be asked at the same time. Each is a `claude -p` subprocess, so this is bounded by
+# what a laptop should be running at once rather than by anything about the checks.
+MOST_AT_ONCE = 6
+
+
+def all_at_once(checks: list[Check], text: str, ctx: Context | None,
+                budget: int) -> dict[str, tuple]:
+    """Ask every check that costs a model call at the same time, and return what each said.
+
+    They were asked one after another, and each answer is a `claude -p` subprocess taking about eight
+    seconds. Measured on a real pull request review: 39 guarded calls, median 50.3s, and 217.7s for a
+    925-word summary comment — 34.5 minutes of a 168-minute session spent waiting here.
+
+    Nothing about the ANSWERS changes. The checks are independent: each reads the same unmodified text
+    and none can see another's verdict, which is why asking them together is only a question of when.
+    `docs/design-notes.md` records a "parallel checks" failure and it is a different thing — two checks
+    that could each HOLD A MESSAGE BACK, each undoing the other's demand. That is about what may block,
+    not about what may run, and only one finding blocks here either way.
+
+    The budget is divided up front instead of as they run. A share each is what the sequential version
+    was already aiming at, and it is the only division available when nobody goes first.
+    """
+    if not checks or budget <= 0:
+        # Nothing left to spend, so nothing is asked. `max(1, 0 // n)` floors at one and asked anyway,
+        # which spent a call for every check after a session had already used its budget — the one thing
+        # the budget exists to stop. The walk skips paying checks itself once the budget is gone, so
+        # returning nothing here is what makes both agree.
+        return {}
+    share = max(1, budget // len(checks))
+    ceiling = min(ceiling_for(text), share)
+    out: dict[str, tuple] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(checks), MOST_AT_ONCE)) as pool:
+        asking = {pool.submit(pooled, check, text, ctx, ceiling): check for check in checks}
+        for done in concurrent.futures.as_completed(asking):
+            check = asking[done]
+            try:
+                out[check.NAME] = done.result()
+            except Exception:
+                out[check.NAME] = ([], [], 0)   # a broken check is a silent check, never a blocker
+    return out
+
+
+def other_concerns(running: list[Check], answers: dict[str, tuple], blocking: str,
+                   mine: Callable[[Finding], bool], room: int) -> list[str]:
+    """What the checks that are NOT holding this message back found, for the same interruption.
+
+    Available only because the checks are asked together: walking them one at a time and stopping at the
+    first objection meant the rest had never run, so a held message cost one round per objecting check —
+    and every round re-ran every check, because the text had changed and a pass belongs to the text that
+    earned it. Handing all of it over at once is what collapses those rounds into one.
+
+    Bounded by `room`, and only about text this call wrote: a concern about a paragraph the edit never
+    touched is not something the writer of this edit can act on.
+    """
+    out: list[str] = []
+    for check in running:
+        if check.NAME == blocking or check.NAME not in answers:
+            continue
+        found = [f for f in answers[check.NAME][0] if mine(f)]
+        if not found:
+            continue
+        said = one_message(found, mine, room - sum(len(o) for o in out))
+        if said:
+            out.append(f"({check.NAME}) {said}")
+    return out
 
 
 def budget_for(text: str, paying: int) -> int:
@@ -498,6 +579,9 @@ def main() -> None:
     budget = budget_for(text, sum(1 for c in running if costs_a_call(c)))
     unpaid = [c for c in running if costs_a_call(c)
               and (state["verdicts"].get(c.NAME) or {}).get("digest") != digest]
+    # Asked together, before the walk, so the walk spends no time waiting. The walk itself is unchanged:
+    # same order, same caching, same one-finding-blocks rule — it just reads answers that already exist.
+    answers = all_at_once(unpaid, text, ctx, max(0, budget - state["calls"]))
     for check in running:
         remembered = state["verdicts"].get(check.NAME) or {}
         if remembered.get("digest") == digest:
@@ -516,21 +600,21 @@ def main() -> None:
         if costs_a_call(check) and state["calls"] >= budget:
             state["verdicts"][check.NAME] = {"digest": digest}
             continue
-        try:
-            # The same pooling a deliberate run uses, so both apply one bar: passes scale with the
-            # length of the text, and an item more than one run pointed at is what can be blocked on.
-            #
-            # The budget is in calls, and it is divided rather than handed over. Giving each check
-            # whatever was left meant the first one took it: on an edit of one sentence in a 1,960-word
-            # file, all nineteen calls went to `relevance` and four concerns never ran at all. A share
-            # each buys five concerns for the same money, which is what `high` is being paid for.
-            share = max(1, (budget - state["calls"]) // max(1, len(unpaid)))
-            found, firm, spent = pooled(check, text, ctx, min(ceiling_for(text), share))
+        if check.NAME in answers:
+            # Already asked, at the same time as its siblings. See all_at_once: the budget is divided a
+            # share each, which is what the sequential version was aiming at — handing each check
+            # whatever was left meant the first one took it, and on an edit of one sentence in a
+            # 1,960-word file all nineteen calls went to `relevance` while four concerns never ran.
+            found, firm, spent = answers[check.NAME]
             state["calls"] += spent
-            if costs_a_call(check):
-                unpaid = [c for c in unpaid if c.NAME != check.NAME]
-        except Exception:
-            found, firm = [], []             # a broken check is a silent check, never a blocker
+        else:
+            try:
+                # Costs nothing, so there is nothing to gain by asking it early: the free checks are
+                # arithmetic and answer immediately.
+                found, firm, spent = pooled(check, text, ctx, ceiling_for(text))
+                state["calls"] += spent
+            except Exception:
+                found, firm = [], []         # a broken check is a silent check, never a blocker
         if not found:
             state["verdicts"][check.NAME] = {"digest": digest}
             save_state(path, state)
@@ -560,7 +644,8 @@ def main() -> None:
         if say_together(free_findings, free_checks, state, path, digest, advice, keep):
             return
         free_findings, free_checks = [], []
-        if say(finding, check, state, path, digest, advice, keep):
+        if say(finding, check, state, path, digest, advice, keep,
+               also=other_concerns(running, answers, check.NAME, mine, MOST_TO_SAY // 2)):
             return
 
     # A free check objected and nothing after it did, so this is where that is said.

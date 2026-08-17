@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from typing import Any
 
 import paths
@@ -49,7 +50,19 @@ def _read() -> dict[str, Any]:
         return {}
 
 
+# The checks now run at the same time, and a check that cannot run says so through this ledger. Two
+# threads doing read-modify-write on one file lose one of the two notices, or write half a file over the
+# other, so every sequence that reads then writes holds this. Re-entrant because those sequences call
+# `_write`, which takes it too — one lock for the file, however deep the call is.
+_REMEMBERING = threading.RLock()
+
+
 def _write(data: dict[str, Any]) -> None:
+    with _REMEMBERING:
+        _write_now(data)
+
+
+def _write_now(data: dict[str, Any]) -> None:
     try:
         paths.ensure()
         with open(_path(), "w") as fh:
@@ -90,16 +103,17 @@ class Ledger:
                 return False
             said.append(key)
             return True
-        data = _read()
-        entry = data.get(key) or {}
-        if entry.get("said") or entry.get("declined"):
-            return False
-        if key not in data and len(data) >= MOST_REMEMBERED:
-            return False                     # stop growing rather than track for ever
-        entry["said"] = True
-        data[key] = entry
-        _write(data)
-        return True
+        with _REMEMBERING:
+            data = _read()
+            entry = data.get(key) or {}
+            if entry.get("said") or entry.get("declined"):
+                return False
+            if key not in data and len(data) >= MOST_REMEMBERED:
+                return False                 # stop growing rather than track for ever
+            entry["said"] = True
+            data[key] = entry
+            _write(data)
+            return True
 
     # ------------------------------------------------------------------ count first, say later
     def seen(self, key: str) -> int:
@@ -108,16 +122,17 @@ class Ledger:
         Returns 0 for anything already said or declined, so a caller can stop counting: the sequence
         "used, suggested, declined, used again, suggested again" is the thing this prevents.
         """
-        data = _read()
-        entry = data.get(key) or {}
-        if entry.get("said") or entry.get("declined"):
-            return 0
-        if key not in data and len(data) >= MOST_REMEMBERED:
-            return 0
-        entry["seen"] = entry.get("seen", 0) + 1
-        data[key] = entry
-        _write(data)
-        return entry["seen"]
+        with _REMEMBERING:
+            data = _read()
+            entry = data.get(key) or {}
+            if entry.get("said") or entry.get("declined"):
+                return 0
+            if key not in data and len(data) >= MOST_REMEMBERED:
+                return 0
+            entry["seen"] = entry.get("seen", 0) + 1
+            data[key] = entry
+            _write(data)
+            return entry["seen"]
 
     def decline(self, key: str) -> str:
         """Never mention this again. Permanent, and it stops the counting as well as the saying."""
