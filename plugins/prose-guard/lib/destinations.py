@@ -399,6 +399,24 @@ def situation(dest: Dest, tool: str, tool_input: dict[str, Any]) -> dict[str, An
                 out["situation"] = text
         elif tool_input.get(key):
             out["situation"] = text
+    # What the text is pinned to, when it is pinned to anything. A review comment is attached to one line
+    # of one file and the reader is looking at that line while reading it — so a term the anchored code
+    # defines is not undefined for them, and a code fragment sitting in their own diff needs no gloss.
+    #
+    # Without this, `reference` flagged "the markers", "this sweep" and "the branch" as undefined in
+    # comments anchored to the exact lines that define them, and flagged `path().endsWith(uriFile)` as an
+    # unglossed fragment three lines above in the reader's diff. The rewrite then described the behaviour
+    # in prose instead of naming the call, which is the tool being satisfied rather than the message
+    # improved — the worst outcome available to it. The call carried `path`, `line`, `side` and
+    # `subjectType` all along and the destination kept only `body`.
+    #
+    # Declared per destination rather than sniffed out of the fields, for the same reason identifiers are:
+    # a guess about what a call means is wrong before any check runs.
+    anchor = [str(tool_input.get(field) or "") for field in (dest.get("anchored_to") or ())]
+    if all(anchor) and anchor:
+        out["anchored_to"] = (
+            " ".join(anchor) + " — the reader is looking at that while they read this, so a term the "
+            "code there defines is already explained for them, and a fragment of it needs no gloss")
     owner = str(tool_input.get("owner") or "").lower()
     if owner:
         out["reach"] = ("PUBLIC: readers outside your company can see this, so internal links and "

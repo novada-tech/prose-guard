@@ -202,6 +202,18 @@ draft tool — `slack_send_message_draft`, if setup added it for you — lands i
 it has a reader already, and holding it back spends a turn arguing about text you were about to read. The finding is identical either way — the
 destination changes what is done about it, never whether the tool noticed.
 
+**`anchored_to` — the reader is already looking at something.** A review comment is attached to one line
+of one file, and the reader has that line in front of them while they read it. Name the fields that say
+where — `["path", "line"]` for a GitHub review comment — and the checks are told. Without it they judge
+the comment as free-standing prose: `reference` flagged "the markers", "this sweep" and "the branch" as
+undefined in comments attached to the exact lines that define them, and flagged `path().endsWith(uriFile)`
+as an unglossed fragment sitting three lines above in the reader's own diff. The rewrite that satisfied
+that described the behaviour in prose rather than naming the call, which is the tool being satisfied
+instead of the message improved.
+
+Declared per destination rather than worked out from the fields, for the same reason `identifiers` are: a
+guess about what a call means is wrong before any check runs.
+
 Reproduce the cost table with:
 
 ```
