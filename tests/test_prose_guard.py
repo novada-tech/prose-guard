@@ -34,7 +34,6 @@ sys.path.insert(0, LIB)
 _ISOLATED = tempfile.mkdtemp(prefix="prose-guard-tests-")
 os.environ["PROSE_GUARD_HOME"] = _ISOLATED
 os.environ.pop("PROSE_GUARD_EFFORT", None)
-os.environ.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
 os.environ.pop("PROSE_GUARD_STATE", None)
 
 PAD = (" Anyone still relying on the previous credentials will need to re-run the setup command "
@@ -578,7 +577,6 @@ SESSION_START = os.path.join(PLUGIN, "hooks", "scripts", "session-start.sh")
 def nothing_chosen(home):
     """An environment where no source names a level, which is the state every new install is in."""
     e = {k: v for k, v in os.environ.items() if not k.startswith("PROSE_GUARD")}
-    e.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
     e["PROSE_GUARD_HOME"] = home
     return e
 
@@ -1702,7 +1700,6 @@ def test_the_hook_surfaces_a_candidate_once():
 def env(home, state, effort="low"):
     e = {k: v for k, v in os.environ.items() if not k.startswith("PROSE_GUARD")}
     e.pop("CLAUDE_PLUGIN_DATA", None)
-    e.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
     e.update(PROSE_GUARD_HOME=home, PROSE_GUARD_STATE=state, PROSE_GUARD_EFFORT=effort)
     return e
 
@@ -2101,7 +2098,6 @@ def test_levels():
     import importlib
 
     import checks
-    import host
     import paths
     from checks import config
     for level, names in (("disabled", []),
@@ -2144,17 +2140,22 @@ def test_levels():
         check("while a level nobody set is nothing to complain about", config.complaints(), [])
 
         # Precedence, which the module docstring states and nothing checked: the environment, then the
-        # plugin's own setting, then the file. Reversed, a level written into a file once quietly
-        # overrides the one this session was started with, at whichever end is less safe.
+        # file. Reversed, a level written into a file once quietly overrides the one this session was
+        # started with, at whichever end is less safe.
         with open(os.path.join(tmp, "config.json"), "w") as fh:
             json.dump({"effort": "high"}, fh)
         check("the file decides when nothing else does", config.effort(), "high")
-        os.environ[host.EFFORT_VAR] = "medium"
-        check("the plugin's own setting beats the file", config.effort(), "medium")
         os.environ["PROSE_GUARD_EFFORT"] = "low"
-        check("and the environment beats both", config.effort(), "low")
+        check("and the environment beats it", config.effort(), "low")
         del os.environ["PROSE_GUARD_EFFORT"]
-        del os.environ[host.EFFORT_VAR]
+
+        # A third source used to sit between them, set by Claude Code from a `userConfig` field in
+        # plugin.json. That field made Claude Code ask for a level in a free-text dialog at install,
+        # before anybody had been told what a level costs, and recorded the same choice in a second
+        # place that could disagree with the first. Both are gone, and the variable is now nothing.
+        os.environ["CLAUDE_PLUGIN_OPTION_EFFORT"] = "medium"
+        check("and the plugin's own option is no longer one of them", config.effort(), "high")
+        del os.environ["CLAUDE_PLUGIN_OPTION_EFFORT"]
     del os.environ["PROSE_GUARD_HOME"]
     importlib.reload(paths)
     importlib.reload(config)
@@ -3875,7 +3876,6 @@ def test_a_bad_value_in_a_hand_written_file_is_reported_not_ignored():
             json.dump({"effort": "medim"}, fh)
         env = dict(os.environ, PROSE_GUARD_HOME=home)
         env.pop("PROSE_GUARD_EFFORT", None)
-        env.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
         payload = {"session_id": "s", "tool_name": "Bash",
                    "tool_input": {"command": 'git commit -m "' + "word " * 40 + '"'}}
         said = []
@@ -3900,11 +3900,7 @@ def test_what_this_plugin_expects_of_its_host_is_in_one_place():
     """
     import host
 
-    check("the effort variable is named once",
-          [p for p in (os.path.join(LIB, "checks", "config.py"),
-                       os.path.join(PLUGIN, "hooks", "scripts", "outgoing_guard.py"))
-           if "CLAUDE_PLUGIN_OPTION_EFFORT" in open(p).read()], [])
-    check("and so is the checker's binary",
+    check("the checker's binary is named once",
           [p for p in (os.path.join(LIB, "checks", "ask.py"), os.path.join(LIB, "checks", "model.py"))
            if '"claude"' in open(p).read()], [])
 

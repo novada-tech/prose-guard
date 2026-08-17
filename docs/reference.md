@@ -373,10 +373,17 @@ sharing a file of the same name.
 |---|---|
 | `config.json` | effort level, which baseline to assume when no audience matches, and any shared directories |
 
-`/plugin configure` shows the effort level as a free-text box, because `userConfig` supports `string`,
-`number`, `boolean`, `directory` and `file` and has no enumerated type — there is no picker to offer. So a
-typo means no checking at all, which reads exactly like switching it off. A level set to something that is
-not a level now says so once a session, as a message to you rather than to the agent.
+The level is a word you type, in `config.json` or in `PROSE_GUARD_EFFORT`, and a typo means no checking
+at all — which reads exactly like switching it off. A level set to something that is not a level says so
+once a session, as a message to you rather than to the agent. `/prose-guard:setup` writes it for you and
+is the way to avoid the question.
+
+Earlier versions also offered it in `/plugin configure`, as a free-text box: `userConfig` supports
+`string`, `number`, `boolean`, `directory` and `file` and has no enumerated type, so there was no picker
+and no way to mark the recommended answer. Asking for a level in a dialog at install, before anybody had
+been told what one costs, was a worse first minute than not asking. That field is gone and so is the
+setting behind it — if you had answered the dialog, run `/prose-guard:setup` once and the level moves to
+`config.json`.
 | `audiences/*.json` | one per audience: who they are, what they know, who is in them |
 | `destinations.json` | your own or overridden destinations, read before the shipped ones |
 | `unclaimed-destinations.json` | shapes passive discovery noticed, and what you decided |

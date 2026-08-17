@@ -35,8 +35,8 @@ Both counter-intuitive results are worth saying out loud:
 - **`high` is not known to be better than `medium`.** Both satisfied every concern on every message
   measured, which is a judge at its ceiling rather than evidence they are equal.
 
-`medium` is what the evidence supports. Set it with `/plugin configure prose-guard@novada`, which is
-the first-class path, or write the file:
+`medium` is what the evidence supports. Recommend it, take their answer, and write it — this is the
+only place a level is set:
 
 ```
 python3 -c "import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/lib'); \

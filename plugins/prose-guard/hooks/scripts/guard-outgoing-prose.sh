@@ -11,7 +11,7 @@ set -u
 # Must match lib/paths.py exactly. Anything else and the guard reads a different config
 # from the one the setup skill wrote, which is silent and looks like the tool not working.
 CFG_HOME="${PROSE_GUARD_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/prose-guard}"
-if [ -z "${PROSE_GUARD_EFFORT:-}${CLAUDE_PLUGIN_OPTION_EFFORT:-}" ]; then
+if [ -z "${PROSE_GUARD_EFFORT:-}" ]; then
   # Nothing to run, and nothing to say about that here. Saying it is the SessionStart hook's job:
   # hooks/scripts/session_start.py records why it moved, and the short version is that this test —
   # "is there a config.json" — is not the same question as "has anybody chosen a level". Registering

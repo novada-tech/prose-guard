@@ -2,9 +2,8 @@
 
 Every file this tool reads can be edited by hand, and three of them are meant to be: a setup skill
 tells an agent to write destinations as JSON, a team pulls audiences out of a shared repository, and
-`/plugin configure` offers a free-text box for the effort level because `userConfig` has no enumerated
-type. So the interesting question is not what a correct file looks like. It is what happens to a
-slightly wrong one.
+the effort level is a word somebody types. So the interesting question is not what a correct file
+looks like. It is what happens to a slightly wrong one.
 
 What used to happen was nothing, and always in the same direction:
 

@@ -23,7 +23,6 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import host  # noqa: E402
 import paths  # noqa: E402
 import settings  # noqa: E402
 
@@ -39,10 +38,14 @@ _LEVEL = settings.one_of(*LEVELS)
 
 def _sources() -> tuple[tuple[str, str | None], ...]:
     """Where a level may be set, nearest first, each with a name for saying which one is wrong."""
+    # A third source used to sit between these two: `CLAUDE_PLUGIN_OPTION_EFFORT`, which Claude Code
+    # set from a `userConfig` field in plugin.json. Declaring that field made Claude Code ask for a
+    # level in a dialog at install — a free-text box, because `userConfig`'s types are string, number,
+    # boolean, directory and file with no enumerated type among them, so there was no picker and no way
+    # to mark the answer the measurements support. Asking somebody to type a level before they have
+    # been told what one costs is a worse first minute than asking nothing at all, and it left the same
+    # choice recorded in two places that could disagree. The field is gone and so is the source.
     return (("PROSE_GUARD_EFFORT", os.environ.get("PROSE_GUARD_EFFORT")),
-            # Set by Claude Code from the plugin's userConfig. Verified: it reaches a hook's
-            # environment, though not a skill's shell, which is why it cannot be the only path.
-            ("the plugin's effort setting", os.environ.get(host.EFFORT_VAR)),
             ("config.json", paths.config().get("effort")))
 
 
@@ -70,12 +73,11 @@ def complaints() -> list[str]:
     """Everything wrong with how this level was set, in sentences, or [] when nothing is.
 
     The environment is checked here and the file is checked by its declaration in settings.py, because
-    an environment variable has no file to be declared in. `userConfig` has no enumerated type — string,
-    number, boolean, directory and file are the whole list — so `/plugin configure` offers a free-text
-    box, and `medim` in it means disabled with nothing said unless somebody looks.
+    an environment variable has no file to be declared in. `medim` anywhere means disabled with nothing
+    said unless somebody looks, and a level is typed by hand in all three places that can hold one.
     """
     out: list[str] = []
-    for name, value in _sources()[:2]:            # the file's own complaint comes from its declaration
+    for name, value in _sources()[:1]:            # the file's own complaint comes from its declaration
         if (value or "").strip():
             _, complaint = _LEVEL(value)
             if complaint:
