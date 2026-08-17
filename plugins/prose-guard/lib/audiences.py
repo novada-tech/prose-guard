@@ -485,7 +485,8 @@ def visibility(directory: str) -> tuple[bool | None, str]:
         return None, "could not tell who can read this repository"
 
 
-def share(name: str, directory: str, with_names: bool = False) -> tuple[str, int]:
+def share(name: str, directory: str, with_names: bool = False,
+          expansions: bool = False) -> tuple[str, int]:
     """Copy one audience into a directory a team keeps.
 
     Sharing is a separate verb on purpose. This shares exactly the one you name — audiences are
@@ -504,12 +505,24 @@ def share(name: str, directory: str, with_names: bool = False) -> tuple[str, int
     people = list(data.get("members") or [])
     if not with_names:
         data.pop("members", None)
-    # Expansions never travel. Each one is a phrase copied verbatim out of writing the team did in
-    # private — "BSP: Big Secret Project" — so it is where an unreleased project name or a client name
-    # appears in full, and a share can land in a public repository. The receiving side is told what it
-    # is missing rather than left to assume nothing here is ambiguous: `rescan_note` says so, and
-    # dropping the key rather than writing an empty one is what makes it say so.
-    data.pop("expansions", None)
+    # An expansion is a phrase copied verbatim out of writing the team did in private — "BSP: Big
+    # Secret Project" — so it is where an unreleased project or a client appears in full. That is a
+    # reason to keep it out of a PUBLIC repository, which is exactly the judgement `visibility` already
+    # makes for members. So expansions go through that one gate rather than a rule of their own.
+    #
+    # They used to be dropped unconditionally, and that was wrong twice over. It withheld the substance
+    # of an audience from a private team repository for no gain — an expansion is the team's own phrase,
+    # read back to the team it came from — and because the write is a plain overwrite, re-sharing an
+    # audience DELETED expansions a colleague had already committed. Ten working abbreviations, removed
+    # by a command that printed success.
+    if not expansions:
+        # Not addable here, but never removable either: what the target already holds was put there by
+        # somebody, and taking it away gains no privacy that publishing it has not already lost.
+        already = (_read(path_for(name, directory)) or {}).get("expansions")
+        if already:
+            data["expansions"] = already
+        else:
+            data.pop("expansions", None)
     data.setdefault("_meta", {})["measured_over_people"] = len(people)
     return _write(path_for(name, directory), data), len(people)
 
@@ -559,7 +572,12 @@ def _cli() -> None:
                 f"a colleague needs — or point --to at a directory in a private repository your team "
                 f"already clones.")
         try:
-            target, people = share(a.name, a.to, with_names=a.with_names)
+            # Proved private is the same bar members are held to. An expansion is the team's own
+            # phrase going back to the team it came from, so there is nothing to withhold there; a
+            # public repository, or a target nobody could ask about, is where the phrase becomes a
+            # disclosure.
+            target, people = share(a.name, a.to, with_names=a.with_names,
+                                   expansions=public is False)
         except (KeyError, PermissionError, ValueError) as exc:
             raise SystemExit(str(exc).strip("'"))
         print(f"{a.name} -> {target}")
@@ -567,8 +585,19 @@ def _cli() -> None:
         if ALL[a.name].replaces == "built in":
             print(f"  it has the shipped {a.name} baseline's name, so everyone who pulls it stops "
                   f"reading the shipped one — including the terms later releases add to it")
-        print(f"  written-out forms are not included: each is a phrase from private writing, so an "
-              f"abbreviation this audience uses for two things is not told apart by whoever pulls it")
+        if public is False:
+            print(f"  written-out forms are included, and {where}, so they stay inside the team that "
+                  f"wrote them. An abbreviation this audience uses for two things is told apart by "
+                  f"whoever pulls it.")
+        else:
+            print(f"  written-out forms are NOT included: {where}, and each is a phrase copied "
+                  f"verbatim from private writing, so an abbreviation this audience uses for two "
+                  f"things is not told apart by whoever pulls it. Point --to at a directory in a "
+                  f"private repository and they travel.")
+            if (_read(target) or {}).get("expansions"):
+                print(f"  the forms already in {os.path.basename(target)} were left alone: somebody "
+                      f"committed them, and removing them now gains no privacy that committing them "
+                      f"has not already lost")
         if a.with_names:
             print(f"  their names are included, and {where} — so that is who reads them.")
         elif people:
@@ -600,15 +629,20 @@ def _cli() -> None:
             return
         for name, aud in sorted(ALL.items()):
             kind = "baseline" if not aud.matches_on else "audience"
-            known = len(aud.known(BASELINES))
+            # Measured and inherited, separately, because one number for both is the number somebody
+            # decides whether to trust an audience by. A one-term audience inheriting the 225-term
+            # baseline read as "226 terms", so an audience measured over nobody looked like the most
+            # substantial thing in the list. `show` has always split them; this row did not.
+            measured = len(aud.vocabulary)
+            inherited = len(aud.known(BASELINES)) - measured
             where = ", ".join(f"{k}={len(v)}" for k, v in aud.matches_on.items()) or "inherit only"
             # A file of the same name in a nearer layer wins outright — an audience is a measured
             # whole, so there is no merging — and the one it displaced may be a shipped baseline that
             # gains terms every release. Silence about that is how a 227-term vocabulary becomes a
             # 1-term one without anybody deciding to.
             notes = [f"replaces the {aud.replaces} one" if aud.replaces else "", aud.rescan_note]
-            print(f"{name:24s} {kind:9s} {aud.origin:9s} {known:4d} terms  "
-                  f"{len(aud.members):3d} people  {where}"
+            print(f"{name:24s} {kind:9s} {aud.origin:9s} {measured:4d} measured "
+                  f"+{inherited:4d} inherited  {len(aud.members):3d} people  {where}"
                   + (f"   [{'; '.join(n for n in notes if n)}]" if any(notes) else ""))
         print(f"\nyours:  {user_dir()}")
         for directory in paths.shared():
