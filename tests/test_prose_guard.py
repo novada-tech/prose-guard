@@ -222,6 +222,65 @@ def test_the_measure_harnesses_call_names_that_exist():
     check("no harness calls a name that was deleted", missing, [])
 
 
+PROSE = ("The rollout finished this morning. Every cluster is on the new pool now, so the migration "
+         "that was blocking the release is done. You can resume shipping today.")
+
+
+def test_a_discovered_shape_names_the_command_that_carried_the_text():
+    """A chain is several commands and only one of them is sending anything.
+
+    The name used to come from the first two words of the whole line while the flag holding the text was
+    matched anywhere in it, so `cd X && git commit -m "…"` was recorded as `cd X` — one permanent entry
+    per checkout path, none of which could ever recur — and `git add . && git commit -m "…"` was
+    recorded as `git add`, naming a command that sends nothing.
+
+    Measured over 24,390 real tool calls: 136 distinct shapes before, 51 after, and the unusable ones
+    went from 83 to none. `git commit -m` went from 3 calls to 140, because they had been scattered
+    across a `cd <path>` variant per repository.
+    """
+    import discover
+    for command_line, want in [
+            (f'cd /Users/x/rune-dsl && git commit -m "{PROSE}"', "bash: git commit -m"),
+            (f'cd X && git add . && git commit -m "{PROSE}"', "bash: git commit -m"),
+            (f'git -C /Users/x/repo commit -m "{PROSE}"', "bash: git commit -m"),
+            (f'git -c core.pager=cat commit -m "{PROSE}"', "bash: git commit -m"),
+            (f'gh pr create --title t --body "{PROSE}"', "bash: gh pr create --body"),
+            (f'gh -R owner/repo pr comment --body "{PROSE}"', "bash: gh pr comment --body"),
+            (f'VAR=1 slack post --text "{PROSE}"', "bash: slack post --text"),
+            (f'python3 "/a/b/send.py" --body "{PROSE}"', "bash: python3 send.py --body"),
+            # A quoted argument is one word containing spaces, and a command name never is. Without
+            # that, this named itself with the entire paragraph.
+            (f'echo "{PROSE}" | mail -s subject a@b', "bash: echo"),
+            (f'somecli post "{PROSE}"', "bash: somecli post"),
+            # An id is not part of a command's identity: this produced nine entries naming one review
+            # comment each.
+            (f'reply 3792799389 "{PROSE}"', "bash: reply"),
+            # The text itself holds every chain operator, so splitting the string first is what would
+            # break this in the other direction.
+            (f'git commit -m "It finished && it shipped; see below | done. {PROSE}"',
+             "bash: git commit -m")]:
+        got = discover._shape("Bash", {"command": command_line})
+        check(f"{command_line[:34]}…", got, want)
+
+
+
+def test_a_subagent_is_not_a_reader():
+    """Tools whose text has no human reader are not destinations, so they are never proposed.
+
+    "Who will read this, and why should they care" has no answer for a prompt to a subagent: it is
+    instructions to a machine that will act on them and report back. These came up on a real install,
+    and each one spends the single mention a shape gets on something nobody can act on.
+    """
+    import discover
+    for tool, field in [("SendMessage", "message"), ("Agent", "prompt"), ("Task", "prompt"),
+                        ("Skill", "args"), ("WebFetch", "prompt"), ("TodoWrite", "content")]:
+        check(f"{tool} is not a destination", discover._shape(tool, {field: PROSE}), None)
+    # And the ones that ARE for people still are, or this test would pass by switching discovery off.
+    check("an MCP post still is", discover._shape("mcp__slack__post", {"text": PROSE}),
+          "tool: mcp__slack__post [text]")
+    check("Write still is", discover._shape("Write", {"content": PROSE}), "tool: Write [content]")
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 

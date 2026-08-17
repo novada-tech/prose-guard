@@ -172,6 +172,87 @@ def words(cmd: str) -> list[str] | None:
         return None
 
 
+# Words in front of the real command that say nothing about where text is going. `cd` is not here: it
+# ends at a chain operator, so `cd X && git commit -m "…"` is split rather than stripped.
+# `poetry`/`npx` are deliberately absent: `poetry run pytest` is a stable name worth proposing, and
+# stripping the wrapper would name the subcommand `run` instead.
+_WRAPPERS = ("sudo", "env", "time", "nohup", "command", "exec")
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z_0-9]*=")
+# Two words names most commands — `git commit`, `gh api`. Three is needed for `gh pr create`, and it is
+# the ceiling because past that a positional argument starts being read as part of the name.
+MOST_NAME_WORDS = 3
+# Global options that sit between a binary and its subcommand and take a value. Named explicitly rather
+# than guessed: a rule like "a short flag consumes the next word" would eat the subcommand of
+# `somecli -v publish`. Without these, `git -C /path commit -m "…"` was named `git`, 28 times in the
+# corpus, because collection stopped at the first flag.
+_BEFORE_SUBCOMMAND = ("-C", "-c", "--git-dir", "--work-tree", "-R", "--repo")
+
+
+def carrying(cmd: str, at: int) -> str:
+    """The one command in a chain that holds the character at `at`.
+
+    A chain is several commands, and only one of them is sending anything. Naming a call by the start of
+    the line instead named the wrong one nearly every time: `cd X && git commit -m "…"` was recorded as
+    `cd X`, so every checkout became its own permanent entry that could never recur, and
+    `git add . && git commit -m "…"` was recorded as `git add`. Measured over 16,058 real tool calls,
+    74% of the shapes this produced were unusable.
+
+    Quote-aware, because the text being sent is itself quoted and frequently contains `|`, `&&` and `;`.
+    Splitting the string first is what would make this wrong in the other direction.
+    """
+    quote, start = "", 0
+    i = 0
+    while i < len(cmd):
+        ch = cmd[i]
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        else:
+            for op in (";", "&&", "||", "|", "\n"):
+                if cmd.startswith(op, i):
+                    if i > at:
+                        return cmd[start:i]
+                    start, i = i + len(op), i + len(op) - 1
+                    break
+        i += 1
+    return cmd[start:]
+
+
+def naming(segment: str) -> str:
+    """What to call this command: its binary and subcommand, and nothing that varies per machine.
+
+    A name has to be the same tomorrow to be worth proposing as a destination, so an absolute path is
+    reduced to its basename and a `VAR=value` prefix is dropped. Everything from the first flag onwards
+    belongs to the arguments, not the name.
+    """
+    try:
+        # Tokenised properly, so a quoted script path is one word and its basename can be taken. A
+        # naive split on the first quote left `python3 "/long/path/x.py" --body "…"` named `python3`.
+        words = shlex.split(segment, comments=True)
+    except ValueError:
+        words = re.split(r"['\"]", segment.strip(), 1)[0].split()
+    while words and (_ASSIGNMENT.match(words[0]) or words[0] in _WRAPPERS):
+        words.pop(0)
+    # A global option and its value, skipped so the subcommand behind them is still found.
+    while len(words) > 2 and words[1] in _BEFORE_SUBCOMMAND:
+        del words[1:3]
+    out = []
+    for word in words:
+        # A name word is a bare token. Stopping on whitespace is what keeps the text out of the name:
+        # after tokenising, a quoted argument is one word containing spaces, so `echo "<a paragraph>" |
+        # mail -s x` named itself with the entire paragraph. The old code split on the first quote to
+        # avoid that and paid for it by never reducing a quoted script path to its basename.
+        # Digits are never part of a command's identity. `reply 3792799389 "…"` produced nine entries
+        # that each named one review comment and could never recur.
+        if (word.startswith("-") or word.isdigit() or any(c.isspace() for c in word)
+                or len(out) == MOST_NAME_WORDS):
+            break
+        out.append(os.path.basename(word.rstrip("/")) if "/" in word else word)
+    return " ".join(out)
+
+
 def flag_values(cmd: str) -> Iterator[tuple[str, str]]:
     """Every (flag, value) the command itself passes, and nothing at all when it cannot be read as
     words.
