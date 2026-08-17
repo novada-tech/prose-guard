@@ -110,9 +110,17 @@ already has.
 | `disabled` | nothing | — |
 | `low` | the two arithmetic checks only, no model call | +12s |
 | `medium` | plus one advisory judgement call over the five concerns | +19s |
-| `high` | one separate check per concern, re-verified after each edit | +75s |
+| `high` | one separate check per concern, re-verified after each edit | +12s |
 
-The seconds were measured when `high` ran four model-backed checks. It runs six now, so its figure is a floor.
+`low` and `medium` were measured when `high` ran four model-backed checks one after another, at +75s.
+It runs six now, and asks them at the same time: **34.3s to 12.4s** on a 78-word review comment, for the
+same six model calls and the same verdict. The checks are independent — each reads the same unmodified
+text and none can see another's answer — so only the waiting changed.
+
+The figures above are per message sent, and what a slow message costs is the check with the most to say
+rather than the sum of all of them. On a real pull request review before this change: 39 guarded calls,
+median 50.3s, 217.7s for a 925-word summary comment, and 34.5 minutes of a 168-minute session spent
+waiting on the guard.
 
 **Pick `medium`.** `/prose-guard:setup` asks and writes the answer for you. `low` is not the cheap
 option and `high` is not measurably better, which is less obvious than it looks — the numbers, the

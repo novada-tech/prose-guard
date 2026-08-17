@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.abspath(os.path.join(HERE, "..", "plugins", "prose-guard"))
@@ -427,6 +428,122 @@ def test_the_shipped_manifests_are_valid_and_agree():
     check("the version is three numbers", len(parts) == 3 and all(p.isdigit() for p in parts), True)
 
 
+def _drive_hook(running, message, session, tmp):
+    """Run the hook against these checks and return its parsed output. Shares the harness above."""
+    import checks as checks_module
+    import contextlib
+    import io
+    guard = load_guard("outgoing_guard_for_concurrency")
+    was = {k: os.environ.get(k) for k in ("PROSE_GUARD_HOME", "PROSE_GUARD_STATE")}
+    os.environ["PROSE_GUARD_STATE"] = os.path.join(tmp, "state")
+    home = os.path.join(tmp, "home")
+    os.makedirs(home, exist_ok=True)
+    write_destinations(home, chat_destination())
+    fresh(home)
+    stdin, for_effort = sys.stdin, checks_module.for_effort
+    out = io.StringIO()
+    sys.stdin = io.StringIO(json.dumps(
+        {"tool_name": "mcp__ourchat__chat_send", "session_id": session, "cwd": tmp,
+         "tool_input": {"channel_id": "C1", "message": message}}))
+    try:
+        checks_module.for_effort = lambda level=None: running
+        guard.CHECKS = running
+        with contextlib.redirect_stdout(out):
+            guard.main()
+    except SystemExit:
+        pass
+    finally:
+        sys.stdin, checks_module.for_effort = stdin, for_effort
+        for key, value in was.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    return _hook_fields(out.getvalue())
+
+
+def test_the_checks_are_asked_at_the_same_time():
+    """Every check reads the same unmodified text and none can see another's verdict, so when they are
+    asked is free to change. Asked one after another they were not: measured on a real pull request
+    review, 39 guarded calls at a median of 50.3s, 217.7s for a 925-word comment, and 34.5 minutes of a
+    168-minute session spent waiting. A/B on one 78-word comment at `high`: 34.3s -> 12.4s, same six
+    calls, same verdict.
+
+    Timed with checks that sleep rather than with a model, so this measures the asking and not the model.
+    """
+    import checks as checks_module
+    import contextlib
+    import io
+    guard = load_guard("outgoing_guard_for_concurrency")
+    import threading
+
+    class Slow:
+        MODE = checks_module.POOLED
+
+        def __init__(self, name):
+            self.NAME, self.asked = name, 0
+            self.entered, self.left = None, None
+
+        def run(self, text, ctx):
+            self.asked += 1
+            self.entered = time.time()
+            time.sleep(0.4)
+            self.left = time.time()
+            return None                      # passes, so one call each and no pooling
+
+    running = [Slow(f"slow{n}") for n in range(4)]
+    text = " ".join(f"Sentence {n} about the resolver and what it actually does today." for n in range(12))
+    with tempfile.TemporaryDirectory() as tmp:
+        began = time.time()
+        _drive_hook(running, text, "atonce", tmp)
+        took = time.time() - began
+
+    check("every check was asked", [c.asked for c in running], [1, 1, 1, 1])
+    # Four checks sleeping 0.4s each: 1.6s one after another, about 0.4s together. The bar is set well
+    # clear of both so this does not fail on a loaded machine.
+    check("they did not run one after another", took < 1.2, True)
+    # And they genuinely overlapped, which the clock alone cannot prove.
+    latest_start = max(c.entered for c in running)
+    earliest_end = min(c.left for c in running)
+    check("their runs overlapped in time", latest_start < earliest_end, True)
+
+
+def test_only_one_check_holds_a_message_back_however_many_object():
+    """The invariant `docs/design-notes.md` was written about, now that every check has an answer.
+
+    Two checks that could each hold a message back pulled in opposite directions — "explain every term"
+    against "contains nothing they will not act on" — and each undid the other: no message at all, 0 of
+    5 usable, twice. So asking them together must not turn into blocking on all of them. Exactly one
+    blocks; the rest travel in the same interruption as context, which is what collapses a round per
+    objecting check into one round.
+    """
+    import checks as checks_module
+    import contextlib
+    import io
+    guard = load_guard("outgoing_guard_for_concurrency")
+    class Objects:
+        MODE = checks_module.VERDICT          # one call, one verdict, nothing to pool
+
+        def __init__(self, name):
+            self.NAME = name
+
+        def run(self, text, ctx):
+            return checks_module.Finding(checks_module.BLOCK,
+                                         f'"resolver {self.NAME}" is unclear to this reader')
+
+    running = [Objects("alpha"), Objects("beta"), Objects("gamma")]
+    text = " ".join(f"Sentence {n} about the resolver and what it actually does today." for n in range(12))
+    with tempfile.TemporaryDirectory() as tmp:
+        said = _drive_hook(running, text, "oneblocker", tmp)
+
+    reason = said.get("permissionDecisionReason", "")
+    check("the message is held", said.get("permissionDecision"), "deny")
+    check("by the first check in editorial order", "resolver alpha" in reason, True)
+    check("and the others are named in the same interruption",
+          "resolver beta" in reason and "resolver gamma" in reason, True)
+    check("as context rather than as demands", "none of it is holding this back" in reason, True)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
@@ -442,6 +559,21 @@ def teardown_function(_fn):
     if FAILS:
         recorded, FAILS[:] = list(FAILS), []
         raise AssertionError("\n" + "\n".join(recorded))
+
+
+def load_guard(as_name):
+    """The hook module, loaded in this process under its own name.
+
+    By path, because `hooks/scripts/` is not on sys.path and should not be: nothing imports the hook, the
+    hook is executed. Each caller gets its own module object so one test's `guard.CHECKS` cannot leak
+    into another's.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        as_name, os.path.join(PLUGIN, "hooks", "scripts", "outgoing_guard.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def raw_hook_output(payload, environment, timeout=300):
@@ -4163,10 +4295,7 @@ def test_a_long_document_cannot_spend_the_whole_session_on_its_first_check():
 
     import checks as checks_module
 
-    spec = importlib.util.spec_from_file_location(
-        "outgoing_guard_for_budget", os.path.join(PLUGIN, "hooks", "scripts", "outgoing_guard.py"))
-    guard = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(guard)
+    guard = load_guard("outgoing_guard_for_budget")
 
     class Ever:
         """Never stops finding something new, and never says the same thing twice: the worst case for a
