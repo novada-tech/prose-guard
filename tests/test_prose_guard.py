@@ -610,9 +610,28 @@ def test_a_review_comment_is_judged_with_the_code_it_is_attached_to():
             check("and what that means for a term the code defines",
                   "already explained" in told.get("anchored_to", ""), True)
 
-            # A destination that does not declare an anchor is unchanged: nothing is guessed.
+            # A destination that declares nothing still gets it, because destination discovery records
+            # the shape of a call and a use count and never the other field names — so setup has nothing
+            # to propose this from, and a declaration alone would mean only people who hand-edited their
+            # destinations ever benefited. Every install benefits or the fix is not one.
             del dest["anchored_to"]
-            check("nothing is invented for a destination that declares none",
+            check("a destination that declares nothing still gets it",
+                  "Diagnostics.java" in destinations.situation(dest, tool, call).get("anchored_to", ""),
+                  True)
+            # Inferred narrowly: a path AND a line. A path alone is not an anchor — a file being written
+            # is not something its reader is looking at yet — so the review BODY gets nothing.
+            body = {k: v for k, v in call.items() if k not in ("path", "line")}
+            check("prose attached to nothing gets nothing",
+                  "anchored_to" in destinations.situation(dest, tool, body), False)
+            # A path with no line is not an anchor by default: a file somebody is writing is not
+            # something its reader is looking at yet. A destination where it IS one — a file-level
+            # review comment — says `"anchored_to": ["path"]` and gets it.
+            whole_file = {k: v for k, v in call.items() if k != "line"}
+            check("a path with no line is not an anchor by default",
+                  "anchored_to" in destinations.situation(dest, tool, whole_file), False)
+            # And it can be turned off outright, which a default has to allow.
+            dest["anchored_to"] = []
+            check("an empty declaration turns it off",
                   "anchored_to" in destinations.situation(dest, tool, call), False)
         finally:
             os.environ["PROSE_GUARD_HOME"] = was

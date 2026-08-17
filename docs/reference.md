@@ -211,8 +211,17 @@ as an unglossed fragment sitting three lines above in the reader's own diff. The
 that described the behaviour in prose rather than naming the call, which is the tool being satisfied
 instead of the message improved.
 
-Declared per destination rather than worked out from the fields, for the same reason `identifiers` are: a
-guess about what a call means is wrong before any check runs.
+**It costs no configuration.** `path` and `line` together are the default, so a GitHub review comment gets
+this whether or not anybody declared anything. That matters because destination discovery records the shape
+of a call and a use count and never the other field names — so `/prose-guard:setup` has nothing to propose
+this from, and a field only a hand-editor could set would reach almost nobody.
+
+Inferring this is safe where inferring an identifier is not. An identifier decides *which audience applies*,
+before any check runs, so a wrong guess corrupts every verdict; this adds one sentence of context to a
+judgement. It is used only when the call carries every field, which keeps the guess narrow: prose arriving
+with both a path and a line is prose about that line. A path alone is not an anchor — a file somebody is
+writing is not something its reader is looking at yet — so a file-level comment declares `["path"]` to opt
+in, and `[]` turns it off.
 
 Reproduce the cost table with:
 
