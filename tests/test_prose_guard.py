@@ -4466,13 +4466,13 @@ def test_you_are_told_when_a_message_was_checked_and_what_it_cost():
         check("a denial is its own notice, so it does not also carry a tally",
               [s for _, s in (first, second)], ["", ""])
         check("the message that goes out says how many rewrites it took",
-              third[1].startswith("prose-guard low for team: 2 rewrites."), True)
+              third[1].startswith("prose-guard · low · team · 2 rewrites"), True)
 
         # And a clean message says so, which is the half that makes a miss visible: if this line is
         # absent, nothing was checked, and that is now the only thing absence can mean.
         clean = send("Rebuild the payload index after the credential job once more" + pad)
         check("a message nobody objected to says it was checked",
-              clean, ("allow", "prose-guard low for team: nothing to say."))
+              clean, ("allow", "prose-guard · low · team · clean"))
 
 
 def test_the_argument_before_a_message_goes_out_can_be_read_back():
@@ -4641,17 +4641,25 @@ def test_the_line_says_who_the_message_was_judged_for():
         def __init__(self, resolved, names, fallback):
             self.resolved, self.names, self.fallback = resolved, names, fallback
 
-    check("a measured audience is named",
-          guard.reader("low", Audience(True, ["platform"], None)), "prose-guard low for platform")
+    check("a measured audience is named", guard.reader(Audience(True, ["platform"], None)),
+          "platform")
     check("two at once are both named",
-          guard.reader("high", Audience(True, ["platform", "docs"], None)),
-          "prose-guard high for platform + docs")
-    check("and a guess says so, and says what it fell back to",
-          guard.reader("low", Audience(False, [], "engineers")),
-          "prose-guard low, no audience for this — guessing against engineers")
+          guard.reader(Audience(True, ["platform", "docs"], None)), "platform + docs")
+    check("and a guess says so rather than naming what it fell back to",
+          guard.reader(Audience(False, [], "engineers")), "no audience")
     # Never a bare name that could be read as measured when it was not.
     check("with no audience at all it still cannot read as measured",
-          "guessing" in guard.reader("low", None), True)
+          guard.reader(None), "no audience")
+    # The whole line, because the fields are what a person reads and their order is the point.
+    check("a clean message, judged against measured readers",
+          guard.tally("high", 0, 0, 0, Audience(True, ["platform"], None)),
+          "prose-guard · high · platform · clean")
+    check("and one that was argued with, with somewhere to read the argument",
+          guard.tally("high", 2, 1, 8, Audience(True, ["platform"], None)),
+          "prose-guard · high · platform · 2 rewrites, 1 note · 8 calls · /prose-guard:feedback")
+    check("nothing points at the drafts when there are none",
+          guard.tally("low", 0, 1, 0, Audience(False, [], "engineers")),
+          "prose-guard · low · no audience · 1 note")
 
     # End to end, because the hook has to pass the audience it actually used rather than re-derive one.
     with tempfile.TemporaryDirectory() as home:
@@ -4676,9 +4684,9 @@ def test_the_line_says_who_the_message_was_judged_for():
             return out.get("systemMessage", "")
 
         check("inside a repository the audience routes on, it is named",
-              "for platform" in said_for(repo, "a"), True)
+              said_for(repo, "a").startswith("prose-guard · low · platform ·"), True)
         check("and outside it, the guess is named as a guess",
-              "guessing against engineers" in said_for(home, "b"), True)
+              said_for(home, "b").startswith("prose-guard · low · no audience ·"), True)
 
 
 def test_a_long_document_gets_more_calls_than_a_short_message():

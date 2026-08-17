@@ -300,19 +300,24 @@ def say(finding: Finding, check: Check, state: dict[str, Any], path: str, digest
     return False
 
 
-def reader(level: str, audience: Resolved | None) -> str:
-    """The opening of the line: which level ran, and who the message was judged for.
+def reader(audience: Resolved | None) -> str:
+    """Who the message was judged for, and whether that was measured or assumed.
 
     Whether the audience matched is not a detail. One that did was measured from what those people have
     actually written, and it can hold a message back. One that did not cannot — findings become advice,
     because blocking on a guess spends somebody's first day arguing about their own house vocabulary.
     Somebody watching a message go out unchallenged deserves to know which of those they are looking at,
     and it used to be invisible.
+
+    Which baseline the guess is against is deliberately not here. It read `no audience for this —
+    guessing against engineers`, which is 44 characters of a line that appears on every message a person
+    sends, behind a `PreToolUse:<tool> says:` prefix Claude Code adds and nothing here can shorten. The
+    fact worth carrying is that the reader is assumed rather than measured; which assumption it was is a
+    question somebody asks once, and `/prose-guard:audiences` answers it.
     """
     if audience is not None and audience.resolved and audience.names:
-        return f"prose-guard {level} for {' + '.join(audience.names)}"
-    guess = getattr(audience, "fallback", None) or "the shipped baseline"
-    return f"prose-guard {level}, no audience for this — guessing against {guess}"
+        return " + ".join(audience.names)
+    return "no audience"
 
 
 # How many checks may be asked at the same time. Each is a `claude -p` subprocess, so this is bounded by
@@ -399,24 +404,34 @@ def tally(level: str, rewrites: int, notes: int, calls: int,
     Written as counts rather than a verdict because the useful reading is comparative: three rewrites
     on one message is worth looking at, and so is a level nobody meant to be running, or a reader
     nobody meant to be assumed.
+
+    Fields separated rather than a sentence, and that is about where it lands. Claude Code prints it as
+    `PreToolUse:<tool> says: <this>`, and a tool name like
+    `mcp__github__add_comment_to_pending_review` has already spent the width before this gets a word in.
+    A sentence read after that prefix parses as a second clause of somebody else's sentence; four fields
+    in a fixed order read as a status line, which is what it is — the same shape every time, on every
+    message, so an unexpected value is the thing the eye catches rather than something to read for.
     """
     said = []
     if rewrites:
         said.append(f"{rewrites} rewrite" + ("s" if rewrites != 1 else ""))
     if notes:
         said.append(f"{notes} note" + ("s" if notes != 1 else ""))
+    fields = ["prose-guard", level, reader(audience),
+              ", ".join(said) if said else "clean"]
+    if calls:
+        fields.append(f"{calls} call" + ("s" if calls != 1 else ""))
     # Where to read the argument back, said only when there is one. A rewrite is an exchange that
     # happened out of sight, and somebody judging whether the complaint was fair needs the drafts rather
-    # than the count. Nothing is recorded unless a check held something back, so this line and that
+    # than the count. Nothing is recorded unless a check held something back, so this field and that
     # record appear together or not at all.
     #
     # A skill rather than a script path, because everything else here is asked for in words —
     # /prose-guard:setup, /prose-guard:audiences — and a path to a file inside a plugin directory is
     # not something anybody should have to keep.
-    return (reader(level, audience) + ": "
-            + (", ".join(said) if said else "nothing to say")
-            + (f" ({calls} model call{'s' if calls != 1 else ''})" if calls else "")
-            + (". /prose-guard:feedback shows the drafts" if rewrites else "") + ".")
+    if rewrites:
+        fields.append("/prose-guard:feedback")
+    return " · ".join(fields)
 
 
 def say_together(findings: list[Finding], checks: list[Check], state: dict[str, Any], path: str,

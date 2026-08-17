@@ -124,12 +124,19 @@ running. It goes to both now: you see the notice, and the agent knows enough to 
 
 ## What you see when a message is checked
 
-One line, on the message that goes out:
+One line, on the message that goes out. Claude Code prefixes it with `PreToolUse:<tool> says:`, which is
+its own and nothing here can shorten:
 
 ```
-prose-guard high: 2 rewrites, 1 note (7 model calls).
-prose-guard low: nothing to say.
+prose-guard · low · platform-team · clean
+prose-guard · high · platform-team · 2 rewrites, 1 note · 7 calls · /prose-guard:feedback
+prose-guard · low · no audience · 1 note
 ```
+
+The fields never move: the level that ran, who it was judged for, what came of it, what it cost, and
+where to read the argument back if there was one. **`no audience`** in the third position is the one
+worth knowing — nothing was held back on terms, because the reader was assumed rather than measured, and
+`/prose-guard:audiences` is what changes it.
 
 `rewrites` is how many times the agent was sent back before this text passed. A denial carries no such
 line, because a denial is a permission prompt and you have already seen it.
