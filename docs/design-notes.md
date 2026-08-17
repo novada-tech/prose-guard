@@ -263,6 +263,8 @@ how the cases are known to be load-bearing:
 - a second `def` reusing an existing test name, which replaces the first in `globals()` and leaves the
   count unchanged. The runner's own guard could not see this one until it counted definitions instead
   of comparing two sets of names, so the mutation was green before it was red
+- `chosen()` answering a level when no source names one, so an install nobody has set up looks
+  configured and says nothing about checking nothing. Caught by 11 cases
 
 ## One config directory, not two
 
