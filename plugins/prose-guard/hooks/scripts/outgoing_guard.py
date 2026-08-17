@@ -49,8 +49,10 @@ if TYPE_CHECKING:
     from destinations import Dest
 
 # One complaint from a check about one message, then one more if the fix did not land. This is the whole
-# anti-loop mechanism and it is enough: measured over 95 real held messages, 74 went out after one round,
-# 13 after two, 6 after three, and none ever needed a fourth.
+# anti-loop mechanism and it is enough: measured over 59 real held messages, 44 went out after one
+# round, 7 after two, 6 after three, and none ever needed a fourth. (An earlier count said 95 and
+# 74/13/6; it matched the refusal text anywhere in a tool result, so a file that merely contained
+# the phrase counted as a held message. The shape held up, the number did not.)
 MAX_PER_CHECK = 2
 # There used to be a second ceiling of six denials across a whole session, never reset, meant to stop one
 # message eating a session. It stopped the wrong thing. On a real pull request review it was exhausted by
