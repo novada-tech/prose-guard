@@ -87,17 +87,29 @@ your next push, and it would come back on your next pull. To stop using it yours
 file of the same name — yours wins. To retire it for everybody, remove it from the repository, in a
 commit that says why.
 
-## What a shared audience does not carry
+## What a shared audience carries, and what it does not
 
 Nothing about your machine. Routing identifiers, the measured vocabulary, the prose description of the
 people, what it inherits, and the assumptions.
 
-Expansions do not travel either, and that one is a deliberate loss. An expansion is a phrase copied
-verbatim out of private writing — which is exactly where an unreleased project or a client appears in
-full — and a shared audience can end up in a public repository. A colleague who pulls it therefore gets
-the same verdicts you get on whether a term is known, and cannot tell two meanings of the same
-abbreviation apart. `show` says which of the two reasons applies, so nobody is sent to re-scan a corpus
-they never had.
+Expansions travel only into a repository GitHub says is private, and that is the same bar names are
+held to. An expansion is a phrase copied verbatim out of private writing — exactly where an unreleased
+project or a client appears in full. Read back to the team that wrote it, it is their own phrase and
+there is nothing to withhold; in a public repository it is a disclosure.
+
+So `share` asks about the target once and both decisions follow from the answer. Where it cannot tell —
+not a git repository, no `gh`, `gh` not logged in, a remote that is not GitHub — expansions stay behind
+and it says so, because that is the safe direction and three of the four ways a first-time user arrives
+are ways of not being able to tell.
+
+Where they do not travel, a colleague who pulls the audience gets the same verdicts you get on whether
+a term is known, but cannot tell two meanings of the same abbreviation apart. `show` says which of the
+two reasons applies, so nobody is sent to re-scan a corpus they never had.
+
+**Re-sharing never removes expansions somebody already committed.** They were put there deliberately,
+and deleting them gains no privacy that committing them has not already lost. This used to be the
+opposite: `share` dropped the key and overwrote the file, so re-sharing an audience deleted ten working
+abbreviations from a team repository and printed success.
 
 The corpus it was measured from is not included either — it was never in the audience file. If you want
 someone else to be able to re-measure rather than trust the result, share the export command, which is

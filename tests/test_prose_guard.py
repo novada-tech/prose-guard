@@ -281,6 +281,79 @@ def test_a_subagent_is_not_a_reader():
     check("Write still is", discover._shape("Write", {"content": PROSE}), "tool: Write [content]")
 
 
+FORMS = {"CDM": {"Common Domain Model": 6}, "DRR": {"Digital Regulatory Reporting": 5}}
+
+
+def test_expansions_go_through_the_same_gate_as_names():
+    """Whether a verbatim phrase travels is one question about the target, asked once.
+
+    An expansion is a phrase copied out of private writing, so it belongs out of a PUBLIC repository —
+    which is exactly the judgement `visibility` already makes for members. It used to be dropped
+    unconditionally instead, which withheld the substance of an audience from a private team repository
+    for no gain: an expansion read back to the team that wrote it is their own phrase.
+    """
+    import audiences
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as to:
+        write_audience(home, "eng", matches={"repos": ["a/b"]}, members=["p", "q", "r", "s"],
+                       vocabulary={"CDM": 9, "DRR": 7}, expansions=FORMS)
+        was = os.environ["PROSE_GUARD_HOME"]
+        os.environ["PROSE_GUARD_HOME"] = home
+        try:
+            importlib.reload(paths_module()); importlib.reload(audiences)
+            target, _ = audiences.share("eng", to, expansions=True)
+            with open(target) as fh:
+                check("proved private: the forms travel", sorted(json.load(fh).get("expansions") or {}),
+                      ["CDM", "DRR"])
+            target, _ = audiences.share("eng", to, expansions=False)
+            with open(target) as fh:
+                got = json.load(fh).get("expansions") or {}
+            # Not addable, but never removable: this is the re-share that used to delete ten working
+            # abbreviations from a team repository and print success.
+            check("cannot tell: what was committed is left alone", sorted(got), ["CDM", "DRR"])
+        finally:
+            os.environ["PROSE_GUARD_HOME"] = was
+            importlib.reload(paths_module()); importlib.reload(audiences)
+
+    # And a first share into a target that holds nothing still withholds them.
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as to:
+        write_audience(home, "eng", matches={"repos": ["a/b"]}, vocabulary={"CDM": 9},
+                       expansions=FORMS)
+        was = os.environ["PROSE_GUARD_HOME"]
+        os.environ["PROSE_GUARD_HOME"] = home
+        try:
+            importlib.reload(paths_module()); importlib.reload(audiences)
+            target, _ = audiences.share("eng", to, expansions=False)
+            with open(target) as fh:
+                check("nothing there to keep: they stay behind",
+                      json.load(fh).get("expansions"), None)
+        finally:
+            os.environ["PROSE_GUARD_HOME"] = was
+            importlib.reload(paths_module()); importlib.reload(audiences)
+
+
+def test_list_does_not_add_inherited_terms_to_measured_ones():
+    """One number for both is the number somebody decides whether to trust an audience by.
+
+    A one-term audience inheriting the 225-term baseline read as "226 terms", so the least substantial
+    thing in the list looked like the most. `show` has always said "1 measured + 225 inherited"; the
+    row in `list` did not, and a reviewer had to derive the split by hand before sharing it.
+    """
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "thin", matches={"repos": ["your-org/infra"]}, inherits=["engineers"],
+                       members=["ann", "bob", "cat"], vocabulary={"BSP": 4})
+        env = {**os.environ, "PROSE_GUARD_HOME": home}
+        out = subprocess.run([sys.executable, os.path.join(LIB, "audiences.py"), "list"],
+                             capture_output=True, text=True, env=env, timeout=60).stdout
+        row = next((r for r in out.splitlines() if r.startswith("thin")), "")
+        check("the row says how many were measured", "1 measured" in row, True)
+        check("and does not fold the baseline into that", "226" in row, False)
+
+        shown = subprocess.run([sys.executable, os.path.join(LIB, "audiences.py"), "show", "thin"],
+                               capture_output=True, text=True, env=env, timeout=60).stdout
+        measured = next((l for l in shown.splitlines() if l.startswith("knows")), "")
+        check("list and show agree", "1 measured" in measured and "1 measured" in row, True)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
@@ -371,6 +444,11 @@ def cli_destination(name="our cli", binary="ourcli", **kw):
     """A command-shaped destination, the shape a vendor command-line tool would produce."""
     return {"name": name, "bash": r"\b" + binary + r"\s+(post|note)\b",
             "text_arg": ["--message", "--body-file"], **kw}
+
+
+def paths_module():
+    import paths
+    return paths
 
 
 def write_audience(home, name, **kw):
