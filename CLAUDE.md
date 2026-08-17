@@ -58,6 +58,13 @@ a check with nothing to say**. Most of the worst defects found here were that sh
 So when you change a path that can fail, ask what somebody sees when it does. If the answer is
 "nothing", that is the defect. `lib/telling.py` is how something gets said once without nagging.
 
+**`systemMessage` is a sibling of `hookSpecificOutput`, never a field inside it.** Nested it is
+well-formed JSON that Claude Code discards, and for this tool's whole life every transparency line went
+out that way — the level, the audience, the rewrite count, the checks that could not run. The hook
+exited 0, the JSON parsed, and nine tests agreed with the code because they read the field back out of
+the same wrong place. Asserting a value you just set, from where you set it, proves only that you agree
+with yourself: read what a real run printed, and check where the field sits, not that it exists.
+
 ## Write the test that would have caught it, and watch it fail
 
 Before the fix, not after. A test written after a fix pins the fix; a test written before pins the

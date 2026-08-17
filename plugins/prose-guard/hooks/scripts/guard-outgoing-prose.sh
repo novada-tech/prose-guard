@@ -39,7 +39,10 @@ data.setdefault("setup never run", {})["said"] = True
 json.dump(data, open(sys.argv[1], "w"), indent=1, sort_keys=True)
 MARK
     NOTE='prose-guard is installed but has never been set up, so it is checking nothing. Run /prose-guard:setup to choose a level — medium is the one the measurements support. This is the only time it will be mentioned.'
-    printf '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "systemMessage": "%s", "additionalContext": "%s"}}\n' "$NOTE" "$NOTE"
+    # systemMessage is a sibling of hookSpecificOutput, not a field inside it. Nested, Claude Code
+    # discards it, so the one notice a never-configured install ever produces reached nobody — the
+    # exact case this notice exists for. Same mistake as the Python had; both are fixed together.
+    printf '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "%s"}, "systemMessage": "%s"}\n' "$NOTE" "$NOTE"
     exit 0
   fi
   # A level set to something that is not a level has to reach the Python, which says so where the person

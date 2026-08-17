@@ -281,6 +281,9 @@ def test_a_subagent_is_not_a_reader():
     check("Write still is", discover._shape("Write", {"content": PROSE}), "tool: Write [content]")
 
 
+CLEAN = ("The migration finished this morning and every cluster now runs the new pool. You can "
+         "resume shipping today. Nothing else blocks the release, so there is no action for you.")
+
 FORMS = {"CDM": {"Common Domain Model": 6}, "DRR": {"Digital Regulatory Reporting": 5}}
 
 
@@ -354,6 +357,47 @@ def test_list_does_not_add_inherited_terms_to_measured_ones():
         check("list and show agree", "1 measured" in measured and "1 measured" in row, True)
 
 
+def test_every_writer_puts_system_message_where_it_is_read():
+    """One rule, checked against every place that can emit hook JSON.
+
+    `systemMessage` is a sibling of `hookSpecificOutput`, not a field inside it. Nested, it is
+    well-formed JSON that Claude Code discards — so this tool spent its whole life emitting a
+    transparency line nobody could see: the level, the audience, the rewrite count, the checks that
+    could not run. The hook exited 0 and the JSON parsed, so nothing looked wrong, and nine tests in
+    this file agreed with the code because they read the field back out of the same wrong place.
+
+    There are two writers and they are in different languages, so they cannot share the code that
+    builds the envelope: `emit()` in outgoing_guard.py and one `printf` in guard-outgoing-prose.sh,
+    which answers before Python starts precisely so an unconfigured install costs no interpreter.
+    What they can share is this table. A third writer goes in it.
+    """
+    writers = []
+
+    # The shell pre-filter: nothing configured, so it answers the setup notice itself.
+    with tempfile.TemporaryDirectory() as tmp:
+        home = os.path.join(tmp, "home")
+        os.makedirs(home)
+        bare = {k: v for k, v in os.environ.items() if not k.startswith("PROSE_GUARD")}
+        bare.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
+        bare["PROSE_GUARD_HOME"] = home
+        writers.append(("guard-outgoing-prose.sh", raw_hook_output(
+            {"tool_name": "mcp__slack__slack_send_message", "session_id": "w1", "cwd": tmp,
+             "tool_input": {"channel_id": "C1", "message": PROSE}}, bare)))
+
+    # The Python: a message it actually checks, which always carries the tally.
+    with tempfile.TemporaryDirectory() as home:
+        env = {**os.environ, "PROSE_GUARD_HOME": home, "PROSE_GUARD_EFFORT": "low"}
+        writers.append(("outgoing_guard.py", raw_hook_output(
+            {"tool_name": "Bash", "session_id": "w2",
+             "tool_input": {"command": f'git commit -m "{CLEAN}"'}}, env)))
+
+    for who, said in writers:
+        check(f"{who} said something at all", bool(said), True)
+        check(f"{who} puts systemMessage at the top level", "systemMessage" in said, True)
+        check(f"{who} does not nest it where nothing reads it",
+              "systemMessage" in (said.get("hookSpecificOutput") or {}), False)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
@@ -369,6 +413,26 @@ def teardown_function(_fn):
     if FAILS:
         recorded, FAILS[:] = list(FAILS), []
         raise AssertionError("\n" + "\n".join(recorded))
+
+
+def raw_hook_output(payload, environment, timeout=300):
+    """The hook's stdout parsed with NO reshaping, for asserting where a field actually sits."""
+    r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
+                       text=True, env=environment, timeout=timeout)
+    assert r.returncode == 0, f"the hook exited {r.returncode}: {r.stderr}"
+    return json.loads(r.stdout) if r.stdout.strip() else {}
+
+
+def _hook_fields(stdout):
+    """The hook's fields as one dict, with `systemMessage` taken from the top level and nowhere else.
+
+    Every place in this file that reads the hook's output goes through here or `hook_reply`, so a
+    regression that nests `systemMessage` inside `hookSpecificOutput` — where Claude Code does not look,
+    and where this tool put it for its whole life — fails a test instead of passing nine.
+    """
+    said = json.loads(stdout or "{}")
+    return {**(said.get("hookSpecificOutput") or {}),
+            "systemMessage": said.get("systemMessage", "")}
 
 
 def hook_reply(payload, environment, timeout=300):
@@ -387,7 +451,19 @@ def hook_reply(payload, environment, timeout=300):
     assert r.returncode == 0, f"the hook exited {r.returncode}: {r.stderr.strip()[-1500:]}"
     assert not r.stderr.strip(), f"the hook wrote to stderr: {r.stderr.strip()[-1500:]}"
     out = r.stdout.strip()
-    return json.loads(out)["hookSpecificOutput"] if out else None
+    if not out:
+        return None
+    said = json.loads(out)
+    # `systemMessage` is read from the TOP LEVEL and from nowhere else, because that is the only place
+    # Claude Code reads it — it is a sibling of hookSpecificOutput in the common fields table. Nine
+    # tests in this file used to read it out of hookSpecificOutput, which is where the hook was putting
+    # it, so all nine passed while every transparency line the tool emitted was being discarded: the
+    # level, the audience, the rewrite count, the checks that could not run. Asserting a value we just
+    # set, from the same wrong place the code set it, proves only that we agree with ourselves.
+    #
+    # Taking it strictly from the top level is what makes those nine tests catch a nesting regression
+    # rather than accept it.
+    return _hook_fields(out)
 
 
 def verdict_on(payload, home, timeout=120):
@@ -3608,7 +3684,7 @@ def test_a_bad_value_in_a_hand_written_file_is_reported_not_ignored():
             r = subprocess.run(["bash", GUARD], input=json.dumps(payload), capture_output=True,
                                text=True, env=env, timeout=120)
             assert r.returncode == 0, r.stderr[-500:]
-            out = json.loads(r.stdout or "{}").get("hookSpecificOutput", {})
+            out = _hook_fields(r.stdout)
             said.append(out.get("systemMessage", ""))
         check("the person is told what is wrong with their own file", "medim" in said[0], True)
         check("and told once", said[1], "")
@@ -4106,7 +4182,7 @@ def test_a_long_document_cannot_spend_the_whole_session_on_its_first_check():
             sys.stdin, checks_module.for_effort = stdin, for_effort
             for key, value in was.items():
                 os.environ.pop(key, None) if value is None else os.environ.update({key: value})
-    said = json.loads(out.getvalue() or "{}").get("hookSpecificOutput", {})
+    said = _hook_fields(out.getvalue())
 
     # Handed the whole budget instead of its share, the first check spends the lot and the second never
     # runs — which is the level's entire purpose, one concern at a time, gone in silence. Asserted as
