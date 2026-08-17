@@ -67,11 +67,49 @@ and anything that has already carried long prose past the guard unclaimed.
 The last list is the one to trust: those already happened. The guard also mentions such a tool by
 itself, once, on about its third use — and only once ever, so nothing here is urgent.
 
+**Then ask whether you may read their past conversations**, because it answers this far better than
+anything above:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/discover.py" --from-transcripts
+```
+
+Ask first, and say exactly what it does: it reads the transcripts under `~/.claude/projects` and
+counts shapes — a tool name and a field name — and never a value from any message. Nothing leaves
+the machine and nothing is written but the count.
+
+It is worth asking because the other four kinds of evidence are all blind in the same place. An MCP
+call never touches a shell, so shell history cannot see one — and it cannot see a command an *agent*
+ran either, because the Bash tool does not write there. On one real machine nothing a whole session
+had run appeared in shell history, while the transcripts held `add_comment_to_pending_review` 49
+times and `slack_send_message` 9. Those are the destinations that matter, and setup was blind to
+every one of them.
+
+If they say no, nothing is lost that was not already lost: carry on with the four lists above.
+
 Then do the part no script can:
 
 - **Name the tools you can actually see.** For each MCP server it listed, say which of your own
   available tools belong to it and which of those send prose to a person. You can see your tool
   list; the script cannot.
+- **Read the tool's parameters and say what the reader already has.** Fetch the schema of any tool
+  you are about to propose and look at its other fields. They describe themselves: `thread_ts` says
+  *"provide another message's ts value to make this message a reply"*, `line` says *"the line of the
+  blob in the pull request diff that the comment applies to"*, `subjectType` is `FILE` or `LINE`.
+  A field like that means the reader is already looking at something, and the checks judge much
+  better when told — without it, "as I said" reads as having no antecedent when the antecedent is
+  three messages up the thread.
+
+  The common ones are already defaults and need nothing from you: a thread reply, a `path` with a
+  `line`, a pull request or issue number, a reply to a comment. Propose a `when` entry only for a
+  field those do not cover, in the destination's own words:
+
+  ```
+  "when": {"parent_page_id": "a comment on a page the reader has open"}
+  ```
+
+  A `when` entry the destination declares replaces the default for that field rather than repeating
+  it, so there is no harm in wording one yourself.
 - **Propose, do not assume.** Show the user a short list of what you would add and what field
   carries the text. Ask before writing.
 - **Say what each addition costs.** Every added destination is more messages checked, at the

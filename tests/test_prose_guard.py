@@ -604,11 +604,19 @@ def test_a_review_comment_is_judged_with_the_code_it_is_attached_to():
             dest = destinations.match(tool, call)
             check("the destination matched", bool(dest), True)
             told = destinations.situation(dest, tool, call)
-            check("the checks are told which file", "Diagnostics.java" in told.get("anchored_to", ""),
+            check("the checks are told which file", "Diagnostics.java" in told.get("situation", ""),
                   True)
-            check("and which line", "129" in told.get("anchored_to", ""), True)
-            check("and what that means for a term the code defines",
-                  "already explained" in told.get("anchored_to", ""), True)
+            check("and which line", "129" in told.get("situation", ""), True)
+            # A fact about where the text sits, and nothing about what to conclude from it. The first
+            # version added "so a term the code there defines is already explained for them, and a
+            # fragment of it needs no gloss", and measured on six real held drafts every complaint
+            # passed on its first run — including three stacked `file:line` citations and a "these two
+            # assertions" that named one. A clause about what needs no gloss reads as a licence to stop
+            # objecting. Every other entry in `situation` is a bare fact; so is this.
+            check("it says where the text sits", "has open beside this" in told.get("situation", ""), True)
+            check("and does not tell the check what to conclude",
+                  any(w in told.get("situation", "").lower()
+                      for w in ("needs no gloss", "already explained", "is explained for")), False)
 
             # A destination that declares nothing still gets it, because destination discovery records
             # the shape of a call and a use count and never the other field names — so setup has nothing
@@ -616,26 +624,117 @@ def test_a_review_comment_is_judged_with_the_code_it_is_attached_to():
             # destinations ever benefited. Every install benefits or the fix is not one.
             del dest["anchored_to"]
             check("a destination that declares nothing still gets it",
-                  "Diagnostics.java" in destinations.situation(dest, tool, call).get("anchored_to", ""),
+                  "Diagnostics.java" in destinations.situation(dest, tool, call).get("situation", ""),
                   True)
             # Inferred narrowly: a path AND a line. A path alone is not an anchor — a file being written
             # is not something its reader is looking at yet — so the review BODY gets nothing.
             body = {k: v for k, v in call.items() if k not in ("path", "line")}
-            check("prose attached to nothing gets nothing",
-                  "anchored_to" in destinations.situation(dest, tool, body), False)
+            check("prose attached to nothing gets no anchor",
+                  "Diagnostics.java" in destinations.situation(dest, tool, body).get("situation", ""),
+                  False)
             # A path with no line is not an anchor by default: a file somebody is writing is not
             # something its reader is looking at yet. A destination where it IS one — a file-level
             # review comment — says `"anchored_to": ["path"]` and gets it.
             whole_file = {k: v for k, v in call.items() if k != "line"}
             check("a path with no line is not an anchor by default",
-                  "anchored_to" in destinations.situation(dest, tool, whole_file), False)
+                  "Diagnostics.java" in destinations.situation(dest, tool, whole_file).get("situation", ""),
+                  False)
             # And it can be turned off outright, which a default has to allow.
             dest["anchored_to"] = []
             check("an empty declaration turns it off",
-                  "anchored_to" in destinations.situation(dest, tool, call), False)
+                  "Diagnostics.java" in destinations.situation(dest, tool, call).get("situation", ""),
+                  False)
         finally:
             os.environ["PROSE_GUARD_HOME"] = was
             importlib.reload(paths_module()); importlib.reload(destinations)
+
+
+def test_everything_true_about_a_call_is_said_not_just_the_last_thing():
+    """A threaded review comment is both a thread reply and pinned to a line.
+
+    `when` assigned `out["situation"]` each time round its loop, so a destination declaring two facts got
+    whichever matched last and nothing said which. The defaults have the same problem available to them,
+    since a review comment carries `path`, `line` AND `pullNumber`.
+    """
+    import destinations
+    with tempfile.TemporaryDirectory() as home:
+        with open(os.path.join(home, "destinations.json"), "w") as fh:
+            json.dump({"destinations": [
+                {"name": "github mcp", "tool": ["add_comment_to_pending_review"],
+                 "text_fields": ["body"], "note": "A review comment.",
+                 "identifiers": {"repo": ["owner", "repo"]}}]}, fh)
+        was = os.environ["PROSE_GUARD_HOME"]
+        os.environ["PROSE_GUARD_HOME"] = home
+        try:
+            importlib.reload(paths_module()); importlib.reload(destinations)
+            tool = "mcp__github__add_comment_to_pending_review"
+            call = {"owner": "finos", "repo": "rune-dsl", "pullNumber": 1299, "line": 129,
+                    "path": "src/Diag.java", "body": "Key this by the injector instead."}
+            dest = destinations.match(tool, call)
+            facts = destinations.what_the_reader_has(dest, call)
+            check("both facts are said", len(facts), 2)
+            check("the line it is pinned to", any("129" in f and "Diag.java" in f for f in facts), True)
+            check("and the pull request it is on", any("#1299" in f for f in facts), True)
+            check("and they reach the checks together",
+                  destinations.situation(dest, tool, call)["situation"].count(";") >= 1, True)
+
+            # A destination that says it in its own words is not corrected by a default saying it again.
+            dest["when"] = {"pullNumber": "a comment on a pull request, in our own words"}
+            facts = destinations.what_the_reader_has(dest, call)
+            check("a destination's own wording wins", any("#1299" in f for f in facts), False)
+            check("and the fact it did not claim is still said",
+                  any("Diag.java" in f for f in facts), True)
+        finally:
+            os.environ["PROSE_GUARD_HOME"] = was
+            importlib.reload(paths_module()); importlib.reload(destinations)
+
+
+def test_the_transcript_scan_keeps_shapes_and_never_content():
+    """Setup could not see which MCP tools send prose, because an MCP call never touches a shell.
+
+    `from_history` answers this for command-line tools by reading shell history. It cannot answer it for
+    MCP ones at all — and worse, it cannot answer it for commands an AGENT ran either: nothing this
+    session ran appears in the machine's shell history, because the Bash tool does not write there. So the
+    tools that matter most to a plugin about what agents send were the ones setup was blind to.
+
+    The contract is `from_history`'s: what comes back is a tool name and a field name. This asserts the
+    part that matters — a message's text, and the values of its fields, never appear in the result.
+    """
+    import discover
+    # Long enough to be checked at all: the floor is 25 words and two sentences, so one repetition of
+    # this is one word short and the scan correctly finds nothing.
+    secret = "Ashcombe Holdings will not renew before the Vasari migration lands in March. "
+    body = secret * 3
+    rows = [
+        {"message": {"content": [{"type": "tool_use", "name": "mcp__chat__post",
+                                 "input": {"text": body, "channel_id": "C0FFEE"}}]}},
+        {"message": {"content": [{"type": "tool_use", "name": "Bash",
+                                 "input": {"command": f'git commit -m "{body}"'}}]}},
+    ]
+    with tempfile.TemporaryDirectory() as fake_home:
+        project = os.path.join(fake_home, ".claude", "projects", "somewhere")
+        os.makedirs(project)
+        with open(os.path.join(project, "a.jsonl"), "w") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
+        was_home, was_pg = os.environ.get("HOME"), os.environ["PROSE_GUARD_HOME"]
+        os.environ["HOME"] = fake_home
+        try:
+            import host
+            importlib.reload(host); importlib.reload(discover)
+            found = discover.from_transcripts()
+        finally:
+            if was_home is not None:
+                os.environ["HOME"] = was_home
+            os.environ["PROSE_GUARD_HOME"] = was_pg
+            importlib.reload(host); importlib.reload(discover)
+
+    shapes = sorted(found)
+    check("the MCP tool and its field are counted", "tool: mcp__chat__post [text]" in shapes, True)
+    check("and so is the command", "bash: git commit -m" in shapes, True)
+    everything = " ".join(shapes) + " " + " ".join(str(v) for v in found.values())
+    check("no word of the message is kept", "Ashcombe" in everything or "Vasari" in everything, False)
+    check("nor the value of any other field", "C0FFEE" in everything, False)
 
 
 def teardown_function(_fn):
