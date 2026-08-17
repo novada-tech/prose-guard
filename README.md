@@ -2,9 +2,12 @@
 
 A Claude Code plugin that reads what Claude is about to send — a chat message, a review comment, a
 commit message, a pull request description, a document — and asks whether the person receiving it could
-act on it. Where the answer is objectively no, such as an acronym those readers have never used or a
-word typed twice, it holds the message back and names the problem, so Claude fixes the draft before
-anybody sees it. On everything softer than that it says what it found and lets the message go.
+act on it. Most of what it finds it says and lets through. What it can settle objectively it holds the
+message back for, naming the one problem, so Claude fixes the draft before anybody sees it.
+
+Out of the box, that means a word typed twice. Spend a few minutes telling it who reads a given channel
+and it also means an acronym those particular readers have never used. Run it at `high` and the
+judgement calls can hold a message too.
 
 Two questions decide everything below: **who is going to read this**, and **why should they care**.
 
@@ -19,12 +22,12 @@ Two questions decide everything below: **who is going to read this**, and **why 
 If the install summary says `Run /reload-plugins to activate`, run that first — otherwise the hooks are
 not loaded yet and `/prose-guard:setup` has nothing to configure.
 
-**`/prose-guard:setup` is not optional**: nothing runs until a level is chosen and this is where you
-choose one. It takes a few minutes, asks one question at a time, and does three things.
+**Run `/prose-guard:setup` before anything else.** Nothing is checked until a level is chosen, and this
+is where you choose one. It takes a few minutes, asks one question at a time, and does three things.
 
 - Asks how much checking you want, with what each level costs. **Pick `medium`.**
-- Offers to install the writing rule: 250 words that reach Claude while a message is being written
-  rather than when it is sent, and the only part of this that costs nothing per message.
+- Offers to install the writing rule: 250 words that reach Claude while a message is being written,
+  rather than when it is sent. It is the only part of this that costs nothing per message.
 - Reads what is on your machine and proposes which of your tools count as sending prose, rather than
   assuming. Chat, issue trackers and vendor command-line tools go in here.
 
@@ -37,9 +40,8 @@ Then, when you have a few more minutes:
 /prose-guard:audiences
 ```
 
-Optional, and it is what turns advice into enforcement. Until an audience is measured, prose-guard knows
-what developers in general know and nothing about the people you write to, so an unexplained term is
-reported as a guess and nothing is held back.
+Optional, and it is the step that lets an unexplained acronym hold a message back rather than merely be
+mentioned. What it builds and why counting works is [below](#how-it-knows-who-is-reading).
 
 Needs `python3` and nothing else — no packages, no virtualenv, no API key beyond the one Claude Code
 already has. Nothing leaves your machine.
@@ -118,14 +120,15 @@ prose-guard · high · platform-team · 2 rewrites, 1 note · 7 calls · /prose-
 prose-guard · low · no audience · 1 note
 ```
 
-The fields never move: the level that ran, who it was judged for, what came of it, what it cost, and
-where to read the argument back when there was one. **When no such line appears, nothing was checked** —
-that is the only thing its absence can mean, and it is how a gap becomes visible without reading a
-transcript.
+The fields never move: the level that ran, who it was judged for, what came of it, and what it cost.
+`no audience` in the third field is what a new install shows, until you have measured one.
 
-**`no audience`** is what a new install shows in the third position. It means nothing could be held back
-on terms, because your reader was assumed rather than measured. `/prose-guard:audiences` is what changes
-it.
+**When no such line appears, nothing was checked** — that is the only thing its absence can mean, and it
+is how a gap becomes visible without reading a transcript.
+
+A message that was argued with names `/prose-guard:feedback` at the end. That skill replays the drafts:
+what each was held back for, and what finally went out. A held message is otherwise an exchange nobody
+sees, so a fair complaint and an unfair one look identical afterwards.
 
 ## Which level
 
