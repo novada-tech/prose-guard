@@ -1,29 +1,23 @@
 #!/usr/bin/env python3
 """Say, at the start of a session, that this install is checking nothing — while that is still true.
 
-An install where nobody has chosen a level runs no checks, and a tool that runs no checks looks
-exactly like a tool with nothing to object to. That is the failure this repository cares about most
-(CLAUDE.md), and until now the only thing that said so was a notice in `guard-outgoing-prose.sh`,
-printed on the first guarded tool call and once ever. Three things were wrong with it, and the third
-is the one nobody would have reported:
+An install where nobody has chosen a level runs no checks, and a tool that runs no checks looks exactly
+like a tool with nothing to object to. That is the failure this repository cares about most (CLAUDE.md),
+and three things decide whether anybody hears about it.
 
-    it arrived mid-work            on whatever tool call happened to come first, not at a point
-                                   anybody was thinking about their writing setup
-    it needed a message            somebody who installs this and does not commit that day never
-                                   saw it at all
-    a config.json turned it off    the notice required that file to be ABSENT, and `share_dir.py`
-                                   and `audiences.py` both create one with no `effort` key. So
-                                   running /prose-guard:audiences before /prose-guard:setup
-                                   suppressed it for good, with the guard checking nothing
+**When.** At the start of a session, not on the first guarded tool call. A notice that arrives mid-work
+lands on whoever happens to be editing, and one that waits for a message never reaches somebody who does
+not send one that day.
 
-Here instead, keyed on whether a level was ever CHOSEN rather than on whether a file exists, and said
-every session until one is. Repeating it is deliberate and it is the lesser failure: `disabled` is a
-level, so anybody who wants this quiet has a one-word way to make it quiet, and the message says so.
-Going quiet on its own is what the old notice did, and that is how an install ends up off and looking
-on.
+**On what test.** Whether a level was ever CHOSEN, never whether `config.json` exists. `share_dir.py`
+and `audiences.py` both create that file with no `effort` key, so the file is not evidence of a choice.
 
-Nothing here can fail loudly. A SessionStart hook cannot block a session, and this one prints nothing
-it is not certain of.
+**How often.** Every session until a level exists. `disabled` is a level, so anybody who wants this
+quiet has a one-word way to get it, and the message says so — which is what makes repeating the lesser
+failure. A notice that goes quiet by itself leaves an install that is off and looks on.
+
+Nothing here can fail loudly. A SessionStart hook cannot block a session, and this one prints nothing it
+is not certain of.
 """
 from __future__ import annotations
 

@@ -12,11 +12,9 @@ set -u
 # from the one the setup skill wrote, which is silent and looks like the tool not working.
 CFG_HOME="${PROSE_GUARD_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/prose-guard}"
 if [ -z "${PROSE_GUARD_EFFORT:-}" ]; then
-  # Nothing to run, and nothing to say about that here. Saying it is the SessionStart hook's job:
-  # hooks/scripts/session_start.py records why it moved, and the short version is that this test —
-  # "is there a config.json" — is not the same question as "has anybody chosen a level". Registering
-  # a team's shared audiences writes a config.json with no effort key, which used to silence the
-  # notice permanently while the guard checked nothing.
+  # Nothing to run, and nothing to say about that here: saying it is the SessionStart hook's job. This
+  # test — "is there a config.json" — is not the same question as "has anybody chosen a level", because
+  # registering a team's shared audiences writes that file with no effort key in it.
   [ -f "$CFG_HOME/config.json" ] || exit 0
   # A level set to something that is not a level has to reach the Python, which says so where the person
   # can see it. Exiting here on anything but a known level made a typo indistinguishable from "off".

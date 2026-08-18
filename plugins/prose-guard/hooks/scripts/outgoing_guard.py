@@ -235,8 +235,8 @@ def one_message(found: list[Finding], mine: Callable[[Finding], bool],
 
     The second half of the return exists because a caller that remembers what it has already said must
     remember only what was SHOWN. Marking a finding as said and then dropping it for budget suppresses
-    it having never been read once — the mistake `telling.py` names in its own docstring, and the one
-    that is easy to make here because the findings this drops are exactly the ones worth remembering.
+    it having never been read once — the mistake `telling.py` names in its own docstring, and an easy one
+    to make here, because the findings this drops are exactly the ones a caller wants to remember.
     """
     ordered = [f for f in found if mine(f)] + [f for f in found if not mine(f)]
     lines: list[str] = []
@@ -261,11 +261,11 @@ def one_message(found: list[Finding], mine: Callable[[Finding], bool],
 def repeated(finding: Finding) -> str:
     """What a finding is remembered under, once it has been said about text the call did not write.
 
-    Its own words, not the digest of the document it was found in. Keyed on the digest — which is what
-    `advised` uses, and rightly, for a finding about the text being sent — the same complaint about the
-    same untouched paragraph came back on every edit, because every edit changes the digest. Five edits
-    to one README repeated four such notes five times, at a model call apiece, and none of them was
-    something the edit in hand could act on.
+    Its own words, and not the digest of the document it was found in. A digest is the right key for a
+    complaint about the text being sent — an unchanged resend earns it again — and the wrong one here,
+    because every edit changes the digest while the untouched paragraph stays exactly as it was. Keyed
+    that way, rewriting one document repeats the same notes on every edit of it, at a model call apiece,
+    and none of them is something the edit in hand can act on.
     """
     return "already said: " + hashlib.sha1(finding.message.encode()).hexdigest()[:12]
 
@@ -327,14 +327,13 @@ def reader(audience: Resolved | None) -> str:
     Whether the audience matched is not a detail. One that did was measured from what those people have
     actually written, and it can hold a message back. One that did not cannot — findings become advice,
     because blocking on a guess spends somebody's first day arguing about their own house vocabulary.
-    Somebody watching a message go out unchallenged deserves to know which of those they are looking at,
-    and it used to be invisible.
+    Somebody watching a message go out unchallenged deserves to know which of those they are looking at.
 
-    Which baseline the guess is against is deliberately not here. It read `no audience for this —
-    guessing against engineers`, which is 44 characters of a line that appears on every message a person
-    sends, behind a `PreToolUse:<tool> says:` prefix Claude Code adds and nothing here can shorten. The
-    fact worth carrying is that the reader is assumed rather than measured; which assumption it was is a
-    question somebody asks once, and `/prose-guard:audiences` answers it.
+    Which baseline a guess is against is deliberately not here. Naming it costs 44 characters of a line
+    that appears on every message a person sends, behind a `PreToolUse:<tool> says:` prefix Claude Code
+    adds and nothing here can shorten. The fact worth carrying is that the reader is assumed rather than
+    measured; which assumption it was is a question somebody asks once, and `/prose-guard:audiences`
+    answers it.
     """
     if audience is not None and audience.resolved and audience.names:
         return " + ".join(audience.names)
@@ -428,10 +427,10 @@ def tally(level: str, rewrites: int, notes: int, calls: int,
 
     Fields separated rather than a sentence, and that is about where it lands. Claude Code prints it as
     `PreToolUse:<tool> says: <this>`, and a tool name like
-    `mcp__github__add_comment_to_pending_review` has already spent the width before this gets a word in.
-    A sentence read after that prefix parses as a second clause of somebody else's sentence; four fields
-    in a fixed order read as a status line, which is what it is — the same shape every time, on every
-    message, so an unexpected value is the thing the eye catches rather than something to read for.
+    `mcp__github__add_comment_to_pending_review` spends the width before this gets a word in. A sentence
+    read after that prefix parses as a second clause of somebody else's; four fields in a fixed order
+    read as a status line, which is what it is — the same shape every time, on every message, so an
+    unexpected value is what the eye catches rather than something to read for.
     """
     said = []
     if rewrites:

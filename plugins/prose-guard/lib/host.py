@@ -15,10 +15,8 @@ What is NOT here, deliberately: `${CLAUDE_PLUGIN_ROOT}`, which a skill expands f
 Python ever needs, and `CLAUDE_PLUGIN_DATA`, whose story is in paths.py — it reaches a hook and not a
 skill, so resolving state through it split the config in two.
 
-`CLAUDE_PLUGIN_OPTION_EFFORT` used to be here as well, set by Claude Code from a `userConfig` field in
-plugin.json. That field is gone: it made Claude Code ask for a level in a dialog at install, as free
-text, and `userConfig` has no enumerated type — so there was no picker and no way to mark the answer
-the measurements support. `checks/config.py` records the rest of that.
+`CLAUDE_PLUGIN_OPTION_EFFORT` belongs to a `userConfig` field this plugin deliberately does not declare;
+`checks/config.py` says why.
 """
 from __future__ import annotations
 

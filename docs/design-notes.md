@@ -276,6 +276,27 @@ and the budget cannot bind at `low`, where mechanics and terms each return one s
 needs model calls, so this is pinned by `one_message`'s own contract — it reports the findings it
 carried — and not end to end.
 
+## The level is not a plugin setting
+
+A plugin can declare a `userConfig` field, and Claude Code then asks for its value in a dialog when the
+plugin is enabled. That is the obvious home for the effort level and it is not used, for two reasons that
+only show up once you try it.
+
+`userConfig` has no enumerated type — `string`, `number`, `boolean`, `directory` and `file` are the whole
+list — so the dialog is a free-text box. There is no picker, and no way to mark `medium` as the answer
+the measurements support. What reaches the user is a question with four valid answers, none of them
+recommended, asked before anything has told them that `low` is not the cheap option and `high` is not
+measurably better.
+
+It also arrives at the worst moment: the dialog opens on install, which is the one point at which nobody
+has read anything about the tool yet.
+
+The second reason is that it is a second home for one fact. The value lands in
+`~/.claude/settings.json`, and `config.json` holds the same setting, and the two can disagree about
+whether the guard is on at all.
+
+`/prose-guard:setup` asks the same question with the cost table beside it, and writes one file.
+
 ## One config directory, not two
 
 The hook and the skills were reading different files. The per-plugin data directory reaches a hook's

@@ -155,6 +155,5 @@ End by telling them, in this order, and in one short paragraph rather than a che
 - **The one thing left.** `/prose-guard:audiences` if they skipped it, or a new session if they took the
   rule. Not both, and not a list of everything they could do.
 
-Do not tell them to restart Claude Code. That was true of an older version of this plugin and is not
-true now: an install is active as soon as Claude Code says `Plugin is now active`, and `/reload-plugins`
-covers the case where it says otherwise.
+Do not tell them to restart Claude Code. An install is active as soon as Claude Code says `Plugin is now
+active`, and `/reload-plugins` covers the case where it says otherwise.

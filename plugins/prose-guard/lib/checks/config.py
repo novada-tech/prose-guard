@@ -38,13 +38,9 @@ _LEVEL = settings.one_of(*LEVELS)
 
 def _sources() -> tuple[tuple[str, str | None], ...]:
     """Where a level may be set, nearest first, each with a name for saying which one is wrong."""
-    # A third source used to sit between these two: `CLAUDE_PLUGIN_OPTION_EFFORT`, which Claude Code
-    # set from a `userConfig` field in plugin.json. Declaring that field made Claude Code ask for a
-    # level in a dialog at install — a free-text box, because `userConfig`'s types are string, number,
-    # boolean, directory and file with no enumerated type among them, so there was no picker and no way
-    # to mark the answer the measurements support. Asking somebody to type a level before they have
-    # been told what one costs is a worse first minute than asking nothing at all, and it left the same
-    # choice recorded in two places that could disagree. The field is gone and so is the source.
+    # Deliberately not a `userConfig` field in plugin.json. That would make Claude Code ask for a level
+    # in a dialog at install, as free text — `userConfig` has no enumerated type — and record the answer
+    # somewhere config.json could disagree with. docs/design-notes.md carries the rest.
     return (("PROSE_GUARD_EFFORT", os.environ.get("PROSE_GUARD_EFFORT")),
             ("config.json", paths.config().get("effort")))
 

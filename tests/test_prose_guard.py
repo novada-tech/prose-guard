@@ -2149,12 +2149,11 @@ def test_levels():
         check("and the environment beats it", config.effort(), "low")
         del os.environ["PROSE_GUARD_EFFORT"]
 
-        # A third source used to sit between them, set by Claude Code from a `userConfig` field in
-        # plugin.json. That field made Claude Code ask for a level in a free-text dialog at install,
-        # before anybody had been told what a level costs, and recorded the same choice in a second
-        # place that could disagree with the first. Both are gone, and the variable is now nothing.
+        # The variable Claude Code sets from a plugin's `userConfig` is not a source here, because this
+        # plugin declares no such field: a free-text dialog at install asks for a level before anybody
+        # has been told what one costs, and records it where config.json can disagree with it.
         os.environ["CLAUDE_PLUGIN_OPTION_EFFORT"] = "medium"
-        check("and the plugin's own option is no longer one of them", config.effort(), "high")
+        check("and the plugin's own option is not one of them", config.effort(), "high")
         del os.environ["CLAUDE_PLUGIN_OPTION_EFFORT"]
     del os.environ["PROSE_GUARD_HOME"]
     importlib.reload(paths)
@@ -3012,18 +3011,17 @@ def test_an_edit_is_not_refused_over_a_defect_it_did_not_touch():
 
 
 def test_a_complaint_about_untouched_text_is_said_once_a_session():
-    """Rewriting one document is many edits, and the notes about the rest of it used to repeat on all
+    """Rewriting one document is many edits, and the notes about the rest of it must not repeat on all
     of them.
 
-    A finding about text the call did not write is remembered under the digest of the text it was found
-    in, the same key a finding about the edit itself uses. That is right for the second and wrong for
-    the first: every edit changes the digest, so the same complaint about the same untouched paragraph
-    came back every time. Five edits to one README repeated four such notes five times, at a model call
-    apiece, and none of them was something the edit in hand could act on.
+    A finding about text the call did not write is remembered by its own words. Remembered by the digest
+    of the document instead — the right key for a finding about the text being sent — the same complaint
+    about the same untouched paragraph comes back on every edit, because every edit changes the digest,
+    at a model call apiece and with nothing the edit in hand can do about it.
 
-    The session is the same across both edits here, which is what the test turns on — and what
-    `test_an_edit_is_not_refused_over_a_defect_it_did_not_touch` does not exercise, because it takes a
-    fresh session per edit and so could never have seen this.
+    The session is the same across both edits here, which is what the test turns on, and what
+    `test_an_edit_is_not_refused_over_a_defect_it_did_not_touch` cannot exercise: it takes a fresh
+    session per edit.
     """
     with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as repo:
         home = os.path.join(tmp, "home")
