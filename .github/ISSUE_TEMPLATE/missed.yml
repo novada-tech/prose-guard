@@ -1,0 +1,63 @@
+name: It let through a message a reader could not act on
+description: The guard checked something and had nothing to say, and it should have.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Worth as much as a false alarm and harder to notice, because a check that has stopped working
+        looks exactly like a check with nothing to say.
+
+        First rule out the two things that are configuration rather than a defect. If no line reading
+        `prose-guard · ...` appeared at all, nothing was checked, and the question is which destination
+        the text was going to. If the line said `no audience`, nothing could be held back on terms —
+        `/prose-guard:audiences` is the fix.
+
+        **This repository is public and the text below will be published.** Reduce it first if the real
+        message cannot be; `/prose-guard:contribute` does that with you.
+
+  - type: textarea
+    id: text
+    attributes:
+      label: The text that went out
+      description: Publishable. Under 25 words nothing is checked at all, so a shorter sample proves nothing either way.
+      render: markdown
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: publishable
+    attributes:
+      label: Before you file
+      options:
+        - label: This text can be published. It carries no customer or colleague's words, no internal identifiers, and no measured vocabulary.
+          required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What a reader could not do with it
+      description: Name the reader and what they were left unable to act on. That is the defect; "it reads badly" is not reproducible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How you ran it, and how often it passed
+      description: These checks disagree with themselves between runs, so one clean run is not a result. Say how many times you ran it and how many of those passed.
+      value: |
+        python3 lib/check_prose.py sample.md --for engineers --effort high
+
+        Passed in N of M runs.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The `version` field of `.claude-plugin/plugin.json` in the plugin directory you have installed.
+    validations:
+      required: true
