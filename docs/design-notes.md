@@ -117,8 +117,28 @@ lower bar, so `measure_gate.py` asked it against real held drafts and the well-b
     recall     4/8 of drafts the specific checks held were flagged
     precision  10/11 well-built fixtures passed cleanly
 
-Precision is fine and recall is half. A cascade on that gate would let four of eight faulty messages
-through unchecked to save five calls, which is a cheaper way to miss things.
+Recall is half. And the precision figure is measured against eleven fixtures, which cannot carry a rate,
+so it was measured again against **42 review comments that the six specific checks approved** — same genre,
+real messages, known to have passed:
+
+    36 of 42 passed the cheap question.  It objects to 14% of messages the expensive checks approved.
+
+That settles two proposals at once. A **cascade** on this gate lets four of eight faulty messages through
+to save five calls, which is a cheaper way to miss things. **Blocking once on it** — one guaranteed
+interruption for one call — would hold roughly one good message in seven, and a held turn is the most
+expensive thing this tool does: a review session posting forty comments would be interrupted about six
+times for nothing. `high`'s blocking checks pass 9 or 10 of 10 well-built messages by comparison, and now
+cost 12 seconds of wall clock rather than 34.
+
+Two false starts on the way to that number, both the same mistake, and worth more than the number:
+
+- the first clean set was 11 well-built fixtures — too few to carry a rate at all;
+- the second was 17 of this repository's own commit messages, of which only 6 passed. That reads as a 65%
+  false-alarm rate and is measuring the wrong genre: the shipped commit-message destination caps at `low`
+  precisely *because* the judgement questions do not apply to a commit message, which has neither an
+  addressee nor an ask. Measuring a check against prose it is not meant for produces a confident number
+  about nothing — the same error as comparing held code-review comments against well-built Slack messages
+  and discovering "backticked spans".
 
 **So the cost of finding a fault is the cost of asking about it**, and effort cannot be saved by checking
 fewer messages or by checking them more cheaply first. What is left is choosing which messages deserve the

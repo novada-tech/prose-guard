@@ -47,8 +47,13 @@ def gate() -> object:
     return next(c for c in checks.for_effort("medium") if c.NAME == "judgement")
 
 
-def negatives() -> list[tuple[str, str]]:
+def negatives(extra: list[str] | None = None) -> list[tuple[str, str]]:
     out = []
+    for path in (extra or []):
+        with open(path) as fh:
+            out.append((os.path.basename(path), fh.read()))
+    if extra:
+        return out
     for where in ("well-built", "well-built-long"):
         for path in sorted(glob.glob(os.path.join(HERE, "fixtures", where, "*.md"))):
             if os.path.basename(path) == "README.md":
@@ -62,6 +67,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--held", metavar="FILE", help="positives: what held_drafts.py wrote")
     ap.add_argument("--reps", type=int, default=2, help="how many times to ask each text")
+    ap.add_argument("--negatives", nargs="*", metavar="FILE",
+                    help="clean prose it must pass, instead of the built-in fixtures. Eleven fixtures "
+                         "cannot carry a false-block rate; real prose that shipped can.")
     a = ap.parse_args()
 
     check = gate()
@@ -72,7 +80,7 @@ def main() -> None:
             for n, item in enumerate(json.load(fh), 1):
                 if item.get("body"):
                     jobs.append(("positive", f"held {n}", item["body"]))
-    for name, text in negatives():
+    for name, text in negatives(a.negatives):
         jobs.append(("negative", name, text))
 
     def ask(job):
