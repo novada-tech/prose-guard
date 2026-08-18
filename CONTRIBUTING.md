@@ -30,17 +30,19 @@ python3 tests/test_prose_guard.py
 python3 tests/test_docs_match_code.py
 ```
 
-Standard library only, no setup, about fifteen seconds, and no model calls — continuous integration
-runs both on every pull request, on Linux and macOS, and proves the second point by removing `claude`
-from `PATH`. The measurement harnesses under `measure/` are deliberately not in CI: they spend real
-tokens, so they stay something you run deliberately and report here.
+Standard library only, no setup, about fifteen seconds, and no model calls. Continuous integration runs
+both on every pull request, on Linux and macOS, and proves they need no model by removing `claude` from
+`PATH`.
+
+The harnesses under `measure/` are deliberately not in CI. They spend real tokens, so they stay
+something you run deliberately and report here.
 
 The second suite reads every SKILL.md, finds the commands it tells someone to run, and checks each
-against the real interface — a skill documented
-`--audience` for a script that takes `--for`, and the person who hit it lost time before anything else
-could go wrong. Every case pins a design decision, so a failure
-usually means you changed a decision rather than broke an implementation — say which in the pull
-request.
+against the real interface. It exists because a skill documented `--audience` for a script that takes
+`--for`, and the person who hit it lost time before anything else could go wrong.
+
+Every case pins a design decision, so a failure usually means you changed a decision rather than broke
+an implementation. Say which in the pull request.
 
 ### 2. Break your own test before you trust it
 
