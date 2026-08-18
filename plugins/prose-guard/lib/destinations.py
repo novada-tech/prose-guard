@@ -560,6 +560,26 @@ def switch(name: str, on: bool) -> str | None:
     return _save_user(data)
 
 
+def _runs_at(entry: Dest) -> str:
+    """The level this destination really runs at, and where that came from.
+
+    Three things decide it and only one of them was ever shown: the level you set, what the destination
+    says it is worth (`max_effort`, from whoever wrote it), and your own `worth` override. Naming which one
+    won is the difference between a person seeing the dial and not knowing there is one.
+    """
+    level = config.effort()
+    mine = (paths.config().get("worth") or {}).get(entry.get("name", ""))
+    asked = mine or entry.get("max_effort")
+    runs = config.capped(level, asked)
+    if runs == "disabled":
+        return "not checked"
+    if mine and runs == mine:
+        return f"runs at {runs} (you said so)"
+    if asked and runs == asked:
+        return f"runs at {runs} (the destination caps it)"
+    return f"runs at {runs} (your level)"
+
+
 def worth(name: str, level: str) -> str:
     """How hard to check one destination. Written into your config, not into the destination.
 
@@ -761,7 +781,10 @@ def _cli() -> None:
         seen = {}
         for entry in DESTINATIONS:
             caps = " ".join(filter(None, [
-                f"effort<={entry['max_effort']}" if entry.get("max_effort") else "",
+                # What this destination will ACTUALLY run at, not just what caps it. A reader asking
+                # "what does this cost me" was answered only by absence: a destination with nothing set
+                # printed nothing, so the level doing the work was invisible and 8 of 9 stayed unset.
+                _runs_at(entry),
                 f"severity<={entry['max_severity']}" if entry.get("max_severity") else ""]))
             lowered = str(entry.get("name", "")).lower()
             mark = f"  (shadowed by the {seen[lowered]} one)" if lowered in seen else ""

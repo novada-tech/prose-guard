@@ -786,6 +786,29 @@ def test_what_a_destination_is_worth_is_your_policy_not_its_identity():
                       "prose-guard low" in line, True)
                 check("and not the level you set globally", "prose-guard high" in line, False)
 
+            # `list` says what each destination will actually run at, and which of the three things
+            # decided it. Absence was the only signal before: a destination with nothing set printed
+            # nothing about effort, so the level doing the work was invisible — which is how 8 of 9
+            # stayed unset. The row is what setup now walks through.
+            listed = subprocess.run([sys.executable, os.path.join(LIB, "destinations.py"), "list"],
+                                    capture_output=True, text=True,
+                                    env={**os.environ, "PROSE_GUARD_HOME": home,
+                                         "PROSE_GUARD_EFFORT": "high"}, timeout=60).stdout
+            check("a destination you decided about says so",
+                  "runs at low (you said so)" in listed, True)
+            # The cap case needs a home where nobody overrode it — in this one the commit message was
+            # set to `high` a few lines up, so it correctly reports "(you said so)" instead.
+            with tempfile.TemporaryDirectory() as untouched:
+                fresh_list = subprocess.run(
+                    [sys.executable, os.path.join(LIB, "destinations.py"), "list"],
+                    capture_output=True, text=True,
+                    env={**os.environ, "PROSE_GUARD_HOME": untouched, "PROSE_GUARD_EFFORT": "high"},
+                    timeout=60).stdout
+            check("one the destination caps says that instead",
+                  "(the destination caps it)" in fresh_list, True)
+            check("and one nobody decided says it is only getting your level",
+                  "(your level)" in listed, True)
+
             # A name nothing matches is refused rather than written, or a typo becomes a setting that
             # never applies and never says so.
             try:

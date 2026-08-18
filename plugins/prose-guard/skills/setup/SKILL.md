@@ -132,6 +132,31 @@ Then do the part no script can:
   This is worth pressing on, because the dial existed before and nobody moved it: on one real machine 8
   of 9 destinations left it unset, so every message got the same budget whatever it was worth. The level
   they set caps whatever they say here, so there is no way for this to cost more than they agreed to.
+
+## 5. Say what the destinations they already have will cost
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/lib/destinations.py" list
+```
+
+Every row now ends in what that destination will actually run at and why — `runs at high (your level)`,
+`runs at low (the destination caps it)`, `runs at medium (you said so)`.
+
+**Go through the ones that say `(your level)`.** Those are the destinations nobody has decided about: they
+are getting the level by default rather than because it fits. This step exists because the previous one
+only covers destinations being added, and most destinations arrive some other way — the shipped set, a
+directory their team keeps, a colleague's pull request. On the machine this was written on, all six of the
+team's destinations arrived shared and none of them had ever been considered.
+
+Two questions per row, and the second is the one people have an opinion about:
+
+- Does this reach a person who will act on it? If not, `worth <name> disabled` and it costs nothing.
+- Is it worth more or less than the rest? A wide announcement is worth more; a bot channel or a scratch
+  file is worth less.
+
+Take `no` for an answer and move on — a destination left at the level is not broken, it is just
+undecided. What is worth avoiding is leaving them undecided *silently*, which is what happened before this
+step existed.
 - **Ask the two questions that decide how hard it is checked.** Adding a destination is not one
   decision but three, and these two are the ones you cannot work out for them:
 
@@ -188,13 +213,13 @@ tool call does not contain, so nothing was checked — and passing silently read
 passed. That is held back now, naming `--body-file`, which is read. Write long bodies to a file and pass
 them that way and it never comes up.
 
-## 5. Offer audiences, and be honest about what it buys
+## 6. Offer audiences, and be honest about what it buys
 
 Until an audience is measured, the tool knows what developers in general know and nothing about the
 people they write to, so it reports unexplained terms as a guess and does not block. Point at
 `/prose-guard:audiences`. Optional, a few minutes, and it is what turns advice into enforcement.
 
-## 6. Say what is running now, and what is next
+## 7. Say what is running now, and what is next
 
 The level is live from the moment it is written — the hook reads it on every call, so nothing has to be
 reloaded for it. The rule is different: `~/.claude/rules/` is read at session start, so a rule installed
