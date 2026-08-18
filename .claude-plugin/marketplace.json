@@ -9,7 +9,7 @@
     {
       "name": "prose-guard",
       "source": "./plugins/prose-guard",
-      "version": "1.7.0",
+      "version": "1.8.0",
       "description": "Checks a chat message, review comment, commit message, pull request description or document on its way out, for effective communication with its target audience: who will read this, and why should they care?",
       "author": {
         "name": "Simon Cockx"

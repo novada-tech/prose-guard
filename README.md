@@ -48,16 +48,18 @@ already has. Nothing leaves your machine.
 
 ## Why
 
-Agents write review comments nobody can digest: technically right, three clauses deep, and impossible
-to act on. Slack messages carrying six bolded section labels over four lines of content. A paragraph
-announcing that a deploy is fixed which never says what anybody now has to run.
+You have read a review comment from an agent that nobody could digest: technically right, three
+clauses deep, and impossible to act on. You have seen a Slack message with six bolded section labels
+over four lines of content. You have been told a deploy is fixed in a paragraph that never says what
+you now have to run.
 
 Nothing about those messages is badly written. They fail because they were not written for anybody in
 particular.
 
 ## What it checks
 
-Eight checks follow from those two questions, and they are what actually runs. Two are arithmetic — no
+Eight checks follow from **who is going to read this** and **why should they care**, and they are what
+actually runs. Two are arithmetic — no
 model call, and they run at every level. Six are judgement.
 
 | | | |

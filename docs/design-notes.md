@@ -297,6 +297,39 @@ whether the guard is on at all.
 
 `/prose-guard:setup` asks the same question with the cost table beside it, and writes one file.
 
+## Generic "you" is not the second person the address check is for
+
+`address` failed a README opening — "You have read a review comment from an agent that nobody could
+digest" — in three runs of three, and at `high` that holds the message back. Nothing was wrong with it.
+
+The check exists for a "you" only one person in the audience can answer to: a pull request body saying
+"the two files worth your review", an announcement saying "your comment was right". Most readers are not
+that person and cannot tell whether it means them. A "you" addressed to every reader alike names nobody
+in particular, so nobody is left wondering — and the same README says "you give it an audience" and
+"nothing leaves your machine" a dozen times without the check minding at all. What it was reacting to
+was an experience attributed to the readership, which is a figure of speech.
+
+The clause now says which of the two it means and gives the non-example. Both arms measured in one
+session, `claude-sonnet-5` at medium effort, `--check address --reps 2`:
+
+| | catches | passes real prose | disagrees with itself |
+|---|---|---|---|
+| unchanged | 5/8 | 9/10 | 22% |
+| narrowed | 6/8 | 10/10 | 0% |
+
+Better in all three columns, and the direction that matters most is the middle one: the unchanged prompt
+false-alarmed on `release-note.md` for "it changes one thing you have to act on", which is the same
+mistake on prose already judged well built.
+
+Two positives still get past, both of them "restates what the destination shows", which is clause (d)
+and was missed by the unchanged prompt as well.
+
+A first attempt is recorded here because it failed and the failure is the useful part. It added a
+paragraph ending "PASS all of it", which scored 3/8 and 44% — worse than doing nothing, and it stopped
+catching positives under clauses it had not touched. A permissive block in a prompt whose shape is
+"FAILS only if you can point to one of these" does not narrow one clause, it lowers the whole bar. The
+change that worked went inside the clause it was about and added six words of non-example.
+
 ## One config directory, not two
 
 The hook and the skills were reading different files. The per-plugin data directory reaches a hook's
