@@ -9,7 +9,7 @@
     {
       "name": "prose-guard",
       "source": "./plugins/prose-guard",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "description": "Checks a chat message, review comment, commit message, pull request description or document on its way out — for jargon its readers have never used, and for whether they could act on it — and names one problem at a time.",
       "author": {
         "name": "Simon Cockx"

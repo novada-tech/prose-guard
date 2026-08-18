@@ -225,15 +225,23 @@ def emit(decision: str, message: str, hint: str = "", for_user: str = "") -> Non
 MOST_TO_SAY = 3000
 
 
-def one_message(found: list[Finding], mine: Callable[[Finding], bool], budget: int) -> str:
-    """Everything worth saying about one check's findings, within what is left of the turn's budget.
+def one_message(found: list[Finding], mine: Callable[[Finding], bool],
+                budget: int) -> tuple[str, list[Finding]]:
+    """Everything worth saying about one check's findings, and which of them actually got said.
 
     What this call wrote comes first, whatever order the runs found things in: those are the ones the
     agent can act on now, and they are the only ones that can hold the message back. So a budget that
     runs out drops the least actionable findings, not an arbitrary tail.
+
+    The second half of the return exists because a caller that remembers what it has already said must
+    remember only what was SHOWN. Marking a finding as said and then dropping it for budget suppresses
+    it having never been read once — the mistake `telling.py` names in its own docstring, and the one
+    that is easy to make here because the findings this drops are exactly the ones worth remembering.
     """
     ordered = [f for f in found if mine(f)] + [f for f in found if not mine(f)]
-    lines, dropped = [], 0
+    lines: list[str] = []
+    shown: list[Finding] = []
+    dropped = 0
     for f in ordered:
         line = f.message + ("" if mine(f) else "  (already in the file)")
         # `lines and` is a floor of one, deliberately: a check that found something always gets to say
@@ -243,10 +251,23 @@ def one_message(found: list[Finding], mine: Callable[[Finding], bool], budget: i
             dropped += 1
             continue
         lines.append(line)
+        shown.append(f)
     if dropped:
         lines.append(f"({dropped} more, about text this call did not write. "
                      f"`python3 lib/check_prose.py <file>` shows them.)")
-    return "\n".join(lines)
+    return "\n".join(lines), shown
+
+
+def repeated(finding: Finding) -> str:
+    """What a finding is remembered under, once it has been said about text the call did not write.
+
+    Its own words, not the digest of the document it was found in. Keyed on the digest — which is what
+    `advised` uses, and rightly, for a finding about the text being sent — the same complaint about the
+    same untouched paragraph came back on every edit, because every edit changes the digest. Five edits
+    to one README repeated four such notes five times, at a model call apiece, and none of them was
+    something the edit in hand could act on.
+    """
+    return "already said: " + hashlib.sha1(finding.message.encode()).hexdigest()[:12]
 
 
 def say(finding: Finding, check: Check, state: dict[str, Any], path: str, digest: str,
@@ -381,7 +402,7 @@ def other_concerns(running: list[Check], answers: dict[str, tuple], blocking: st
         found = [f for f in answers[check.NAME][0] if mine(f)]
         if not found:
             continue
-        said = one_message(found, mine, room - sum(len(o) for o in out))
+        said, _ = one_message(found, mine, room - sum(len(o) for o in out))
         if said:
             out.append(f"({check.NAME}) {said}")
     return out
@@ -640,10 +661,24 @@ def main() -> None:
         # worth saying and is not grounds for refusing the edit.
         def mine(f: Finding) -> bool:
             return written_here(text, f, ctx.mine)
+        # Drop what has already been said about text this call did not write. Only those: a finding
+        # about the edit in hand is about THIS text and is remembered by its digest, so an unchanged
+        # resend re-says it and an edit that did not fix it earns the complaint again. See `repeated`.
+        already = set(state.get("said", []))
+        found = [f for f in found if mine(f) or repeated(f) not in already]
+        if not found:
+            state["verdicts"][check.NAME] = {"digest": digest}
+            save_state(path, state)
+            continue
         blocking = [f for f in firm if f.severity == BLOCK and mine(f)]
-        finding = found[0]._replace(
-            message=one_message(found, mine, MOST_TO_SAY - sum(len(a) for a in advice)),
-            severity=BLOCK if blocking else "advise")
+        said, shown = one_message(found, mine, MOST_TO_SAY - sum(len(a) for a in advice))
+        # Marked here, from what the message actually carried, and never from `found`: the findings a
+        # spent budget drops are the not-mine ones, so marking before showing would silence exactly
+        # the notes nobody has read yet.
+        for f in shown:
+            if not mine(f):
+                ledger.worth_saying(repeated(f))
+        finding = found[0]._replace(message=said, severity=BLOCK if blocking else "advise")
         # A destination can refuse to block at all. Blocking is justified by the text being about to
         # reach a reader unreviewed; where it is not — a draft that lands in your own compose box —
         # the finding is worth saying and not worth a turn spent arguing.

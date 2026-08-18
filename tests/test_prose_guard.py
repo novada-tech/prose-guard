@@ -3011,6 +3011,85 @@ def test_an_edit_is_not_refused_over_a_defect_it_did_not_touch():
         check("naming it", "ZZQ" in said, True)
 
 
+def test_a_complaint_about_untouched_text_is_said_once_a_session():
+    """Rewriting one document is many edits, and the notes about the rest of it used to repeat on all
+    of them.
+
+    A finding about text the call did not write is remembered under the digest of the text it was found
+    in, the same key a finding about the edit itself uses. That is right for the second and wrong for
+    the first: every edit changes the digest, so the same complaint about the same untouched paragraph
+    came back every time. Five edits to one README repeated four such notes five times, at a model call
+    apiece, and none of them was something the edit in hand could act on.
+
+    The session is the same across both edits here, which is what the test turns on — and what
+    `test_an_edit_is_not_refused_over_a_defect_it_did_not_touch` does not exercise, because it takes a
+    fresh session per edit and so could never have seen this.
+    """
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as repo:
+        home = os.path.join(tmp, "home")
+        write_audience(home, "team", matches={"paths": ["*"]}, inherits=["engineers"],
+                       members=["a", "b", "c", "d"])
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"effort": "low"}, fh)
+        subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True, timeout=60)
+        path = os.path.join(repo, "notes.md")
+        opening = ("This file lists every term the checker treats as shared vocabulary for this team. "
+                   "It exists so a a reader can see what was measured rather than trusting a count. "
+                   "Everything in the the list below was measured the same way.")
+        # Two sentences in the body, edited one after the other. Both are on disk throughout, which is
+        # what lets each edit be a real one without the test rewriting the file underneath the hook.
+        first_line = "The shared file store is mounted on every host."
+        second_line = "Everyone on the team can read it."
+        with open(path, "w") as fh:
+            fh.write(opening + "\n\n" + first_line + " " + second_line + "\n")
+        subprocess.run(["git", "-C", repo, "add", "notes.md"], capture_output=True, timeout=60)
+
+        def edit(old_text, new_text, session="one-rewrite"):
+            return verdict_on({"tool_name": "Edit", "session_id": session, "cwd": repo,
+                               "tool_input": {"file_path": path, "old_string": old_text,
+                                              "new_string": new_text}}, home)
+
+        _, said = edit(first_line, "The shared file store is mounted on every host in the cluster "
+                                   "now, and nothing else on the machine reads it.")
+        check("the first edit hears about the defects already in the file",
+              ['"a a"' in said, '"the the"' in said], [True, True])
+
+        _, again = edit(second_line, "Everyone on the team can read it, and the two people who "
+                                     "maintain it can write to it as well.")
+        check("and the next edit of the same document is not told twice",
+              ['"a a"' in again, '"the the"' in again], [False, False])
+
+        # A different session is a different afternoon, and hears them once too.
+        _, fresh = edit(second_line, "Everyone on the team can read it, though only two people are "
+                                     "able to write anything to it.", session="someone-else")
+        check("but a fresh session still hears them", '"a a"' in fresh, True)
+
+        # And none of this may reach a complaint about the text the call actually wrote. Saying those
+        # once would be the worst version of this: an agent is sent back over a defect, does not fix
+        # it, edits something else in the same breath, and the guard has nothing left to say — a real
+        # defect going quiet because it was mentioned once already.
+        verdict, first = edit(first_line, "The shared file store is is mounted on every host.",
+                              session="not-fixed")
+        check("a defect the edit wrote is refused", (verdict, '"is is"' in first), ("deny", True))
+        verdict, twice = edit(first_line, "The shared file store is is mounted on each host in the "
+                                          "cluster and nowhere else at all.", session="not-fixed")
+        check("and refused again when the next edit still has it",
+              (verdict, '"is is"' in twice), ("deny", True))
+
+        # The case the `mine(f) or` guard is really for: one complaint that starts as somebody else's
+        # and becomes this call's. "a a" is reported once as already in the file, and is then still on
+        # the page when the edit rewrites the paragraph holding it — at which point it is the agent's
+        # own defect and has to be refused, however many times it has been mentioned as scenery.
+        moved = "moving-defect"
+        _, mentioned = edit(second_line, "Everyone on the team can read it, and two of them can "
+                                         "write to it as well.", session=moved)
+        check("first heard as somebody else's", '"a a"' in mentioned, True)
+        verdict, owned = edit(opening, opening.replace("trusting a count", "trusting any count"),
+                              session=moved)
+        check("and refused once the edit owns the paragraph it is in",
+              (verdict, '"a a"' in owned), ("deny", True))
+
+
 def test_an_audience_without_expansions_says_it_needs_a_rescan():
     """No compatibility shim, because there is no user base to be compatible with.
 
@@ -3952,15 +4031,21 @@ def test_what_the_hook_adds_to_the_conversation_is_bounded_and_ordered():
     def mine(f):
         return '"number 7 ' in f.message
 
-    msg = guard.one_message(found, mine, guard.MOST_TO_SAY)
+    msg, shown = guard.one_message(found, mine, guard.MOST_TO_SAY)
     check("what this call wrote is said first", '"number 7 ' in msg.splitlines()[0], True)
     check("the rest is a count, not a list", "more, about text this call did not write" in msg, True)
     check("and it fits the budget", len(msg) <= guard.MOST_TO_SAY + 400, True)
+    # What it says it showed has to be what it showed. A caller remembers findings by this list so it
+    # can stop repeating them, and one name too many in it silences a note nobody has read yet.
+    check("and it reports exactly the findings it carried",
+          [f.message in msg for f in shown] + [len(shown) < len(found)], [True] * len(shown) + [True])
 
     # A spent budget must not silence a check completely: that is indistinguishable from passing.
-    last = guard.one_message(found, mine, 0)
+    last, kept = guard.one_message(found, mine, 0)
     check("a check with nothing left to spend still says one thing", len(last.splitlines()) >= 1, True)
     check("and it is the actionable one", '"number 7 ' in last.splitlines()[0], True)
+    check("and it is the only one counted as said", [f.message for f in kept],
+          [f.message for f in found if mine(f)])
 
 
 def test_a_team_can_retire_a_destination_as_well_as_add_one():

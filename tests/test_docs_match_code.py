@@ -66,7 +66,14 @@ def sources():
     """
     found = []
     for here, dirs, names in os.walk(REPO):
-        dirs[:] = [d for d in dirs if d not in (".git", "__pycache__", "node_modules")]
+        # A directory holding its own `.git` is a different checkout — a linked worktree, or a clone
+        # somebody left here. Its documentation describes ITS scripts, and checking it against this
+        # checkout's reports a drift that exists nowhere: an agent worktree on another branch made this
+        # suite fail on a flag that branch's discover.py does have. `.git` may be a file rather than a
+        # directory in a worktree, which is why this tests for existence rather than for a directory.
+        dirs[:] = [d for d in dirs
+                   if d not in (".git", "__pycache__", "node_modules")
+                   and not os.path.exists(os.path.join(here, d, ".git"))]
         for name in sorted(names):
             if not name.endswith(".md"):
                 continue

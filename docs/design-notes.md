@@ -265,6 +265,16 @@ how the cases are known to be load-bearing:
   of comparing two sets of names, so the mutation was green before it was red
 - `chosen()` answering a level when no source names one, so an install nobody has set up looks
   configured and says nothing about checking nothing. Caught by 11 cases
+- the `mine` guard dropped from the repeat filter, so a complaint that starts as scenery and ends up
+  inside the paragraph an edit rewrites is suppressed as already-said — a defect the edit owns, allowed
+  in silence. The first version of its test did not catch this, because it only ever showed one
+  complaint staying somebody else's; what pins it is the one that MOVES
+
+One survivor, recorded rather than claimed equivalent: marking not-mine findings from `found` instead
+of from what `one_message` actually showed. The two differ only when the turn's budget drops a finding,
+and the budget cannot bind at `low`, where mechanics and terms each return one short finding. Binding it
+needs model calls, so this is pinned by `one_message`'s own contract — it reports the findings it
+carried — and not end to end.
 
 ## One config directory, not two
 
