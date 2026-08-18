@@ -51,6 +51,12 @@ the something is almost always one of three questions. Answer the one they asked
   once, that is not a message problem, it is a vocabulary problem. Point at `/prose-guard:audiences`,
   which is the lasting fix, and offer to run it.
 
+That last answer only covers terms. A judgement check that objected to prose which was fine, or let
+through a message its reader could not act on, is a defect in the check rather than in this machine's
+configuration, and nothing here can fix it. `/prose-guard:contribute` turns what `show` just printed
+into a report the people who maintain the checks can run — it decides first whether the fix is
+configuration after all, and it will not let a real message out of this machine unreduced.
+
 ## If there is nothing to show
 
 Nothing is recorded unless a check actually held a message back. So an empty list means no message has
