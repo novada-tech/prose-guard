@@ -613,7 +613,11 @@ def main() -> None:
     # reader will care and whether the ask is clear; a commit message has no addressee and no ask, and
     # paying four model calls for one is the wrong trade for something read years later, by someone
     # looking for when a line changed. See data/destinations.json.
-    level = checks_module.capped(EFFORT, dest.get("max_effort"))
+    # What this destination is worth, then what you are willing to pay. `worth` in config.json names a
+    # destination and replaces its own `max_effort`, so it can raise a cheap destination as well as lower
+    # an expensive one; EFFORT caps the result either way, so the level you set stays a ceiling.
+    asked = (paths.config().get("worth") or {}).get(dest.get("name", "")) or dest.get("max_effort")
+    level = checks_module.capped(EFFORT, asked)
     running = checks_module.for_effort(level)
     if not running:
         allow()

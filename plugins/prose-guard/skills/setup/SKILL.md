@@ -118,8 +118,20 @@ Then do the part no script can:
   it, so there is no harm in wording one yourself.
 - **Propose, do not assume.** Show the user a short list of what you would add and what field
   carries the text. Ask before writing.
-- **Say what each addition costs.** Every added destination is more messages checked, at the
-  per-message price above.
+- **Say what each addition costs, and ask what it is worth.** Every added destination is more messages
+  checked, at the per-message price above — and the price is per destination, not just per install:
+
+  ```
+  python3 "${CLAUDE_PLUGIN_ROOT}/lib/destinations.py" worth "slack message" high
+  ```
+
+  Ask it for anything whose answer is not the level they just set. An announcement to a wide channel is
+  worth more than the level they chose for everything; a scratch file or a bot channel is worth less.
+  `disabled` is available and is the honest answer for a destination they do not want checked at all.
+
+  This is worth pressing on, because the dial existed before and nobody moved it: on one real machine 8
+  of 9 destinations left it unset, so every message got the same budget whatever it was worth. The level
+  they set caps whatever they say here, so there is no way for this to cost more than they agreed to.
 - **Ask the two questions that decide how hard it is checked.** Adding a destination is not one
   decision but three, and these two are the ones you cannot work out for them:
 

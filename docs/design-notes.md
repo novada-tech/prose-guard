@@ -90,6 +90,44 @@ went out after one round, 7 after two, 6 after three, and none needed a fourth. 
 figure was 95 and 74/13/6. The shape survived — nothing ever needs a fourth round, which is what the
 per-check bound rests on — and the number did not.
 
+## There is no cheap way to find out whether a message is worth checking
+
+`low` costs 0 model calls, `medium` 1, `high` 6 — one per paying check, since pooling stops on the first
+empty run. So the obvious saving is to find the messages worth six calls and spend one on the rest. Two
+ways were measured and both fail.
+
+**A free signal: none exists.** Comparing review comments the checks HELD against review comments that went
+out clean — same genre both sides, which matters, because comparing held code-review comments against
+well-built Slack messages produces a beautiful 72% on "backticked spans" that is measuring genre and not
+quality. Within one genre:
+
+    feature                held   passed
+    words                   47.0     60.0
+    longest sentence        25.5     30.0
+    mean sentence           15.9     18.0
+    backticked spans         4.0      4.0
+
+Held drafts are *shorter*, with shorter sentences. The best free rule reaches **0% recall** at under 25%
+false alarms. Nothing cheap predicts which messages have faults.
+
+**The one cheap question as an alarm: 4 of 8.** `medium`'s combined judgement question was measured as a
+verdict before and rejected as one. As a gate it needs recall and almost no precision, which is a much
+lower bar, so `measure_gate.py` asked it against real held drafts and the well-built fixtures:
+
+    recall     4/8 of drafts the specific checks held were flagged
+    precision  10/11 well-built fixtures passed cleanly
+
+Precision is fine and recall is half. A cascade on that gate would let four of eight faulty messages
+through unchecked to save five calls, which is a cheaper way to miss things.
+
+**So the cost of finding a fault is the cost of asking about it**, and effort cannot be saved by checking
+fewer messages or by checking them more cheaply first. What is left is choosing which messages deserve the
+spend — which is what a destination knows and an install-wide number cannot. Hence `worth`.
+
+For the same reason, splitting the text to check less is already ruled out twice over: it finds no more at
+nine times the calls, and the judgement checks are comparative, so a smaller window lowers the bar rather
+than saving money.
+
 ## A check that fires on everything carries no information
 
 The sentence check originally failed **14 of 15** real messages, including ones written with no guidance

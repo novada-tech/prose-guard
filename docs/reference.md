@@ -216,6 +216,29 @@ finding out when a line changed. The term check still applies, because an acrony
 exactly as unhelpful in a permanent record as anywhere, and it costs no model call and a tenth of a
 second.
 
+**`worth` — how hard *you* want one checked.** `max_effort` is set by whoever wrote the destination and
+says what that kind of destination is inherently worth. `worth` is how you disagree, and it is yours:
+
+```
+python3 lib/destinations.py worth "slack message" high
+python3 lib/destinations.py worth "commit message" disabled
+```
+
+It replaces the destination's own `max_effort`, so it raises a cheap destination as well as lowering an
+expensive one, and the level you set still caps the result — there is no way to spend more than you agreed
+to. It is written into `config.json` beside the level, because how hard you want something checked is your
+policy rather than part of what the destination is.
+
+One level for a whole install is a per-install answer to a per-message question. The dial existed before
+this and nobody moved it: on one real machine 8 of 9 destinations left `max_effort` unset, because
+`add --max-effort` only works at creation and destinations mostly arrive from the shipped set, a team's
+file, or setup. `/prose-guard:setup` now asks.
+
+Not in `destinations.json`, and that is not a style choice: the layers there replace a whole entry by
+name, so an override carrying only a name and a level throws away the pattern that recognises the
+destination. It then matches nothing, which `list` shows as `0 tool(s)` with the real one shadowed behind
+it. That was the first version of this.
+
 **`max_severity` — nothing is about to reach anyone unreviewed.** A draft is its own destination and
 caps at `advise`. Blocking is justified by text being about to reach a reader with nobody in between; a
 draft tool — `slack_send_message_draft`, if setup added it for you — lands in your own compose box, so

@@ -732,6 +732,77 @@ def test_the_transcript_scan_keeps_shapes_and_never_content():
     check("nor the value of any other field", "C0FFEE" in everything, False)
 
 
+def test_what_a_destination_is_worth_is_your_policy_not_its_identity():
+    """One number for a whole install is a per-install answer to a per-message question.
+
+    A commit message and an announcement to two hundred people got the same budget. The dial existed —
+    `max_effort` on a destination — and on one real machine 8 of 9 destinations left it unset, because
+    `add --max-effort` only works at creation and destinations arrive from the shipped set, a team's file
+    or setup.
+
+    It lives in config.json beside the level, not in destinations.json. The first version wrote an
+    override into the destinations file and broke the destination: the layers replace a whole entry by
+    name, so an entry carrying only a name and a level threw away the pattern that recognises it and it
+    matched nothing at all — visible as `0 tool(s)` in `list`, with the real one shadowed behind it.
+    """
+    import destinations
+    from checks.config import capped
+    with tempfile.TemporaryDirectory() as home:
+        was = os.environ["PROSE_GUARD_HOME"]
+        os.environ["PROSE_GUARD_HOME"] = home
+        try:
+            importlib.reload(paths_module()); importlib.reload(destinations)
+            shipped = destinations.find("commit message")
+            check("the shipped destination caps itself at low", shipped.get("max_effort"), "low")
+
+            where = destinations.worth("commit message", "high")
+            check("it is written to config.json", where.endswith("config.json"), True)
+            importlib.reload(paths_module())
+            check("and the destination file is untouched",
+                  os.path.exists(os.path.join(home, "destinations.json")), False)
+
+            import paths
+            asked = (paths.config().get("worth") or {}).get("commit message")
+            check("your override is recorded", asked, "high")
+            # It raises past what the destination says it is worth...
+            check("it raises the destination", capped("high", asked), "high")
+            # ...and the level you set is still the ceiling.
+            check("and your level still caps it", capped("medium", asked), "medium")
+
+            # And the HOOK reads it, which the arithmetic above does not prove. Driven at `high` with
+            # the checker off the PATH, so no model call is possible and the tally still reports which
+            # level actually ran.
+            with tempfile.TemporaryDirectory() as tmp:
+                state = os.path.join(tmp, "state")
+                write_destinations(home, chat_destination())
+                importlib.reload(paths_module()); importlib.reload(destinations)
+                destinations.worth("our chat", "low")
+                bare = {**env(home, state, "high"), "PATH": path_without_the_checker(tmp)}
+                said = hook_reply({"tool_name": "mcp__ourchat__chat_send", "session_id": "worth",
+                                   "cwd": tmp, "tool_input": {"channel_id": "C1",
+                                                              "message": PROSE + " " + PAD}}, bare)
+                line = (said or {}).get("systemMessage", "")
+                check("the hook runs the level you said this destination is worth",
+                      "prose-guard low" in line, True)
+                check("and not the level you set globally", "prose-guard high" in line, False)
+
+            # A name nothing matches is refused rather than written, or a typo becomes a setting that
+            # never applies and never says so.
+            try:
+                destinations.worth("no such destination", "high")
+                check("an unknown destination is refused", "written", "refused")
+            except KeyError:
+                check("an unknown destination is refused", "refused", "refused")
+            try:
+                destinations.worth("commit message", "extremely")
+                check("an unknown level is refused", "written", "refused")
+            except ValueError:
+                check("an unknown level is refused", "refused", "refused")
+        finally:
+            os.environ["PROSE_GUARD_HOME"] = was
+            importlib.reload(paths_module()); importlib.reload(destinations)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
