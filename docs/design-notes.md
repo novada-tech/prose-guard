@@ -76,8 +76,29 @@ an ordinary turn does not — so it is an upper bound on willingness rather than
 at the mechanism rather than the wording: an advisory finding reaches the model as `additionalContext` on
 PreToolUse and the call then proceeds, so there is no turn in which the message could have changed.
 
-What follows is a design question and not yet a change: an advisory finding could reach the person instead
-of the model, or ask rather than allow, or not be paid for at all. Each trades attention against effect.
+**The fix is not to pay for it until it can be acted on.** A check that can never hold a message back is
+not asked until something else has, and then its findings ride along on that denial, which
+`other_concerns` already arranges. Advice attached to an interruption reaches the model while it is
+rewriting anyway; advice on its own reaches it after the call has run.
+
+At `medium` that is the whole of the token cost. The only paying check there is `judgement`, it only
+advises, and what can block is the two arithmetic checks — which cost nothing and answer before any model
+call. So a clean message at `medium` now costs **0 model calls** rather than 1, with no extra waiting,
+because the gate is free:
+
+    clean    prose-guard medium …: nothing to say.            (no model call)
+    held     Hold this message.
+             "the the" — a word typed twice
+             Also worth fixing while you are here, though none of it is holding this back:
+             (judgement) Consider: … is backstory the reader didn't live through …
+
+At `high` the same rule gates `promise`, where the gate is the five blocking checks, so it costs one more
+round of waiting on a message that is being held anyway — 1% of claimed calls, at most 7% — and saves a
+call on the rest.
+
+Three denial sites had to route through one closure, and patching one of them was the first attempt: at
+`medium` what blocks is a free check, so the paid-check site never fires and the advice was never asked at
+all.
 
 ## A count that matched the refusal text anywhere counted files as messages
 

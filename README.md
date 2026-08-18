@@ -133,7 +133,7 @@ sees, so a fair complaint and an unfair one look identical afterwards.
 |---|---|---|
 | `disabled` | nothing | — |
 | `low` | the two arithmetic checks only, no model call | +12s |
-| `medium` | plus one advisory judgement call over the five concerns | +19s |
+| `medium` | plus one advisory judgement call, asked only if something already holds the message | +12s |
 | `high` | one separate check per concern, re-verified after each edit | +12s |
 
 `low` and `medium` were measured when `high` ran four model-backed checks one after another, at +75s.
@@ -150,15 +150,18 @@ the guard.
 answer for you. `low` is not the cheap option, and the cost numbers above no longer separate `medium`
 from `high` now that the checks are asked at the same time.
 
-What separates them is what can hold a message back. At both levels the two arithmetic checks do.
-`medium` adds one combined judgement question that **only ever advises** — and advice is measurably
-inert: on one machine's transcripts, 41 messages got advice and went out, and **none was corrected
-afterwards**. An advisory finding reaches the model after the call has already run, so there is no turn
-in which the message could change. `high` asks the five concerns separately and five of them can hold a
-message, which is the only mechanism here shown to change what goes out.
+What separates them is what can hold a message back. At both levels the two arithmetic checks do, and
+they cost nothing. `high` adds five concerns asked separately, each of which can hold a message — the
+only mechanism here shown to change what goes out.
 
-So `medium` is worth having for the arithmetic checks and its judgement half is not yet worth paying for.
-The numbers, the leading-question caveat on them, and what would settle it are in
+`medium` adds one combined judgement question that **only ever advises**, and advice on its own is
+measurably inert: on one machine's transcripts 41 messages got advice and went out, and **none was
+corrected afterwards**, because an advisory finding reaches the model after the call has already run. So
+it is asked only when something is already holding the message, where it arrives while the agent is
+rewriting anyway. A clean message at `medium` therefore costs **no model call at all** — the same as
+`low` — and a held one costs one.
+
+The numbers, the leading-question caveat on them, and what would settle the rest are in
 [docs/design-notes.md](docs/design-notes.md); `measure/measure_advice.py` recomputes them.
 
 ## When it gets it wrong
