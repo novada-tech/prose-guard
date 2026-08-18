@@ -1935,8 +1935,10 @@ def test_every_message_a_session_sends_gets_the_same_treatment():
     A session-wide ceiling of six denials used to sit alongside it, never reset. It stopped the wrong
     thing: on a real pull request review it was spent by six DIFFERENT messages that each converged on
     their first rewrite, and the next sixteen comments went out with the guard structurally unable to
-    hold any of them back, saying nothing. Measured over 95 real held messages, 74 went out after one
-    round, 13 after two, 6 after three, and none needed a fourth — the pathology the ceiling guarded
+    hold any of them back, saying nothing. Measured over 59 real held messages, 44 went out after one
+    round, 7 after two, 6 after three, and none needed a fourth. An earlier count said 95 and matched the
+    refusal text anywhere in a tool result, so a file that merely contained the phrase counted as a held
+    message; `measure/held_drafts.py` requires the result to begin with it — the pathology the ceiling guarded
     against does not occur, and its cost did.
     """
     with tempfile.TemporaryDirectory() as tmp:

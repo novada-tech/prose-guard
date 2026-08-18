@@ -14,27 +14,81 @@ docker be explained; the other flags that as padding."*
 I nearly reported the opposite. The first scoring pass showed "0.00 unexplained terms" for both broken
 configurations, which was empty files scoring perfectly.
 
-## Context that tells a check what to conclude silences it
+## Telling a check what the reader already has: measured three times, three answers
 
-Telling the checks what the reader already has — "attached to line 129 of Diag.java" — was meant to stop
-`reference` flagging terms that the anchored code defines. The first wording added the conclusion too:
-*"so a term the code there defines is already explained for them, and a fragment of it needs no gloss"*.
+Prose is usually attached to something the reader has in front of them: a review comment to a line of a
+diff, a reply to the thread above it. Telling the checks looked obviously right, and it was built as a
+shipped default so every install would get it — `thread_ts` on 243 real calls, `path`+`line` on 83.
 
-Re-run against the six real drafts that had been held on one pull request review, **every complaint passed
-on its first run** — including three stacked `file:line` citations and a "these two assertions" that named
-one. Stacking is a structural fault whatever the reader has open, and a second assertion that does not
-exist cannot be anchored into existence. The person who received those complaints had judged five of the
-six fair. A clause about what needs no gloss reads as a general licence to stop objecting.
+It is not shipped, and the reason is worth more than the feature.
 
-Every other entry in `situation` is a bare fact — "private: colleagues can open internal links". So are
-these now: where the text sits, and nothing about what follows from it.
+**First measurement, six drafts, before and after.** Every complaint disappeared with the context. That
+looked like a clear answer and it was noise: the same condition run three times fired on 3 of 6 drafts
+every time but on *different* drafts each time.
 
-**What this measurement could not settle**, and the reason to distrust the numbers above as a comparison:
-the same condition run three times fired on 3 of 6 drafts every time, but on *different* drafts each time
-— `..F.FF`, `F..F.F`, `F..F.F`. The count is stable and the identity is not, so at six drafts and three
-passes a per-draft before/after tells you nothing. The 0-of-6 under the first wording was outside that
-range and is believable; the remaining effect of the bare-fact version is not measurable at this sample
-size. Settling it needs `measure/measure_check.py` against labelled fixtures, not six drafts.
+**The instability was in the harness, not the checks.** One draft's raw first-run rate over eight
+repetitions: draft 6 fires 8/8, draft 3 fires 6/8. Stable enough to measure. What was unstable was asking
+`pooled` instead of the check —
+
+- the harness used `passes=3` where production uses `ceiling_for(text)`, 6 for a review comment;
+- `firm` needs two runs pointing at the same item;
+- and `pooled` returns after **one** empty run, so a clean first sample means there is no second.
+
+That last is the tool, not the harness: **for a check that fires half the time, whether a message is
+checked at all rides on one sample.** Deliberate — a clean first run costs one call — and worth knowing
+before believing any single result, including the ones below.
+
+**Second measurement, the draft with the stable baseline**, eight repetitions each way:
+
+    without the context sentence:  FFFFFFFF   8/8
+    with it:                       .F......   1/8
+
+The finding it silences is "These two assertions" where only one was introduced, which the agent who wrote
+that comment called a real error of its own. Removing the clause that told the check what to conclude —
+*"so a term the code there defines is already explained for them"* — did not fix it. A bare fact about
+which file the reader has open suppressed it just as thoroughly.
+
+**Third measurement, five drafts, four repetitions each way.** No effect at all:
+
+    draft 1 sentence   3/4 -> 2/4      draft 4 reference  3/4 -> 3/4
+    draft 2 sentence   0/4 -> 1/4      draft 5 reference  2/4 -> 0/4
+    draft 3 sentence   3/4 -> 4/4      total             11/20 -> 10/20
+
+So draft 6 is an outlier rather than the rule, and the honest summary is **one measured harm and no
+measured benefit anywhere**: no draft showed a false positive being removed, which is what the change was
+for. A default that can take a blocking check from 8/8 to 1/8 on one draft and does nothing on five is not
+something to ship on the strength of an idea.
+
+`when` survives, so a destination can still say what a call means in its own words — local, deliberate,
+and visible in a file somebody edited. `measure/measure_check.py` with a bigger labelled set is what would
+settle whether this can be made to work, and `measure/held_drafts.py` builds the corpus.
+
+## Advisory findings are never acted on
+
+`medium`'s judgement question only advises, and `high` demotes a blocking finding to advice once a check
+has asked twice about a message. On one machine's transcripts, **41 messages got advice and went out and 0
+were followed by a correction.** `measure/measure_advice.py --transcripts` recomputes it.
+
+Asked directly, the same notes are usable: given a held draft and its note, an agent said it would edit in
+4 of 6 cases when told the message had already gone out, and revise in 5 of 6 when told it could still
+change the text. That is a leading question — asking "what do you do next" makes a note salient in a way
+an ordinary turn does not — so it is an upper bound on willingness rather than a prediction. But it points
+at the mechanism rather than the wording: an advisory finding reaches the model as `additionalContext` on
+PreToolUse and the call then proceeds, so there is no turn in which the message could have changed.
+
+What follows is a design question and not yet a change: an advisory finding could reach the person instead
+of the model, or ask rather than allow, or not be paid for at all. Each trades attention against effect.
+
+## A count that matched the refusal text anywhere counted files as messages
+
+Every number about held messages in this repository came from one grep, and it was wrong. Matching
+`"Hold this message"` anywhere in a tool result counts a file that merely *contains* the phrase — reading
+this repository's own notes produced four phantom held `Read` calls, and 47 phantoms out of 59.
+
+Corrected by requiring the result to BEGIN with the refusal, the real distribution is 59 held messages: 44
+went out after one round, 7 after two, 6 after three, and none needed a fourth. The earlier published
+figure was 95 and 74/13/6. The shape survived — nothing ever needs a fourth round, which is what the
+per-check bound rests on — and the number did not.
 
 ## A check that fires on everything carries no information
 

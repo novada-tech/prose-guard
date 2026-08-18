@@ -122,10 +122,20 @@ rather than the sum of all of them. On a real pull request review before this ch
 median 50.3s, 217.7s for a 925-word summary comment, and 34.5 minutes of a 168-minute session spent
 waiting on the guard.
 
-**Pick `medium`.** `/prose-guard:setup` asks and writes the answer for you. `low` is not the cheap
-option and `high` is not measurably better, which is less obvious than it looks — the numbers, the
-unguarded run they were priced against, and what the measurement cannot tell you are in
-[docs/design-notes.md](docs/design-notes.md).
+**Pick `medium` or `high`, and know what separates them.** `/prose-guard:setup` asks and writes the
+answer for you. `low` is not the cheap option, and the cost numbers above no longer separate `medium`
+from `high` now that the checks are asked at the same time.
+
+What separates them is what can hold a message back. At both levels the two arithmetic checks do.
+`medium` adds one combined judgement question that **only ever advises** — and advice is measurably
+inert: on one machine's transcripts, 41 messages got advice and went out, and **none was corrected
+afterwards**. An advisory finding reaches the model after the call has already run, so there is no turn
+in which the message could change. `high` asks the five concerns separately and five of them can hold a
+message, which is the only mechanism here shown to change what goes out.
+
+So `medium` is worth having for the arithmetic checks and its judgement half is not yet worth paying for.
+The numbers, the leading-question caveat on them, and what would settle it are in
+[docs/design-notes.md](docs/design-notes.md); `measure/measure_advice.py` recomputes them.
 
 ## Reading further
 

@@ -9,11 +9,25 @@ plugin and nothing at runtime imports them.
 | `measure_cost.py` | what a level costs the person using it, against a control in the same run |
 | `measure_rule.py` | does a change to `rule/` change what the agent writes |
 | `measure_thresholds.py` | re-derive the author cut and the share threshold on your own audiences |
+| `measure_advice.py` | is advisory feedback ever acted on, and would an agent act if it arrived in time |
+| `held_drafts.py` | build a corpus out of the messages this machine has actually held back |
 | `fixtures/well-built/` | ordinary messages every check must pass |
 | `fixtures/one-reader/` | messages whose correctness depends on having a single addressee |
 
-Standard library only, like everything else here. All except `measure_thresholds.py` spend real
-tokens, which is the point: a cost measurement that costs nothing is measuring nothing.
+Standard library only, like everything else here. Most spend real tokens, which is the point: a cost
+measurement that costs nothing is measuring nothing. `measure_thresholds.py`, `held_drafts.py` and
+`measure_advice.py --transcripts` are the exceptions — they read what is already on the machine.
+
+The two that read past conversations:
+
+```
+python3 measure/held_drafts.py --out /tmp/held.json     # the messages this machine held back
+python3 measure/measure_advice.py --transcripts          # was advice ever acted on: 41 given, 0 acted on
+python3 measure/measure_advice.py --probe /tmp/held.json # would an agent act if it could. Spends tokens
+```
+
+`held_drafts.py` keeps message text, unlike everything else here — that is what makes it a corpus.
+Write it somewhere temporary and do not commit what comes out.
 
 They are **not** in continuous integration for that reason. CI runs the two deterministic suites
 under `tests/`, which make no model calls at all.
