@@ -30,17 +30,19 @@ python3 tests/test_prose_guard.py
 python3 tests/test_docs_match_code.py
 ```
 
-Standard library only, no setup, about fifteen seconds, and no model calls — continuous integration
-runs both on every pull request, on Linux and macOS, and proves the second point by removing `claude`
-from `PATH`. The measurement harnesses under `measure/` are deliberately not in CI: they spend real
-tokens, so they stay something you run deliberately and report here.
+Standard library only, no setup, about fifteen seconds, and no model calls. Continuous integration runs
+both on every pull request, on Linux and macOS, and proves they need no model by removing `claude` from
+`PATH`.
+
+The harnesses under `measure/` are deliberately not in CI. They spend real tokens, so they stay
+something you run deliberately and report here.
 
 The second suite reads every SKILL.md, finds the commands it tells someone to run, and checks each
-against the real interface — a skill documented
-`--audience` for a script that takes `--for`, and the person who hit it lost time before anything else
-could go wrong. Every case pins a design decision, so a failure
-usually means you changed a decision rather than broke an implementation — say which in the pull
-request.
+against the real interface. It exists because a skill documented `--audience` for a script that takes
+`--for`, and the person who hit it lost time before anything else could go wrong.
+
+Every case pins a design decision, so a failure usually means you changed a decision rather than broke
+an implementation. Say which in the pull request.
 
 ### 2. Break your own test before you trust it
 
@@ -193,9 +195,22 @@ Numbers with the command that produced them, so a reviewer can re-run it. That i
 
 ## Reporting a false alarm
 
-The most useful issue you can open. Include the text that was flagged, which check flagged it, and which
-audience was in scope — `python3 plugins/prose-guard/lib/audiences.py show <name>` prints the last one.
-A false alarm on ordinary prose is a defect even when the check's reasoning sounds plausible.
+The most useful issue you can open, and a false alarm on ordinary prose is a defect even when the
+check's reasoning sounds plausible.
+[The form](https://github.com/novada-tech/prose-guard/issues/new/choose) asks for what a reviewer needs.
+
+What makes one reviewable is text somebody else can run the check on. A description of a verdict cannot
+be reproduced. So if the message that was flagged cannot be published, reduce it: keep the term, the
+sentence and the paragraph structure that were objected to, replace the names and the subject matter,
+and check the reduction still fails before you file it.
+
+**Name the audience that was in scope; never paste its vocabulary.** An audience's term counts are a
+list of what your organisation works on and who it talks to, and `audiences.py show` prints them in
+full. Ship the measuring, not the measurements — the same rule as the baselines above.
+
+If you have the plugin installed, `/prose-guard:contribute` does all of that with you: it reads back
+what actually happened, works out whether the fix is your own configuration rather than a defect here,
+and reduces the message before anything is filed.
 
 ## Licence
 

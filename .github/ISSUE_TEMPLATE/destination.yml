@@ -1,0 +1,42 @@
+name: A tool that sends prose and the guard does not watch
+description: Add a tool to the destinations that ship, so nobody else has to work it out again.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most reusable thing you can send. Which tool sends prose and which field carries it is the
+        same fact for everyone who uses that tool, and the shipped destinations file cannot see anybody's
+        tool list — so today every user works the same entry out from scratch.
+
+        `/prose-guard:setup` writes the entry on your machine and `discover.py --share` copies it to your
+        team. This is how it reaches everybody.
+
+  - type: input
+    id: tool
+    attributes:
+      label: The tool
+      description: What it is, and how somebody gets it — an MCP server, a command-line tool, a package.
+    validations:
+      required: true
+
+  - type: textarea
+    id: entry
+    attributes:
+      label: The entry that works on your machine
+      description: "`python3 lib/destinations.py show <name>` prints it. Check it names nothing local first: a `bash` pattern carrying your hostname, an `identifiers` field carrying your workspace."
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: judgement
+    attributes:
+      label: The two questions setup asks
+      description: These set `max_severity` and `max_effort`, and they are the two fields a reviewer cannot work out from a tool name.
+      value: |
+        Does anybody read a message sent there before its audience does?
+
+        Does such a message have an addressee and an ask?
+    validations:
+      required: true

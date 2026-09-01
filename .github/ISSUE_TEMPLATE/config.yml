@@ -1,0 +1,11 @@
+# Blank issues stay on. Everything that is not one of the three forms — the documentation is wrong, a
+# command does not exist, an audience baseline you want to contribute — has to have a home that does not
+# need a form written for it first.
+blank_issues_enabled: true
+contact_links:
+  - name: You have prose-guard installed
+    url: https://github.com/novada-tech/prose-guard/blob/main/plugins/prose-guard/skills/contribute/SKILL.md
+    about: Run /prose-guard:contribute instead. It reads what actually happened on your machine, works out whether the fix is your configuration rather than a defect here, and reduces a real message to something publishable before anything is filed.
+  - name: Changing the code
+    url: https://github.com/novada-tech/prose-guard/blob/main/CONTRIBUTING.md
+    about: Which suites to run, how to prove your own test would have caught the defect, and which measurement your change owes.

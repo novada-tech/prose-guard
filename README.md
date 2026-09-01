@@ -161,6 +161,26 @@ So `medium` is worth having for the arithmetic checks and its judgement half is 
 The numbers, the leading-question caveat on them, and what would settle it are in
 [docs/design-notes.md](docs/design-notes.md); `measure/measure_advice.py` recomputes them.
 
+## When it gets it wrong
+
+```
+/prose-guard:contribute
+```
+
+A check that fires on good prose is the defect this most wants reported, and it is the one report a
+maintainer cannot produce for themselves: the evidence is a real message you sent to real people, and
+[this repository](https://github.com/novada-tech/prose-guard/issues) is public. So that skill reduces
+what was flagged to something publishable, and checks the reduction still fails before anything is filed.
+
+It settles the more common case first, which is that nothing is wrong with the tool. A term your readers
+do know is a vocabulary that wants measuring again. A concern that never ran is usually a place you send
+to being checked more lightly on purpose, the way a commit message is — it has no reader to address, so
+most of what the higher levels ask does not apply to it. Both look exactly like a false alarm from where
+you are standing.
+
+Without the plugin installed, the [issue forms](https://github.com/novada-tech/prose-guard/issues/new/choose)
+ask for the same things.
+
 ## Reading further
 
 | | |

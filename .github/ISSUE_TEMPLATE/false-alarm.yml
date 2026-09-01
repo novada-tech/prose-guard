@@ -1,0 +1,70 @@
+name: A check objected to prose that was fine
+description: The guard held a message back, or advised on one, and it was wrong to.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful issue there is. A false alarm on ordinary prose is a defect even when the
+        check's reasoning sounds plausible.
+
+        **This repository is public and the text below will be published.** If the message that was
+        flagged cannot be published, reduce it first: keep the term, the sentence and the paragraph
+        structure that were objected to, and replace the names, identifiers and subject matter with
+        something unremarkable of the same shape. `/prose-guard:contribute` does this with you and
+        checks the reduction still fails before you file.
+
+  - type: textarea
+    id: text
+    attributes:
+      label: The text
+      description: What the check objected to, publishable. Under 25 words nothing is checked at all, so a shorter sample proves nothing either way.
+      render: markdown
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: publishable
+    attributes:
+      label: Before you file
+      options:
+        - label: This text can be published. It carries no customer or colleague's words, no internal identifiers, and no measured vocabulary.
+          required: true
+
+  - type: input
+    id: check
+    attributes:
+      label: Which check
+      description: The guard names it in the line it printed when it held the message, and `check_prose.py` names it in its output.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How you ran it, and how often it fired
+      description: |
+        These checks disagree with themselves between runs, so one run is not a result. Say how many times you ran it and how many of those fired.
+      value: |
+        python3 lib/check_prose.py repro.md --for engineers --effort high
+
+        Fired in N of M runs.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened
+      description: Passed clean, or been held for something else. One sentence.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The `version` field of `.claude-plugin/plugin.json` in the plugin directory you have installed.
+    validations:
+      required: true
