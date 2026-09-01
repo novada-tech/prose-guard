@@ -34,7 +34,6 @@ sys.path.insert(0, LIB)
 _ISOLATED = tempfile.mkdtemp(prefix="prose-guard-tests-")
 os.environ["PROSE_GUARD_HOME"] = _ISOLATED
 os.environ.pop("PROSE_GUARD_EFFORT", None)
-os.environ.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
 os.environ.pop("PROSE_GUARD_STATE", None)
 
 # The checks that can hold a message back, so a bound can be stated without restating a number.
@@ -372,23 +371,19 @@ def test_every_writer_puts_system_message_where_it_is_read():
     could not run. The hook exited 0 and the JSON parsed, so nothing looked wrong, and nine tests in
     this file agreed with the code because they read the field back out of the same wrong place.
 
-    There are two writers and they are in different languages, so they cannot share the code that
-    builds the envelope: `emit()` in outgoing_guard.py and one `printf` in guard-outgoing-prose.sh,
-    which answers before Python starts precisely so an unconfigured install costs no interpreter.
-    What they can share is this table. A third writer goes in it.
+    There are two writers and they answer different events, so they cannot share the code that builds
+    the envelope: `emit()` in outgoing_guard.py and `session_start.py`, which speaks at the start of a
+    session about an install where nobody has chosen a level. What they can share is this table. A
+    third writer goes in it.
     """
     writers = []
 
-    # The shell pre-filter: nothing configured, so it answers the setup notice itself.
+    # SessionStart: nothing configured, so it says the install is checking nothing.
     with tempfile.TemporaryDirectory() as tmp:
         home = os.path.join(tmp, "home")
         os.makedirs(home)
-        bare = {k: v for k, v in os.environ.items() if not k.startswith("PROSE_GUARD")}
-        bare.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
-        bare["PROSE_GUARD_HOME"] = home
-        writers.append(("guard-outgoing-prose.sh", raw_hook_output(
-            {"tool_name": "mcp__slack__slack_send_message", "session_id": "w1", "cwd": tmp,
-             "tool_input": {"channel_id": "C1", "message": PROSE}}, bare)))
+        writers.append(("session_start.py",
+                        raw_session_start_output(nothing_chosen(home))))
 
     # The Python: a message it actually checks, which always carries the tally.
     with tempfile.TemporaryDirectory() as home:
@@ -767,6 +762,26 @@ def load_guard(as_name):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+SESSION_START = os.path.join(PLUGIN, "hooks", "scripts", "session-start.sh")
+
+
+def nothing_chosen(home):
+    """An environment where no source names a level, which is the state every new install is in."""
+    e = {k: v for k, v in os.environ.items() if not k.startswith("PROSE_GUARD")}
+    e["PROSE_GUARD_HOME"] = home
+    return e
+
+
+def raw_session_start_output(environment, timeout=60):
+    """What the SessionStart hook printed, with NO reshaping, for asserting where a field sits."""
+    r = subprocess.run(["bash", SESSION_START],
+                       input=json.dumps({"hook_event_name": "SessionStart", "session_id": "s"}),
+                       capture_output=True, text=True, env=environment, timeout=timeout)
+    assert r.returncode == 0, f"the hook exited {r.returncode}: {r.stderr}"
+    assert not r.stderr.strip(), f"the hook wrote to stderr: {r.stderr.strip()[-1500:]}"
+    return json.loads(r.stdout) if r.stdout.strip() else {}
 
 
 def raw_hook_output(payload, environment, timeout=300):
@@ -1878,7 +1893,6 @@ def test_the_hook_surfaces_a_candidate_once():
 def env(home, state, effort="low"):
     e = {k: v for k, v in os.environ.items() if not k.startswith("PROSE_GUARD")}
     e.pop("CLAUDE_PLUGIN_DATA", None)
-    e.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
     e.update(PROSE_GUARD_HOME=home, PROSE_GUARD_STATE=state, PROSE_GUARD_EFFORT=effort)
     return e
 
@@ -2038,31 +2052,52 @@ def test_a_session_stops_paying_for_model_checks_once_its_budget_is_spent():
         check("and once twenty are spent it is not", asked_after(20), False)
 
 
-def test_an_install_nobody_has_set_up_says_so_once():
-    """Installed, restarted, setup never run — the state every new user is in, and nothing tested it.
+def test_an_install_nobody_has_set_up_says_so_every_session():
+    """Installed, nobody has chosen a level — the state every new user is in, and nothing tested it.
 
     Working correctly and doing nothing are the same output here: somebody installs this, sends a
     message, sees nothing, and concludes it is broken, with no wrong output to report. Which is why
     nobody would file it.
 
-    Said by the shell pre-filter rather than by the Python, so the empty state still costs nobody the
-    interpreter startup that pre-filter exists to save, and remembered in told.json — a notice nobody
-    can dismiss is its own defect.
+    It is said at SessionStart and it repeats, which is the opposite of what the notice this replaces
+    did. That one was printed on the first guarded tool call and once ever, so somebody who missed it
+    was never told again — and somebody who did not send anything that day was never told at all.
+    Repeating costs a person nothing they cannot stop with one word: `disabled` is a level, choosing
+    it silences this, and the message says so.
     """
     with tempfile.TemporaryDirectory() as tmp:
         home = os.path.join(tmp, "home")
         os.makedirs(home)
-        nothing_set = {k: v for k, v in os.environ.items() if not k.startswith("PROSE_GUARD")}
-        nothing_set.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
-        nothing_set["PROSE_GUARD_HOME"] = home
-        payload = {"tool_name": "mcp__slack__slack_send_message", "session_id": "empty", "cwd": tmp,
-                   "tool_input": {"channel_id": "C1", "message": PROSE}}
-        said = [hook_reply(payload, nothing_set) for _ in range(2)]
+        said = [raw_session_start_output(nothing_chosen(home)) for _ in range(2)]
         check("a tool nobody has set up says so, with the command that fixes it",
-              "prose-guard:setup" in (said[0] or {}).get("systemMessage", ""), True)
+              "prose-guard:setup" in said[0].get("systemMessage", ""), True)
         check("to the model too, so it can offer to run it",
-              "prose-guard:setup" in (said[0] or {}).get("additionalContext", ""), True)
-        check("and then never again", said[1], None)
+              "prose-guard:setup" in (said[0].get("hookSpecificOutput") or {})
+              .get("additionalContext", ""), True)
+        check("and it is still said the next session, because it is still true", bool(said[1]), True)
+        # A level, any level, ends it — including the one that turns everything off. The person has
+        # decided, and a notice they cannot stop is its own defect.
+        for level in ("medium", "disabled"):
+            chosen = {**nothing_chosen(home), "PROSE_GUARD_EFFORT": level}
+            check(f"and never again once {level} is chosen",
+                  raw_session_start_output(chosen), {})
+
+
+def test_a_config_file_written_for_another_reason_does_not_silence_the_notice():
+    """The hole the old notice had, and the reason it moved.
+
+    That notice asked whether `config.json` EXISTS, which is not the same question as whether anybody
+    has chosen a level. `share_dir.py` writes that file to register a team's shared audience
+    directory, and `audiences.py never-known` writes it to hold one term — neither puts an `effort`
+    key in it. So the ordinary sequence "install, run /prose-guard:audiences, get to setup later"
+    suppressed the notice permanently, with the guard checking nothing and saying nothing about it.
+    """
+    with tempfile.TemporaryDirectory() as home:
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"shared": ["/somewhere/a-team-shares"]}, fh)
+        said = raw_session_start_output(nothing_chosen(home))
+        check("a config.json with no effort key is not a choice",
+              "prose-guard:setup" in said.get("systemMessage", ""), True)
 
 
 def test_state_stays_out_of_the_plugin():
@@ -2271,7 +2306,6 @@ def test_levels():
     import importlib
 
     import checks
-    import host
     import paths
     from checks import config
     for level, names in (("disabled", []),
@@ -2314,17 +2348,21 @@ def test_levels():
         check("while a level nobody set is nothing to complain about", config.complaints(), [])
 
         # Precedence, which the module docstring states and nothing checked: the environment, then the
-        # plugin's own setting, then the file. Reversed, a level written into a file once quietly
-        # overrides the one this session was started with, at whichever end is less safe.
+        # file. Reversed, a level written into a file once quietly overrides the one this session was
+        # started with, at whichever end is less safe.
         with open(os.path.join(tmp, "config.json"), "w") as fh:
             json.dump({"effort": "high"}, fh)
         check("the file decides when nothing else does", config.effort(), "high")
-        os.environ[host.EFFORT_VAR] = "medium"
-        check("the plugin's own setting beats the file", config.effort(), "medium")
         os.environ["PROSE_GUARD_EFFORT"] = "low"
-        check("and the environment beats both", config.effort(), "low")
+        check("and the environment beats it", config.effort(), "low")
         del os.environ["PROSE_GUARD_EFFORT"]
-        del os.environ[host.EFFORT_VAR]
+
+        # The variable Claude Code sets from a plugin's `userConfig` is not a source here, because this
+        # plugin declares no such field: a free-text dialog at install asks for a level before anybody
+        # has been told what one costs, and records it where config.json can disagree with it.
+        os.environ["CLAUDE_PLUGIN_OPTION_EFFORT"] = "medium"
+        check("and the plugin's own option is not one of them", config.effort(), "high")
+        del os.environ["CLAUDE_PLUGIN_OPTION_EFFORT"]
     del os.environ["PROSE_GUARD_HOME"]
     importlib.reload(paths)
     importlib.reload(config)
@@ -3178,6 +3216,84 @@ def test_an_edit_is_not_refused_over_a_defect_it_did_not_touch():
                              "and nothing else on the machine reads it.", "newterm")
         check("a term the edit introduces is refused as well", verdict, "deny")
         check("naming it", "ZZQ" in said, True)
+
+
+def test_a_complaint_about_untouched_text_is_said_once_a_session():
+    """Rewriting one document is many edits, and the notes about the rest of it must not repeat on all
+    of them.
+
+    A finding about text the call did not write is remembered by its own words. Remembered by the digest
+    of the document instead — the right key for a finding about the text being sent — the same complaint
+    about the same untouched paragraph comes back on every edit, because every edit changes the digest,
+    at a model call apiece and with nothing the edit in hand can do about it.
+
+    The session is the same across both edits here, which is what the test turns on, and what
+    `test_an_edit_is_not_refused_over_a_defect_it_did_not_touch` cannot exercise: it takes a fresh
+    session per edit.
+    """
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as repo:
+        home = os.path.join(tmp, "home")
+        write_audience(home, "team", matches={"paths": ["*"]}, inherits=["engineers"],
+                       members=["a", "b", "c", "d"])
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"effort": "low"}, fh)
+        subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True, timeout=60)
+        path = os.path.join(repo, "notes.md")
+        opening = ("This file lists every term the checker treats as shared vocabulary for this team. "
+                   "It exists so a a reader can see what was measured rather than trusting a count. "
+                   "Everything in the the list below was measured the same way.")
+        # Two sentences in the body, edited one after the other. Both are on disk throughout, which is
+        # what lets each edit be a real one without the test rewriting the file underneath the hook.
+        first_line = "The shared file store is mounted on every host."
+        second_line = "Everyone on the team can read it."
+        with open(path, "w") as fh:
+            fh.write(opening + "\n\n" + first_line + " " + second_line + "\n")
+        subprocess.run(["git", "-C", repo, "add", "notes.md"], capture_output=True, timeout=60)
+
+        def edit(old_text, new_text, session="one-rewrite"):
+            return verdict_on({"tool_name": "Edit", "session_id": session, "cwd": repo,
+                               "tool_input": {"file_path": path, "old_string": old_text,
+                                              "new_string": new_text}}, home)
+
+        _, said = edit(first_line, "The shared file store is mounted on every host in the cluster "
+                                   "now, and nothing else on the machine reads it.")
+        check("the first edit hears about the defects already in the file",
+              ['"a a"' in said, '"the the"' in said], [True, True])
+
+        _, again = edit(second_line, "Everyone on the team can read it, and the two people who "
+                                     "maintain it can write to it as well.")
+        check("and the next edit of the same document is not told twice",
+              ['"a a"' in again, '"the the"' in again], [False, False])
+
+        # A different session is a different afternoon, and hears them once too.
+        _, fresh = edit(second_line, "Everyone on the team can read it, though only two people are "
+                                     "able to write anything to it.", session="someone-else")
+        check("but a fresh session still hears them", '"a a"' in fresh, True)
+
+        # And none of this may reach a complaint about the text the call actually wrote. Saying those
+        # once would be the worst version of this: an agent is sent back over a defect, does not fix
+        # it, edits something else in the same breath, and the guard has nothing left to say — a real
+        # defect going quiet because it was mentioned once already.
+        verdict, first = edit(first_line, "The shared file store is is mounted on every host.",
+                              session="not-fixed")
+        check("a defect the edit wrote is refused", (verdict, '"is is"' in first), ("deny", True))
+        verdict, twice = edit(first_line, "The shared file store is is mounted on each host in the "
+                                          "cluster and nowhere else at all.", session="not-fixed")
+        check("and refused again when the next edit still has it",
+              (verdict, '"is is"' in twice), ("deny", True))
+
+        # The case the `mine(f) or` guard is really for: one complaint that starts as somebody else's
+        # and becomes this call's. "a a" is reported once as already in the file, and is then still on
+        # the page when the edit rewrites the paragraph holding it — at which point it is the agent's
+        # own defect and has to be refused, however many times it has been mentioned as scenery.
+        moved = "moving-defect"
+        _, mentioned = edit(second_line, "Everyone on the team can read it, and two of them can "
+                                         "write to it as well.", session=moved)
+        check("first heard as somebody else's", '"a a"' in mentioned, True)
+        verdict, owned = edit(opening, opening.replace("trusting a count", "trusting any count"),
+                              session=moved)
+        check("and refused once the edit owns the paragraph it is in",
+              (verdict, '"a a"' in owned), ("deny", True))
 
 
 def test_an_audience_without_expansions_says_it_needs_a_rescan():
@@ -4045,7 +4161,6 @@ def test_a_bad_value_in_a_hand_written_file_is_reported_not_ignored():
             json.dump({"effort": "medim"}, fh)
         env = dict(os.environ, PROSE_GUARD_HOME=home)
         env.pop("PROSE_GUARD_EFFORT", None)
-        env.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
         payload = {"session_id": "s", "tool_name": "Bash",
                    "tool_input": {"command": 'git commit -m "' + "word " * 40 + '"'}}
         said = []
@@ -4070,11 +4185,7 @@ def test_what_this_plugin_expects_of_its_host_is_in_one_place():
     """
     import host
 
-    check("the effort variable is named once",
-          [p for p in (os.path.join(LIB, "checks", "config.py"),
-                       os.path.join(PLUGIN, "hooks", "scripts", "outgoing_guard.py"))
-           if "CLAUDE_PLUGIN_OPTION_EFFORT" in open(p).read()], [])
-    check("and so is the checker's binary",
+    check("the checker's binary is named once",
           [p for p in (os.path.join(LIB, "checks", "ask.py"), os.path.join(LIB, "checks", "model.py"))
            if '"claude"' in open(p).read()], [])
 
@@ -4126,15 +4237,21 @@ def test_what_the_hook_adds_to_the_conversation_is_bounded_and_ordered():
     def mine(f):
         return '"number 7 ' in f.message
 
-    msg = guard.one_message(found, mine, guard.MOST_TO_SAY)
+    msg, shown = guard.one_message(found, mine, guard.MOST_TO_SAY)
     check("what this call wrote is said first", '"number 7 ' in msg.splitlines()[0], True)
     check("the rest is a count, not a list", "more, about text this call did not write" in msg, True)
     check("and it fits the budget", len(msg) <= guard.MOST_TO_SAY + 400, True)
+    # What it says it showed has to be what it showed. A caller remembers findings by this list so it
+    # can stop repeating them, and one name too many in it silences a note nobody has read yet.
+    check("and it reports exactly the findings it carried",
+          [f.message in msg for f in shown] + [len(shown) < len(found)], [True] * len(shown) + [True])
 
     # A spent budget must not silence a check completely: that is indistinguishable from passing.
-    last = guard.one_message(found, mine, 0)
+    last, kept = guard.one_message(found, mine, 0)
     check("a check with nothing left to spend still says one thing", len(last.splitlines()) >= 1, True)
     check("and it is the actionable one", '"number 7 ' in last.splitlines()[0], True)
+    check("and it is the only one counted as said", [f.message for f in kept],
+          [f.message for f in found if mine(f)])
 
 
 def test_a_team_can_retire_a_destination_as_well_as_add_one():
@@ -4640,13 +4757,13 @@ def test_you_are_told_when_a_message_was_checked_and_what_it_cost():
         check("a denial is its own notice, so it does not also carry a tally",
               [s for _, s in (first, second)], ["", ""])
         check("the message that goes out says how many rewrites it took",
-              third[1].startswith("prose-guard low for team: 2 rewrites."), True)
+              third[1].startswith("prose-guard · low · team · 2 rewrites"), True)
 
         # And a clean message says so, which is the half that makes a miss visible: if this line is
         # absent, nothing was checked, and that is now the only thing absence can mean.
         clean = send("Rebuild the payload index after the credential job once more" + pad)
         check("a message nobody objected to says it was checked",
-              clean, ("allow", "prose-guard low for team: nothing to say."))
+              clean, ("allow", "prose-guard · low · team · clean"))
 
 
 def test_the_argument_before_a_message_goes_out_can_be_read_back():
@@ -4819,17 +4936,25 @@ def test_the_line_says_who_the_message_was_judged_for():
         def __init__(self, resolved, names, fallback):
             self.resolved, self.names, self.fallback = resolved, names, fallback
 
-    check("a measured audience is named",
-          guard.reader("low", Audience(True, ["platform"], None)), "prose-guard low for platform")
+    check("a measured audience is named", guard.reader(Audience(True, ["platform"], None)),
+          "platform")
     check("two at once are both named",
-          guard.reader("high", Audience(True, ["platform", "docs"], None)),
-          "prose-guard high for platform + docs")
-    check("and a guess says so, and says what it fell back to",
-          guard.reader("low", Audience(False, [], "engineers")),
-          "prose-guard low, no audience for this — guessing against engineers")
+          guard.reader(Audience(True, ["platform", "docs"], None)), "platform + docs")
+    check("and a guess says so rather than naming what it fell back to",
+          guard.reader(Audience(False, [], "engineers")), "no audience")
     # Never a bare name that could be read as measured when it was not.
     check("with no audience at all it still cannot read as measured",
-          "guessing" in guard.reader("low", None), True)
+          guard.reader(None), "no audience")
+    # The whole line, because the fields are what a person reads and their order is the point.
+    check("a clean message, judged against measured readers",
+          guard.tally("high", 0, 0, 0, Audience(True, ["platform"], None)),
+          "prose-guard · high · platform · clean")
+    check("and one that was argued with, with somewhere to read the argument",
+          guard.tally("high", 2, 1, 8, Audience(True, ["platform"], None)),
+          "prose-guard · high · platform · 2 rewrites, 1 note · 8 calls · /prose-guard:feedback")
+    check("nothing points at the drafts when there are none",
+          guard.tally("low", 0, 1, 0, Audience(False, [], "engineers")),
+          "prose-guard · low · no audience · 1 note")
 
     # End to end, because the hook has to pass the audience it actually used rather than re-derive one.
     with tempfile.TemporaryDirectory() as home:
@@ -4854,9 +4979,9 @@ def test_the_line_says_who_the_message_was_judged_for():
             return out.get("systemMessage", "")
 
         check("inside a repository the audience routes on, it is named",
-              "for platform" in said_for(repo, "a"), True)
+              said_for(repo, "a").startswith("prose-guard · low · platform ·"), True)
         check("and outside it, the guess is named as a guess",
-              "guessing against engineers" in said_for(home, "b"), True)
+              said_for(home, "b").startswith("prose-guard · low · no audience ·"), True)
 
 
 def test_a_long_document_gets_more_calls_than_a_short_message():

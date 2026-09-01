@@ -17,30 +17,36 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/install_rule.py"
 
 ## 2. Choose a level
 
-The numbers are five paired sessions on one fixture and one model, taken when `high` ran four
-model-backed checks rather than the six it runs now — so the ordering is the finding and the digits are
-not:
+What each level adds per message sent. Read the ordering rather than the digits — one fixture, one
+model:
 
 | level | what runs | added per message sent |
 |---|---|---|
 | `disabled` | nothing | — |
 | `low` | the two deterministic checks only, no model call | +12s |
 | `medium` | plus one advisory writing check | +19s |
-| `high` | one separate check per concern, re-verified after each edit | +75s |
+| `high` | one separate check per concern, all asked at the same time | +12s |
 
-Both counter-intuitive results are worth saying out loud:
+Cost is not what separates `medium` from `high`, and two results are worth saying out loud because
+neither is what somebody expects:
 
 - **`low` is not the cheap option.** No model call, but holding a message back costs a whole agent
   turn on their own context, which is dearer than the small call `medium` adds.
-- **`high` is not known to be better than `medium`.** Both satisfied every concern on every message
-  measured, which is a judge at its ceiling rather than evidence they are equal.
+- **`medium`'s judgement half has never been measured changing anything.** Advice reaches the model
+  after the call has already run, so there is no turn in which the message could change: 41 messages
+  got advice and went out, and none was corrected afterwards. `high` asks the same concerns separately
+  and can hold a message, which is the only mechanism here shown to change what goes out.
 
-`medium` is what the evidence supports. Set it with `/plugin configure prose-guard@novada`, which is
-the first-class path, or write the file:
+So **`high`** for somebody who wants the judgement checks to do something, and **`medium`** for
+somebody who wants the two arithmetic checks and nothing that can cost a held turn. The full argument,
+and the caveat on those 41 messages, is in
+[docs/design-notes.md](../../../../docs/design-notes.md).
+
+Take their answer and write it — this is the only place a level is set:
 
 ```
 python3 -c "import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/lib'); \
-from checks import config; print(config.save('medium'))"
+from checks import config; print(config.save('<their answer>'))"
 ```
 
 ## 3. Offer the rule
@@ -176,6 +182,22 @@ Until an audience is measured, the tool knows what developers in general know an
 people they write to, so it reports unexplained terms as a guess and does not block. Point at
 `/prose-guard:audiences`. Optional, a few minutes, and it is what turns advice into enforcement.
 
-## 6. Restart
+## 6. Say what is running now, and what is next
 
-Hooks and rules load at startup. Nothing takes effect until then.
+The level is live from the moment it is written — the hook reads it on every call, so nothing has to be
+reloaded for it. The rule is different: `~/.claude/rules/` is read at session start, so a rule installed
+in step 3 does not apply until the next session they open.
+
+End by telling them, in this order, and in one short paragraph rather than a checklist:
+
+- **What is on.** The level, and which of their tools it now watches. Name the two or three they will
+  hit today, not the whole list.
+- **What they will see.** One line on every message that goes out —
+  `prose-guard · medium · no audience · clean` — and that its absence means nothing was checked.
+  Warn them the third field says `no audience` until step 5 happens, which is what stops anything being
+  held back on terms.
+- **The one thing left.** `/prose-guard:audiences` if they skipped it, or a new session if they took the
+  rule. Not both, and not a list of everything they could do.
+
+Do not tell them to restart Claude Code. An install is active as soon as Claude Code says `Plugin is now
+active`, and `/reload-plugins` covers the case where it says otherwise.

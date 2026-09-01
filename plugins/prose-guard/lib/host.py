@@ -14,6 +14,9 @@ and one place to look, and so that `exists()` can say plainly when something exp
 What is NOT here, deliberately: `${CLAUDE_PLUGIN_ROOT}`, which a skill expands for itself and no
 Python ever needs, and `CLAUDE_PLUGIN_DATA`, whose story is in paths.py — it reaches a hook and not a
 skill, so resolving state through it split the config in two.
+
+`CLAUDE_PLUGIN_OPTION_EFFORT` belongs to a `userConfig` field this plugin deliberately does not declare;
+`checks/config.py` says why.
 """
 from __future__ import annotations
 
@@ -21,9 +24,6 @@ import glob
 import json
 import os
 
-# The setting Claude Code puts in a hook's environment from the plugin's own `userConfig`. Verified to
-# reach a hook and NOT a skill's shell, which is why it can never be the only way to read a setting.
-EFFORT_VAR = "CLAUDE_PLUGIN_OPTION_EFFORT"
 # The binary a model-backed check shells out to. One name, so a check and the thing that reports the
 # check could not run cannot disagree about what was missing.
 CLI = "claude"

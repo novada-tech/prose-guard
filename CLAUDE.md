@@ -108,6 +108,23 @@ One home per explanation, and links from anywhere else. When you change code tha
 change the comment in the same commit — prose that has drifted from its code is a correctness problem
 wearing a comment's clothes.
 
+## No history
+
+State what is true. Never what used to be true.
+
+"This used to be X", "earlier versions did Y", "that was true before" — none of it belongs in code,
+documentation or a skill. A reader arriving today has to carry the old design through the new one to
+understand either, and the note is stale from the commit after the one that added it. It is worst in a
+skill, where the audience is a model that will faithfully act on the version it read last.
+
+That is not the same as the rationale above, which stays. **A rejected alternative is a fact about the
+design; a superseded implementation is a fact about the repository.** "Splitting a long document was
+measured and finds no more, at nine times the calls" tells the next person not to try it. "The notice
+used to fire on the first tool call" tells them nothing they can use.
+
+Where the old shape genuinely explains the new one, `git log` is where that lives, and
+[docs/design-notes.md](docs/design-notes.md) is where a design that did not survive a measurement goes.
+
 ## Commit messages carry the evidence
 
 One coherent change each, subject saying what changes for a user rather than what was edited, body

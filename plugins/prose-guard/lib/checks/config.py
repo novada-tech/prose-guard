@@ -23,7 +23,6 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import host  # noqa: E402
 import paths  # noqa: E402
 import settings  # noqa: E402
 
@@ -39,31 +38,42 @@ _LEVEL = settings.one_of(*LEVELS)
 
 def _sources() -> tuple[tuple[str, str | None], ...]:
     """Where a level may be set, nearest first, each with a name for saying which one is wrong."""
+    # Deliberately not a `userConfig` field in plugin.json. That would make Claude Code ask for a level
+    # in a dialog at install, as free text — `userConfig` has no enumerated type — and record the answer
+    # somewhere config.json could disagree with. docs/design-notes.md carries the rest.
     return (("PROSE_GUARD_EFFORT", os.environ.get("PROSE_GUARD_EFFORT")),
-            # Set by Claude Code from the plugin's userConfig. Verified: it reaches a hook's
-            # environment, though not a skill's shell, which is why it cannot be the only path.
-            ("the plugin's effort setting", os.environ.get(host.EFFORT_VAR)),
             ("config.json", paths.config().get("effort")))
 
 
-def effort() -> str:
+def chosen() -> str | None:
+    """The level a source actually names, or None when no source names one.
+
+    `effort()` cannot answer this. It says `disabled` both for somebody who turned the guard off and
+    for somebody who has never been asked, and those two deserve opposite treatment: one has decided
+    and must never be nagged, the other is running an install that checks nothing and looks installed.
+    `hooks/scripts/session_start.py` is the only caller that needs to tell them apart, and it is the
+    one place a person is told their install is doing nothing.
+    """
     for _, value in _sources():
         level, _ = _LEVEL(value)
         if level:
             return level
-    return "disabled"
+    return None
+
+
+def effort() -> str:
+    return chosen() or "disabled"
 
 
 def complaints() -> list[str]:
     """Everything wrong with how this level was set, in sentences, or [] when nothing is.
 
     The environment is checked here and the file is checked by its declaration in settings.py, because
-    an environment variable has no file to be declared in. `userConfig` has no enumerated type — string,
-    number, boolean, directory and file are the whole list — so `/plugin configure` offers a free-text
-    box, and `medim` in it means disabled with nothing said unless somebody looks.
+    an environment variable has no file to be declared in. `medim` anywhere means disabled with nothing
+    said unless somebody looks, and a level is typed by hand in all three places that can hold one.
     """
     out: list[str] = []
-    for name, value in _sources()[:2]:            # the file's own complaint comes from its declaration
+    for name, value in _sources()[:1]:            # the file's own complaint comes from its declaration
         if (value or "").strip():
             _, complaint = _LEVEL(value)
             if complaint:

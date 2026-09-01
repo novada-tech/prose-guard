@@ -339,6 +339,72 @@ how the cases are known to be load-bearing:
 - a second `def` reusing an existing test name, which replaces the first in `globals()` and leaves the
   count unchanged. The runner's own guard could not see this one until it counted definitions instead
   of comparing two sets of names, so the mutation was green before it was red
+- `chosen()` answering a level when no source names one, so an install nobody has set up looks
+  configured and says nothing about checking nothing. Caught by 11 cases
+- the `mine` guard dropped from the repeat filter, so a complaint that starts as scenery and ends up
+  inside the paragraph an edit rewrites is suppressed as already-said — a defect the edit owns, allowed
+  in silence. The first version of its test did not catch this, because it only ever showed one
+  complaint staying somebody else's; what pins it is the one that MOVES
+
+One survivor, recorded rather than claimed equivalent: marking not-mine findings from `found` instead
+of from what `one_message` actually showed. The two differ only when the turn's budget drops a finding,
+and the budget cannot bind at `low`, where mechanics and terms each return one short finding. Binding it
+needs model calls, so this is pinned by `one_message`'s own contract — it reports the findings it
+carried — and not end to end.
+
+## The level is not a plugin setting
+
+A plugin can declare a `userConfig` field, and Claude Code then asks for its value in a dialog when the
+plugin is enabled. That is the obvious home for the effort level and it is not used, for two reasons that
+only show up once you try it.
+
+`userConfig` has no enumerated type — `string`, `number`, `boolean`, `directory` and `file` are the whole
+list — so the dialog is a free-text box. There is no picker, and no way to mark `medium` as the answer
+the measurements support. What reaches the user is a question with four valid answers, none of them
+recommended, asked before anything has told them that `low` is not the cheap option and `high` is not
+measurably better.
+
+It also arrives at the worst moment: the dialog opens on install, which is the one point at which nobody
+has read anything about the tool yet.
+
+The second reason is that it is a second home for one fact. The value lands in
+`~/.claude/settings.json`, and `config.json` holds the same setting, and the two can disagree about
+whether the guard is on at all.
+
+`/prose-guard:setup` asks the same question with the cost table beside it, and writes one file.
+
+## Generic "you" is not the second person the address check is for
+
+`address` failed a README opening — "You have read a review comment from an agent that nobody could
+digest" — in three runs of three, and at `high` that holds the message back. Nothing was wrong with it.
+
+The check exists for a "you" only one person in the audience can answer to: a pull request body saying
+"the two files worth your review", an announcement saying "your comment was right". Most readers are not
+that person and cannot tell whether it means them. A "you" addressed to every reader alike names nobody
+in particular, so nobody is left wondering — and the same README says "you give it an audience" and
+"nothing leaves your machine" a dozen times without the check minding at all. What it was reacting to
+was an experience attributed to the readership, which is a figure of speech.
+
+The clause now says which of the two it means and gives the non-example. Both arms measured in one
+session, `claude-sonnet-5` at medium effort, `--check address --reps 2`:
+
+| | catches | passes real prose | disagrees with itself |
+|---|---|---|---|
+| unchanged | 5/8 | 9/10 | 22% |
+| narrowed | 6/8 | 10/10 | 0% |
+
+Better in all three columns, and the direction that matters most is the middle one: the unchanged prompt
+false-alarmed on `release-note.md` for "it changes one thing you have to act on", which is the same
+mistake on prose already judged well built.
+
+Two positives still get past, both of them "restates what the destination shows", which is clause (d)
+and was missed by the unchanged prompt as well.
+
+A first attempt is recorded here because it failed and the failure is the useful part. It added a
+paragraph ending "PASS all of it", which scored 3/8 and 44% — worse than doing nothing, and it stopped
+catching positives under clauses it had not touched. A permissive block in a prompt whose shape is
+"FAILS only if you can point to one of these" does not narrow one clause, it lowers the whole bar. The
+change that worked went inside the clause it was about and added six words of non-example.
 
 ## One config directory, not two
 

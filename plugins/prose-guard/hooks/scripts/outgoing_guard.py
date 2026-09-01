@@ -242,15 +242,23 @@ def emit(decision: str, message: str, hint: str = "", for_user: str = "") -> Non
 MOST_TO_SAY = 3000
 
 
-def one_message(found: list[Finding], mine: Callable[[Finding], bool], budget: int) -> str:
-    """Everything worth saying about one check's findings, within what is left of the turn's budget.
+def one_message(found: list[Finding], mine: Callable[[Finding], bool],
+                budget: int) -> tuple[str, list[Finding]]:
+    """Everything worth saying about one check's findings, and which of them actually got said.
 
     What this call wrote comes first, whatever order the runs found things in: those are the ones the
     agent can act on now, and they are the only ones that can hold the message back. So a budget that
     runs out drops the least actionable findings, not an arbitrary tail.
+
+    The second half of the return exists because a caller that remembers what it has already said must
+    remember only what was SHOWN. Marking a finding as said and then dropping it for budget suppresses
+    it having never been read once — the mistake `telling.py` names in its own docstring, and an easy one
+    to make here, because the findings this drops are exactly the ones a caller wants to remember.
     """
     ordered = [f for f in found if mine(f)] + [f for f in found if not mine(f)]
-    lines, dropped = [], 0
+    lines: list[str] = []
+    shown: list[Finding] = []
+    dropped = 0
     for f in ordered:
         line = f.message + ("" if mine(f) else "  (already in the file)")
         # `lines and` is a floor of one, deliberately: a check that found something always gets to say
@@ -260,10 +268,23 @@ def one_message(found: list[Finding], mine: Callable[[Finding], bool], budget: i
             dropped += 1
             continue
         lines.append(line)
+        shown.append(f)
     if dropped:
         lines.append(f"({dropped} more, about text this call did not write. "
                      f"`python3 lib/check_prose.py <file>` shows them.)")
-    return "\n".join(lines)
+    return "\n".join(lines), shown
+
+
+def repeated(finding: Finding) -> str:
+    """What a finding is remembered under, once it has been said about text the call did not write.
+
+    Its own words, and not the digest of the document it was found in. A digest is the right key for a
+    complaint about the text being sent — an unchanged resend earns it again — and the wrong one here,
+    because every edit changes the digest while the untouched paragraph stays exactly as it was. Keyed
+    that way, rewriting one document repeats the same notes on every edit of it, at a model call apiece,
+    and none of them is something the edit in hand can act on.
+    """
+    return "already said: " + hashlib.sha1(finding.message.encode()).hexdigest()[:12]
 
 
 def advice_message(advice: list[Advice]) -> str:
@@ -361,19 +382,23 @@ def say(finding: Finding, check: Check, state: dict[str, Any], path: str, digest
     return False
 
 
-def reader(level: str, audience: Resolved | None) -> str:
-    """The opening of the line: which level ran, and who the message was judged for.
+def reader(audience: Resolved | None) -> str:
+    """Who the message was judged for, and whether that was measured or assumed.
 
     Whether the audience matched is not a detail. One that did was measured from what those people have
     actually written, and it can hold a message back. One that did not cannot — findings become advice,
     because blocking on a guess spends somebody's first day arguing about their own house vocabulary.
-    Somebody watching a message go out unchallenged deserves to know which of those they are looking at,
-    and it used to be invisible.
+    Somebody watching a message go out unchallenged deserves to know which of those they are looking at.
+
+    Which baseline a guess is against is deliberately not here. Naming it costs 44 characters of a line
+    that appears on every message a person sends, behind a `PreToolUse:<tool> says:` prefix Claude Code
+    adds and nothing here can shorten. The fact worth carrying is that the reader is assumed rather than
+    measured; which assumption it was is a question somebody asks once, and `/prose-guard:audiences`
+    answers it.
     """
     if audience is not None and audience.resolved and audience.names:
-        return f"prose-guard {level} for {' + '.join(audience.names)}"
-    guess = getattr(audience, "fallback", None) or "the shipped baseline"
-    return f"prose-guard {level}, no audience for this — guessing against {guess}"
+        return " + ".join(audience.names)
+    return "no audience"
 
 
 # How many checks may be asked at the same time. Each is a `claude -p` subprocess, so this is bounded by
@@ -437,7 +462,7 @@ def other_concerns(running: list[Check], answers: dict[str, tuple], blocking: st
         found = [f for f in answers[check.NAME][0] if mine(f)]
         if not found:
             continue
-        said = one_message(found, mine, room - sum(len(o) for o in out))
+        said, _ = one_message(found, mine, room - sum(len(o) for o in out))
         if said:
             out.append(f"({check.NAME}) {said}")
     return out
@@ -460,24 +485,34 @@ def tally(level: str, rewrites: int, notes: int, calls: int,
     Written as counts rather than a verdict because the useful reading is comparative: three rewrites
     on one message is worth looking at, and so is a level nobody meant to be running, or a reader
     nobody meant to be assumed.
+
+    Fields separated rather than a sentence, and that is about where it lands. Claude Code prints it as
+    `PreToolUse:<tool> says: <this>`, and a tool name like
+    `mcp__github__add_comment_to_pending_review` spends the width before this gets a word in. A sentence
+    read after that prefix parses as a second clause of somebody else's; four fields in a fixed order
+    read as a status line, which is what it is — the same shape every time, on every message, so an
+    unexpected value is what the eye catches rather than something to read for.
     """
     said = []
     if rewrites:
         said.append(f"{rewrites} rewrite" + ("s" if rewrites != 1 else ""))
     if notes:
         said.append(f"{notes} note" + ("s" if notes != 1 else ""))
+    fields = ["prose-guard", level, reader(audience),
+              ", ".join(said) if said else "clean"]
+    if calls:
+        fields.append(f"{calls} call" + ("s" if calls != 1 else ""))
     # Where to read the argument back, said only when there is one. A rewrite is an exchange that
     # happened out of sight, and somebody judging whether the complaint was fair needs the drafts rather
-    # than the count. Nothing is recorded unless a check held something back, so this line and that
+    # than the count. Nothing is recorded unless a check held something back, so this field and that
     # record appear together or not at all.
     #
     # A skill rather than a script path, because everything else here is asked for in words —
     # /prose-guard:setup, /prose-guard:audiences — and a path to a file inside a plugin directory is
     # not something anybody should have to keep.
-    return (reader(level, audience) + ": "
-            + (", ".join(said) if said else "nothing to say")
-            + (f" ({calls} model call{'s' if calls != 1 else ''})" if calls else "")
-            + (". /prose-guard:feedback shows the drafts" if rewrites else "") + ".")
+    if rewrites:
+        fields.append("/prose-guard:feedback")
+    return " · ".join(fields)
 
 
 def say_together(findings: list[Finding], checks: list[Check], state: dict[str, Any], path: str,
@@ -682,13 +717,27 @@ def main() -> None:
         # worth saying and is not grounds for refusing the edit.
         def mine(f: Finding) -> bool:
             return written_here(text, f, ctx.mine)
+        # Drop what has already been said about text this call did not write. Only those: a finding
+        # about the edit in hand is about THIS text and is remembered by its digest, so an unchanged
+        # resend re-says it and an edit that did not fix it earns the complaint again. See `repeated`.
+        already = set(state.get("said", []))
+        found = [f for f in found if mine(f) or repeated(f) not in already]
+        if not found:
+            state["verdicts"][check.NAME] = {"digest": digest}
+            save_state(path, state)
+            continue
         blocking = [f for f in firm if f.severity == BLOCK and mine(f)]
-        finding = found[0]._replace(
-            # `a.text`, not `a` — advice items carry the reason they are only advice now, and `len()`
-            # of the record is its field count. That would have silently handed every finding the same
-            # room whatever had already been said.
-            message=one_message(found, mine, MOST_TO_SAY - sum(len(a.text) for a in advice)),
-            severity=BLOCK if blocking else "advise")
+        # `a.text`, not `a` — advice items carry the reason they are only advice, and `len()` of the
+        # record is its field count. That would silently hand every finding the same room whatever had
+        # already been said.
+        said, shown = one_message(found, mine, MOST_TO_SAY - sum(len(a.text) for a in advice))
+        # Marked here, from what the message actually carried, and never from `found`: the findings a
+        # spent budget drops are the not-mine ones, so marking before showing would silence exactly
+        # the notes nobody has read yet.
+        for f in shown:
+            if not mine(f):
+                ledger.worth_saying(repeated(f))
+        finding = found[0]._replace(message=said, severity=BLOCK if blocking else "advise")
         # A destination can refuse to block at all. Blocking is justified by the text being about to
         # reach a reader unreviewed; where it is not — a draft that lands in your own compose box —
         # the finding is worth saying and not worth a turn spent arguing.

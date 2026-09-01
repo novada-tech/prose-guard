@@ -82,7 +82,7 @@ Where it stands today, at `claude-sonnet-5` and medium effort, 13 positives and 
 | structure | 5/6 | 10/10 | 12% |
 | sentence | 5/6 | 10/10 | 12% |
 | reference | 5/6 | 9/10 | 25% |
-| address | 7/8 | 10/10 | 11% |
+| address | 6/8 | 10/10 | 0% |
 | promise | 2/4 | 11/14 | 11% |
 
 `promise` is measured against the six long negatives in
@@ -99,6 +99,11 @@ kinds are missing. Drop the `.advise` from the filename when it reaches the bloc
 **These figures move between runs on unchanged prompts.** Three consecutive runs of `address` alone gave
 5/5, 5/5 and 4/5 on the negatives. So a one-cell difference is not a result, and a change worth claiming
 has to move more than that or be run more times.
+
+They move far enough that the table is not a control. Re-measuring the unchanged `address` prompt gave
+5/8, 9/10 and 22% where the row above it had said 7/8, 10/10 and 11%. Run the arm you are replacing in
+the same session as the arm you are proposing, quote both, and treat the table as the current claim
+rather than as the number to beat.
 
 Do not make one column better by making the other worse without saying so. Both directions matter, and
 the failure that actually loses users is a check that fires on good prose.

@@ -57,6 +57,24 @@ falling. One finding a pass is roughly what a good writer's own draft scores her
 what is left is allowed — chasing zero is chasing something a good writer does not reach. The
 measurements behind all of that are in [docs/design-notes.md](../../../../docs/design-notes.md).
 
+## The hook is checking your edits as well
+
+A prose file in a git working tree is a destination like any other, so every edit you make while
+rewriting one is checked on its way to disk. Two things follow, and neither is a reason to work around
+it.
+
+**A block is worth obeying.** It is about the text you just wrote, at whatever level is configured,
+and it is the same bar the deliberate run above holds you to. Fix it and edit again.
+
+**Its notes about text your edit did not write are not new information.** The run above already gave
+you all of them, in full and in order, which is why they are said once a session per document rather
+than on every edit. Work from the deliberate run; treat these as a reminder that the rest of the
+document is still there.
+
+Do not reach for `PROSE_GUARD_SKIP`. It is read out of a shell command and an `Edit` has none, so it
+cannot reach one — and writing the file by some other route to get around the check is the exact
+failure this tool exists to prevent: prose that goes out looking checked and is not.
+
 ## What you hand back
 
 Two things, both of them, every time:

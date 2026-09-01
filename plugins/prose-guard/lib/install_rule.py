@@ -114,7 +114,10 @@ def main() -> int:
         return 1
     os.makedirs(os.path.dirname(TARGET), exist_ok=True)
     shutil.copyfile(SOURCE, TARGET)
-    print(f"installed {TARGET}\nRestart Claude Code: rules load at startup.")
+    # Not "restart Claude Code": that implies the rest of the plugin needs one, and it does not. Rules
+    # are read at session start and nothing reloads them mid-session, so the next session is the honest
+    # instruction.
+    print(f"installed {TARGET}\nIt applies from your next session: rules load at session start.")
     return 0
 
 

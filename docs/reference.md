@@ -124,12 +124,19 @@ running. It goes to both now: you see the notice, and the agent knows enough to 
 
 ## What you see when a message is checked
 
-One line, on the message that goes out:
+One line, on the message that goes out. Claude Code prefixes it with `PreToolUse:<tool> says:`, which is
+its own and nothing here can shorten:
 
 ```
-prose-guard high: 2 rewrites, 1 note (7 model calls).
-prose-guard low: nothing to say.
+prose-guard · low · platform-team · clean
+prose-guard · high · platform-team · 2 rewrites, 1 note · 7 calls · /prose-guard:feedback
+prose-guard · low · no audience · 1 note
 ```
+
+The fields never move: the level that ran, who it was judged for, what came of it, what it cost, and
+where to read the argument back if there was one. **`no audience`** in the third position is the one
+worth knowing — nothing was held back on terms, because the reader was assumed rather than measured, and
+`/prose-guard:audiences` is what changes it.
 
 `rewrites` is how many times the agent was sent back before this text passed. A denial carries no such
 line, because a denial is a permission prompt and you have already seen it.
@@ -142,6 +149,19 @@ reading a transcript, and it is worth knowing which gaps are deliberate: under 2
 with no `-m`, and text the guard could not read and said so about.
 
 It costs the agent nothing. `systemMessage` never enters the conversation the model is paying for.
+
+### Before a level is chosen
+
+The biggest gap of all is the one where no level has been chosen, because then no message produces a
+line and the reasoning above cannot help you: an install checking nothing and an install with nothing to
+object to are the same silence. So that state announces itself instead, at the start of every session,
+until a level exists.
+
+`disabled` is a level. Choosing it ends the notice and is the supported way to keep prose-guard
+installed and quiet.
+
+The question it asks is whether a level was ever chosen, not whether `config.json` exists: registering a
+team's shared audience directory writes that file without one.
 
 ### Reading back an argument
 
@@ -401,10 +421,10 @@ sharing a file of the same name.
 |---|---|
 | `config.json` | effort level, which baseline to assume when no audience matches, and any shared directories |
 
-`/plugin configure` shows the effort level as a free-text box, because `userConfig` supports `string`,
-`number`, `boolean`, `directory` and `file` and has no enumerated type — there is no picker to offer. So a
-typo means no checking at all, which reads exactly like switching it off. A level set to something that is
-not a level now says so once a session, as a message to you rather than to the agent.
+The level is a word you type, in `config.json` or in `PROSE_GUARD_EFFORT`, and a typo means no checking
+at all — which reads exactly like switching it off. A level set to something that is not a level says so
+once a session, as a message to you rather than to the agent. `/prose-guard:setup` writes it for you and
+is the way to avoid the question.
 | `audiences/*.json` | one per audience: who they are, what they know, who is in them |
 | `destinations.json` | your own or overridden destinations, read before the shipped ones |
 | `unclaimed-destinations.json` | shapes passive discovery noticed, and what you decided |

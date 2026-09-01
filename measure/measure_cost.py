@@ -68,7 +68,6 @@ def one(args: tuple[str, int, str, str, str]) -> dict[str, Any]:
     env["PROSE_GUARD_STATE"] = os.path.join(work, "state")
     env["CHECKER_COST_LOG"] = os.path.join(work, "checker.jsonl")
     env["PROSE_GUARD_EFFORT"] = level
-    env.pop("CLAUDE_PLUGIN_OPTION_EFFORT", None)
 
     started = time.time()
     run = subprocess.run(

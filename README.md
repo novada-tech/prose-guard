@@ -9,10 +9,48 @@ Nothing about those messages is badly written. They fail because they were not w
 particular.
 
 `prose-guard` is a Claude Code plugin that checks a message on its way out — a chat message, a review
-comment, a commit message, a document — against two questions:
+comment, a commit message, a pull request description, a document — against two questions:
 
 **Who is going to read this?**
 **Why should they care?**
+
+## Install
+
+```
+/plugin marketplace add novada-tech/prose-guard
+/plugin install prose-guard@novada
+/prose-guard:setup
+```
+
+If the install summary says `Run /reload-plugins to activate`, run that first — otherwise the hooks are
+not loaded yet and `/prose-guard:setup` has nothing to configure.
+
+**Run `/prose-guard:setup` before anything else.** Nothing is checked until a level is chosen, and this
+is where you choose one. It takes a few minutes, asks one question at a time, and does three things.
+
+- Asks how much checking you want, with what each level costs. **Pick `medium` or `high`** — [what
+  separates them](#which-level) is what can hold a message back, not what it costs.
+- Offers to install the writing rule: 250 words that reach Claude while a message is being written,
+  rather than when it is sent. It is the only part of this that costs nothing per message.
+- Reads what is on your machine and proposes which of your tools count as sending prose, rather than
+  assuming. Chat, issue trackers and vendor command-line tools go in here.
+
+Skip it and prose-guard says so at the start of every session, because an install that checks nothing
+looks exactly like one that has nothing to object to.
+
+Then, when you have a few more minutes:
+
+```
+/prose-guard:audiences
+```
+
+Optional, and it is the step that lets an unexplained acronym hold a message back rather than merely be
+mentioned. What it builds and why counting works is [below](#how-it-knows-who-is-reading).
+
+Needs `python3` and nothing else — no packages, no virtualenv, no API key beyond the one Claude Code
+already has. Nothing leaves your machine.
+
+## What it checks
 
 Eight checks follow from those two questions, and they are what actually runs. Two are arithmetic — no
 model call, and they run at every level. Six are judgement.
@@ -31,9 +69,13 @@ model call, and they run at every level. Six are judgement.
 **What can hold a message back depends on the level.** The two arithmetic checks always can: both are
 objective and both are a small fix. At `high` five of the six judgement checks can too, because each
 names one concern and quotes the span it means, and a finding two runs agree on is specific enough to
-act on. At `medium` those five concerns are asked as one combined question, and that only ever advises —
-measured against a real label it agrees 50–70% of the time and disagrees with itself between runs, which
-is a prompt to look again rather than something to gate on.
+act on.
+
+At `medium` those five concerns are asked as one combined question, and that only ever advises. It gets
+50–70% right when asked to sort real messages by whether a colleague or an agent wrote them, and
+disagrees with itself between runs — but the reason not to rely on it is stronger than that, and it is
+[under Which level](#which-level): advice arrives after the call has already run, so no measured message
+has ever been corrected by it.
 
 The sixth, the one about the opening, advises at every level and says so in its own filename. It passes
 11 of 14 well-built messages where the blocking checks pass 9 or 10 of 10, and the gap is not worth
@@ -42,8 +84,6 @@ would settle it are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Under 25 words nothing is checked at all.** A short message is not the failure this catches, and it is
 not worth a model call — so a one-line commit message is the wrong thing to test it with.
-
-Everything below is those two questions, made checkable.
 
 ## How it knows who is reading
 
@@ -63,47 +103,31 @@ Send to that channel and it knows `GKE` is safe and `SFTR` is not. Send somewher
 of and it says so rather than guessing at you: **findings become advice, and nothing is held back**,
 because a tool that blocks on a guess spends your first day arguing about your own house vocabulary.
 
-That is also why `medium`'s combined judgement call only ever advises. Asked to sort real messages by
-whether a colleague or an agent wrote them, it manages 50–70%, unstably. Useful as a prompt to look
-again. Not something to gate on. `high` asks the same concerns one at a time and each answer quotes the
-span it means, which is specific enough to hold a message for.
+`/prose-guard:audiences` builds one for you. It reads writing those readers have already done and counts
+how many of them used each term. Four different people writing a term makes it shared. It asks you about
+the ones that reached three, since that is the only place counting cannot decide.
 
-## Setting it up
+## What you see
 
-```
-/plugin marketplace add novada-tech/prose-guard
-/plugin install prose-guard@novada
-```
-
-Then two skills. Both are conversations, and each is worth five minutes.
+One line on every message that goes out, whether or not anything was wrong with it:
 
 ```
-/prose-guard:setup
+prose-guard · low · platform-team · clean
+prose-guard · high · platform-team · 2 rewrites, 1 note · 7 calls · /prose-guard:feedback
+prose-guard · low · no audience · 1 note
 ```
 
-Required: nothing runs until a level is set, and this is where you set one. It does three things.
+The fields never move: the level that ran, who it was judged for, what came of it, and what it cost.
+`no audience` in the third field is what a new install shows, until you have measured one.
 
-- Asks which level you want, and writes your answer.
-- Offers to install the writing rule.
-- Reads what is on your machine and proposes what should count as sending, rather than assuming.
+**When no such line appears, nothing was checked** — that is the only thing its absence can mean, and it
+is how a gap becomes visible without reading a transcript.
 
-```
-/prose-guard:audiences
-```
+A message that was argued with names `/prose-guard:feedback` at the end. That skill replays the drafts:
+what each was held back for, and what finally went out. A held message is otherwise an exchange nobody
+sees, so a fair complaint and an unfair one look identical afterwards.
 
-Optional. Run it and unexplained terms start being held back; skip it and they are reported as a guess,
-because the tool knows nothing about your readers yet.
-
-It reads writing those readers have already done and counts how many of them used each term. Four
-different people writing a term makes it shared. It asks you about the ones that reached three, since
-that is the only place counting cannot decide. Nothing leaves your machine.
-
-Restart Claude Code afterwards. Hooks and rules load at startup.
-
-Needs `python3` and nothing else — no packages, no virtualenv, no API key beyond the one Claude Code
-already has.
-
-### Which level
+## Which level
 
 | level | what runs | added per message sent |
 |---|---|---|
@@ -117,10 +141,10 @@ It runs six now, and asks them at the same time: **34.3s to 12.4s** on a 78-word
 same six model calls and the same verdict. The checks are independent — each reads the same unmodified
 text and none can see another's answer — so only the waiting changed.
 
-The figures above are per message sent, and what a slow message costs is the check with the most to say
-rather than the sum of all of them. On a real pull request review before this change: 39 guarded calls,
-median 50.3s, 217.7s for a 925-word summary comment, and 34.5 minutes of a 168-minute session spent
-waiting on the guard.
+The figures above are per message sent, and a slow message costs whatever its slowest check costs rather
+than the sum of all of them. On a real pull request review before this change: 39 guarded calls, median
+50.3s, 217.7s for a 925-word summary comment, and 34.5 minutes of a 168-minute session spent waiting on
+the guard.
 
 **Pick `medium` or `high`, and know what separates them.** `/prose-guard:setup` asks and writes the
 answer for you. `low` is not the cheap option, and the cost numbers above no longer separate `medium`
