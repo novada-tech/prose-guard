@@ -36,6 +36,11 @@ os.environ["PROSE_GUARD_HOME"] = _ISOLATED
 os.environ.pop("PROSE_GUARD_EFFORT", None)
 os.environ.pop("PROSE_GUARD_STATE", None)
 
+# The checks that can hold a message back, so a bound can be stated without restating a number.
+CHECK_NAMES = ("terms", "mechanics", "relevance", "structure", "sentence", "reference")
+# Mirrors the hook. Stated once here so a bound can be asserted without restating a number.
+MAX_PER_CHECK = 2
+
 PAD = (" Anyone still relying on the previous credentials will need to re-run the setup command "
        "before their next deploy actually goes through cleanly today.")
 # A paragraph, and it has to be one: passive discovery, the prose-file destination and every routing
@@ -537,6 +542,194 @@ def test_only_one_check_holds_a_message_back_however_many_object():
     check("and the others are named in the same interruption",
           "resolver beta" in reason and "resolver gamma" in reason, True)
     check("as context rather than as demands", "none of it is holding this back" in reason, True)
+
+
+def test_advice_says_which_kind_of_advice_it_is():
+    """A finding that wanted to hold the message back is not the same as one that only ever advises.
+
+    Both used to arrive under one sentence — "Advice from a noisy check, not a blocker." An agent
+    reviewing a real pull request read that, took "noisy check" to mean the guard rated these weak, and
+    dismissed three findings it afterwards judged correct, one of them on the review body where "the
+    class passes 60/60" pointed at a class the body never named.
+    """
+    import checks as checks_module
+    guard = load_guard("outgoing_guard_for_advice")
+
+    only_advises = [guard.Advice("Something reads oddly.", "promise", would_have_held=False)]
+    ran_out = [guard.Advice("A coined label is unexplained.", "reference", would_have_held=True),
+               guard.Advice("Something reads oddly.", "promise", would_have_held=False)]
+
+    said = guard.advice_message(only_advises)
+    check("a check that only advises says so", "only ever advise" in said, True)
+    check("and is not called a blocker", "would have held" in said, False)
+
+    said = guard.advice_message(ran_out)
+    check("a check that ran out of complaints says it would have held the message",
+          "reference would have held this message back" in said, True)
+    check("and says why it is advice now", "already asked twice" in said, True)
+    check("the finding itself still travels", "A coined label is unexplained." in said, True)
+    check("nothing is called noise", "noisy" in said.lower(), False)
+    check("nothing at all when there is nothing", guard.advice_message([]), "")
+
+
+def test_a_review_comment_is_judged_with_the_code_it_is_attached_to():
+    """The call carries the anchor; the destination used to keep only the body.
+
+    So `reference` flagged "the markers", "this sweep" and "the branch" as undefined in comments attached
+    to the exact lines that define them, and flagged `path().endsWith(uriFile)` as an unglossed fragment
+    three lines above in the reader's own diff. Declared per destination, like identifiers, because a
+    guess about what a call means is wrong before any check runs.
+    """
+    import destinations
+    with tempfile.TemporaryDirectory() as home:
+        with open(os.path.join(home, "destinations.json"), "w") as fh:
+            json.dump({"destinations": [
+                {"name": "github review comment", "tool": ["add_comment_to_pending_review"],
+                 "text_fields": ["body"], "anchored_to": ["path", "line"],
+                 "note": "A review comment on one line of a diff.",
+                 "identifiers": {"repo": ["owner", "repo"]}}]}, fh)
+        was = os.environ["PROSE_GUARD_HOME"]
+        os.environ["PROSE_GUARD_HOME"] = home
+        try:
+            importlib.reload(paths_module()); importlib.reload(destinations)
+            call = {"owner": "finos", "repo": "rune-dsl", "line": 129, "side": "RIGHT",
+                    "path": "rune-ide/src/main/java/Diagnostics.java",
+                    "body": "Key this by language.get(Injector.class) instead of the resource loop."}
+            tool = "mcp__github__add_comment_to_pending_review"
+            dest = destinations.match(tool, call)
+            check("the destination matched", bool(dest), True)
+            told = destinations.situation(dest, tool, call)
+            check("the checks are told which file", "Diagnostics.java" in told.get("situation", ""),
+                  True)
+            check("and which line", "129" in told.get("situation", ""), True)
+            # A fact about where the text sits, and nothing about what to conclude from it. The first
+            # version added "so a term the code there defines is already explained for them, and a
+            # fragment of it needs no gloss", and measured on six real held drafts every complaint
+            # passed on its first run — including three stacked `file:line` citations and a "these two
+            # assertions" that named one. A clause about what needs no gloss reads as a licence to stop
+            # objecting. Every other entry in `situation` is a bare fact; so is this.
+            check("it says where the text sits", "has open beside this" in told.get("situation", ""), True)
+            check("and does not tell the check what to conclude",
+                  any(w in told.get("situation", "").lower()
+                      for w in ("needs no gloss", "already explained", "is explained for")), False)
+
+            # A destination that declares nothing still gets it, because destination discovery records
+            # the shape of a call and a use count and never the other field names — so setup has nothing
+            # to propose this from, and a declaration alone would mean only people who hand-edited their
+            # destinations ever benefited. Every install benefits or the fix is not one.
+            del dest["anchored_to"]
+            check("a destination that declares nothing still gets it",
+                  "Diagnostics.java" in destinations.situation(dest, tool, call).get("situation", ""),
+                  True)
+            # Inferred narrowly: a path AND a line. A path alone is not an anchor — a file being written
+            # is not something its reader is looking at yet — so the review BODY gets nothing.
+            body = {k: v for k, v in call.items() if k not in ("path", "line")}
+            check("prose attached to nothing gets no anchor",
+                  "Diagnostics.java" in destinations.situation(dest, tool, body).get("situation", ""),
+                  False)
+            # A path with no line is not an anchor by default: a file somebody is writing is not
+            # something its reader is looking at yet. A destination where it IS one — a file-level
+            # review comment — says `"anchored_to": ["path"]` and gets it.
+            whole_file = {k: v for k, v in call.items() if k != "line"}
+            check("a path with no line is not an anchor by default",
+                  "Diagnostics.java" in destinations.situation(dest, tool, whole_file).get("situation", ""),
+                  False)
+            # And it can be turned off outright, which a default has to allow.
+            dest["anchored_to"] = []
+            check("an empty declaration turns it off",
+                  "Diagnostics.java" in destinations.situation(dest, tool, call).get("situation", ""),
+                  False)
+        finally:
+            os.environ["PROSE_GUARD_HOME"] = was
+            importlib.reload(paths_module()); importlib.reload(destinations)
+
+
+def test_everything_true_about_a_call_is_said_not_just_the_last_thing():
+    """A threaded review comment is both a thread reply and pinned to a line.
+
+    `when` assigned `out["situation"]` each time round its loop, so a destination declaring two facts got
+    whichever matched last and nothing said which. The defaults have the same problem available to them,
+    since a review comment carries `path`, `line` AND `pullNumber`.
+    """
+    import destinations
+    with tempfile.TemporaryDirectory() as home:
+        with open(os.path.join(home, "destinations.json"), "w") as fh:
+            json.dump({"destinations": [
+                {"name": "github mcp", "tool": ["add_comment_to_pending_review"],
+                 "text_fields": ["body"], "note": "A review comment.",
+                 "identifiers": {"repo": ["owner", "repo"]}}]}, fh)
+        was = os.environ["PROSE_GUARD_HOME"]
+        os.environ["PROSE_GUARD_HOME"] = home
+        try:
+            importlib.reload(paths_module()); importlib.reload(destinations)
+            tool = "mcp__github__add_comment_to_pending_review"
+            call = {"owner": "finos", "repo": "rune-dsl", "pullNumber": 1299, "line": 129,
+                    "path": "src/Diag.java", "body": "Key this by the injector instead."}
+            dest = destinations.match(tool, call)
+            facts = destinations.what_the_reader_has(dest, call)
+            check("both facts are said", len(facts), 2)
+            check("the line it is pinned to", any("129" in f and "Diag.java" in f for f in facts), True)
+            check("and the pull request it is on", any("#1299" in f for f in facts), True)
+            check("and they reach the checks together",
+                  destinations.situation(dest, tool, call)["situation"].count(";") >= 1, True)
+
+            # A destination that says it in its own words is not corrected by a default saying it again.
+            dest["when"] = {"pullNumber": "a comment on a pull request, in our own words"}
+            facts = destinations.what_the_reader_has(dest, call)
+            check("a destination's own wording wins", any("#1299" in f for f in facts), False)
+            check("and the fact it did not claim is still said",
+                  any("Diag.java" in f for f in facts), True)
+        finally:
+            os.environ["PROSE_GUARD_HOME"] = was
+            importlib.reload(paths_module()); importlib.reload(destinations)
+
+
+def test_the_transcript_scan_keeps_shapes_and_never_content():
+    """Setup could not see which MCP tools send prose, because an MCP call never touches a shell.
+
+    `from_history` answers this for command-line tools by reading shell history. It cannot answer it for
+    MCP ones at all — and worse, it cannot answer it for commands an AGENT ran either: nothing this
+    session ran appears in the machine's shell history, because the Bash tool does not write there. So the
+    tools that matter most to a plugin about what agents send were the ones setup was blind to.
+
+    The contract is `from_history`'s: what comes back is a tool name and a field name. This asserts the
+    part that matters — a message's text, and the values of its fields, never appear in the result.
+    """
+    import discover
+    # Long enough to be checked at all: the floor is 25 words and two sentences, so one repetition of
+    # this is one word short and the scan correctly finds nothing.
+    secret = "Ashcombe Holdings will not renew before the Vasari migration lands in March. "
+    body = secret * 3
+    rows = [
+        {"message": {"content": [{"type": "tool_use", "name": "mcp__chat__post",
+                                 "input": {"text": body, "channel_id": "C0FFEE"}}]}},
+        {"message": {"content": [{"type": "tool_use", "name": "Bash",
+                                 "input": {"command": f'git commit -m "{body}"'}}]}},
+    ]
+    with tempfile.TemporaryDirectory() as fake_home:
+        project = os.path.join(fake_home, ".claude", "projects", "somewhere")
+        os.makedirs(project)
+        with open(os.path.join(project, "a.jsonl"), "w") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
+        was_home, was_pg = os.environ.get("HOME"), os.environ["PROSE_GUARD_HOME"]
+        os.environ["HOME"] = fake_home
+        try:
+            import host
+            importlib.reload(host); importlib.reload(discover)
+            found = discover.from_transcripts()
+        finally:
+            if was_home is not None:
+                os.environ["HOME"] = was_home
+            os.environ["PROSE_GUARD_HOME"] = was_pg
+            importlib.reload(host); importlib.reload(discover)
+
+    shapes = sorted(found)
+    check("the MCP tool and its field are counted", "tool: mcp__chat__post [text]" in shapes, True)
+    check("and so is the command", "bash: git commit -m" in shapes, True)
+    everything = " ".join(shapes) + " " + " ".join(str(v) for v in found.values())
+    check("no word of the message is kept", "Ashcombe" in everything or "Vasari" in everything, False)
+    check("nor the value of any other field", "C0FFEE" in everything, False)
 
 
 def teardown_function(_fn):
@@ -1750,7 +1943,18 @@ def test_hook_end_to_end():
               run_guard(elsewhere, home, os.path.join(tmp, "s3"), "disabled")[0], "allow")
 
 
-def test_session_ledger_bounds_the_argument():
+def test_every_message_a_session_sends_gets_the_same_treatment():
+    """Ten drafts of the SAME message, so the per-check bound is what has to hold.
+
+    A session-wide ceiling of six denials used to sit alongside it, never reset. It stopped the wrong
+    thing: on a real pull request review it was spent by six DIFFERENT messages that each converged on
+    their first rewrite, and the next sixteen comments went out with the guard structurally unable to
+    hold any of them back, saying nothing. Measured over 59 real held messages, 44 went out after one
+    round, 7 after two, 6 after three, and none needed a fourth. An earlier count said 95 and matched the
+    refusal text anywhere in a tool result, so a file that merely contained the phrase counted as a held
+    message; `measure/held_drafts.py` requires the result to begin with it — the pathology the ceiling guarded
+    against does not occur, and its cost did.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
         write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"],
@@ -1764,11 +1968,16 @@ def test_session_ledger_bounds_the_argument():
                                       "message": f"Draft {n} still talks about GKE." + PAD}}
             said.append(run_guard(payload, home, state))
         seq = [verdict == "deny" for verdict, _ in said]
-        check("a session is blocked at most MAX_DENIALS times", sum(seq), 6)
-        check("and stops blocking once the ledger is spent", any(seq[-2:]), False)
-        # Two denials per check, then it says its piece and hands over. The session total alone cannot
-        # see that bound: one check spending the whole ledger on its own reaches the same six, and the
-        # checks that would have run after it never speak at all.
+        # Two denials per check about this message, then it says its piece and hands over. Nothing
+        # else bounds it, and nothing else needs to: this is one message being rewritten, which is the
+        # case the tool exists for.
+        # No run of denials longer than one check's allowance: an argument about one text ends.
+        longest = max((len(run) for run in "".join("D" if d else "-" for d in seq).split("-")), default=0)
+        check("one text is never argued about for ever", longest <= MAX_PER_CHECK * 2, True)
+        # And the tenth message is protected exactly as much as the first. This is what the session
+        # ceiling broke: it was spent by six messages that each converged first time, and everything
+        # after it went out unchecked with nothing said.
+        check("the last message of a long session is still protected", any(seq[-2:]), True)
         check("one check gets two denials, then it has to let the message go",
               seq[:3], [True, True, False])
 
@@ -1831,8 +2040,7 @@ def test_a_session_stops_paying_for_model_checks_once_its_budget_is_spent():
             session = f"budget{spent}"
             os.makedirs(os.path.join(state, "sessions"), exist_ok=True)
             with open(os.path.join(state, "sessions", session + ".json"), "w") as fh:
-                json.dump({"passed": {}, "denials": {}, "total_denials": 0, "calls": spent,
-                           "advised": []}, fh)
+                json.dump({"passed": {}, "denials": {}, "calls": spent, "advised": []}, fh)
             payload = {"tool_name": "mcp__ourchat__chat_send", "session_id": session,
                        "cwd": tmp, "tool_input": {"channel_id": "C1", "message": clean}}
             out = hook_reply(payload, {**env(home, state, "medium"),
@@ -4699,10 +4907,14 @@ def test_the_free_checks_object_together_rather_than_one_turn_each():
         check("and told about the terms", "SFTR" in said and "ADC" in said, True)
         check("and the doubled word, in the same interruption", '"the the"' in said, True)
 
-        # One interruption is one denial against the session's allowance, however many checks objected.
-        # Counting it per check would halve what a session gets for a message held back a single time.
+        # One interruption, and each check that objected has spent one of its two complaints about this
+        # message. There is no session-wide allowance any more — every message gets the same treatment,
+        # because a count of denials cannot tell one message being rewritten from a session doing its
+        # job, and the measurement says the runaway it guarded against does not happen.
         with open(os.path.join(home, "sessions", "b.json")) as fh:
-            check("which costs the session one denial", json.load(fh)["total_denials"], 1)
+            spent = json.load(fh)["denials"]
+        check("each objecting check spent one of its own two", sorted(spent.items()),
+              [("mechanics", 1), ("terms", 1)])
 
 
 def test_the_line_says_who_the_message_was_judged_for():

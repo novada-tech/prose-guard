@@ -28,7 +28,8 @@ not loaded yet and `/prose-guard:setup` has nothing to configure.
 **Run `/prose-guard:setup` before anything else.** Nothing is checked until a level is chosen, and this
 is where you choose one. It takes a few minutes, asks one question at a time, and does three things.
 
-- Asks how much checking you want, with what each level costs. **Pick `medium`.**
+- Asks how much checking you want, with what each level costs. **Pick `medium` or `high`** — [what
+  separates them](#which-level) is what can hold a message back, not what it costs.
 - Offers to install the writing rule: 250 words that reach Claude while a message is being written,
   rather than when it is sent. It is the only part of this that costs nothing per message.
 - Reads what is on your machine and proposes which of your tools count as sending prose, rather than
@@ -70,9 +71,11 @@ objective and both are a small fix. At `high` five of the six judgement checks c
 names one concern and quotes the span it means, and a finding two runs agree on is specific enough to
 act on.
 
-At `medium` those five concerns are asked as one combined question, and that only ever advises. Asked to
-sort real messages by whether a colleague or an agent wrote them, it gets 50–70% right and disagrees with
-itself between runs, which is a prompt to look again rather than something to gate on.
+At `medium` those five concerns are asked as one combined question, and that only ever advises. It gets
+50–70% right when asked to sort real messages by whether a colleague or an agent wrote them, and
+disagrees with itself between runs — but the reason not to rely on it is stronger than that, and it is
+[under Which level](#which-level): advice arrives after the call has already run, so no measured message
+has ever been corrected by it.
 
 The sixth, the one about the opening, advises at every level and says so in its own filename. It passes
 11 of 14 well-built messages where the blocking checks pass 9 or 10 of 10, and the gap is not worth
@@ -143,10 +146,20 @@ than the sum of all of them. On a real pull request review before this change: 3
 50.3s, 217.7s for a 925-word summary comment, and 34.5 minutes of a 168-minute session spent waiting on
 the guard.
 
-**Pick `medium`.** `/prose-guard:setup` asks and writes the answer for you. `low` is not the cheap
-option and `high` is not measurably better, which is less obvious than it looks — the numbers, the
-unguarded run they were priced against, and what the measurement cannot tell you are in
-[docs/design-notes.md](docs/design-notes.md).
+**Pick `medium` or `high`, and know what separates them.** `/prose-guard:setup` asks and writes the
+answer for you. `low` is not the cheap option, and the cost numbers above no longer separate `medium`
+from `high` now that the checks are asked at the same time.
+
+What separates them is what can hold a message back. At both levels the two arithmetic checks do.
+`medium` adds one combined judgement question that **only ever advises** — and advice is measurably
+inert: on one machine's transcripts, 41 messages got advice and went out, and **none was corrected
+afterwards**. An advisory finding reaches the model after the call has already run, so there is no turn
+in which the message could change. `high` asks the five concerns separately and five of them can hold a
+message, which is the only mechanism here shown to change what goes out.
+
+So `medium` is worth having for the arithmetic checks and its judgement half is not yet worth paying for.
+The numbers, the leading-question caveat on them, and what would settle it are in
+[docs/design-notes.md](docs/design-notes.md); `measure/measure_advice.py` recomputes them.
 
 ## Reading further
 

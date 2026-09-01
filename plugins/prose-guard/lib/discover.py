@@ -108,6 +108,64 @@ def from_history(limit: int = 40000) -> tuple[dict[str, int], dict[str, int]]:
     return counts, subcommands
 
 
+def from_transcripts(most_files: int = 400, per_file: int = 5000) -> dict[str, int]:
+    """Which tools have actually carried prose to a person here, from past conversations.
+
+    Shell history answers this for command-line tools and cannot answer it at all for MCP ones: an MCP
+    call never touches a shell. That is where the destinations that matter are — measured across real
+    transcripts on one machine, `mcp__slack__post` 114 calls, `mcp__fleet__post` 85,
+    `add_comment_to_pending_review` 83, `slack_send_message` 65 — and setup could see none of them. It
+    proposed from which MCP SERVERS were configured, which says nothing about which of their tools send
+    prose.
+
+    Same contract as `from_history`, and the same reason for it: what comes back is `_shape()`, which is a
+    tool name and a field name. Never a value, never a line of anybody's message. This reads
+    conversations to count shapes, not to build a corpus, and it is only run when somebody asks for it —
+    see `--from-transcripts`.
+
+    Bounded per file rather than in total, because a total budget spent on the newest conversations is
+    recency and nothing else: a first pass capped at 4,000 rows reported Edit and Write and missed
+    `mcp__slack__post` at 114 calls, which is the kind of destination this exists to find.
+    """
+    found: dict[str, int] = {}
+    directory = os.path.join(host.dot_dir(), "projects")
+    try:
+        files = sorted(glob.glob(os.path.join(directory, "*", "*.jsonl")),
+                       key=os.path.getmtime, reverse=True)
+    except OSError:
+        return found
+    for path in files[:most_files]:
+        try:
+            fh = open(path, errors="replace")
+        except OSError:
+            continue
+        seen = 0
+        with fh:
+            for line in fh:
+                if '"tool_use"' not in line:
+                    continue
+                seen += 1
+                if seen > per_file:
+                    break
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                for block in (row.get("message", {}).get("content") or []):
+                    if not isinstance(block, dict) or block.get("type") != "tool_use":
+                        continue
+                    given = block.get("input")
+                    if not isinstance(given, dict):
+                        continue
+                    try:
+                        shape = _shape(block.get("name") or "", given)
+                    except Exception:
+                        shape = None
+                    if shape:
+                        found[shape] = found.get(shape, 0) + 1
+    return found
+
+
 def unclaimed() -> dict[str, dict[str, Any]]:
     """Shapes seen carrying prose that no destination claims, with what has been decided about each."""
     out: dict[str, dict[str, Any]] = {}
@@ -294,6 +352,10 @@ def main() -> None:
     ap.add_argument("--decline", metavar="SHAPE",
                     help="never suggest this shape again. Permanent, and what setup uses when you "
                          "say no.")
+    ap.add_argument("--from-transcripts", action="store_true",
+                    help="count which tools have carried prose in past conversations on this machine. "
+                         "Reads them to count shapes — a tool name and a field name — and never a value "
+                         "from anybody's message. Ask before running it: they are private.")
     ap.add_argument("--share", metavar="DIR",
                     help="copy the destinations you have worked out into a directory your team keeps, "
                          "so nobody else has to work them out")
@@ -303,6 +365,22 @@ def main() -> None:
         return
     if a.share:
         print(share(a.share))
+        return
+
+    if a.from_transcripts:
+        counted = from_transcripts()
+        claimed = {d.get("name") for d in destinations.DESTINATIONS}
+        print("Tools that have carried prose to somebody here, most used first.")
+        print("Shapes only — a tool name and a field name, never a value from a message.\n")
+        if not counted:
+            print("  nothing found. Either nothing here sends prose, or this machine keeps no "
+                  "transcripts yet.")
+            return
+        for shape, uses in sorted(counted.items(), key=lambda kv: -kv[1]):
+            print(f"  {uses:5d}  {shape}")
+        print(f"\n{len(counted)} shape(s). Ones already covered by a destination need nothing; for the "
+              f"rest, /prose-guard:setup writes them.")
+        print(f"Destinations configured now: {', '.join(sorted(n for n in claimed if n)) or 'none'}")
         return
 
     servers = mcp_servers()

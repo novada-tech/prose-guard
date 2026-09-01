@@ -129,6 +129,9 @@ DESTINATION: dict[str, Rule] = {
     "tool": each(text), "bash": text, "file": text,
     "text_fields": each(text), "text_arg": each(text),
     "identifiers": mapping, "when": mapping, "context_from": mapping,
+    # Fields naming what this text is pinned to — a file and a line for a review comment. The checks are
+    # told, because a reader looking at that code already has the terms it defines.
+    "anchored_to": each(text),
     "require_tracked": flag,
     "max_effort": one_of(*LEVELS),
     "max_severity": one_of(*SEVERITIES)}
