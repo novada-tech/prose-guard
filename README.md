@@ -136,24 +136,19 @@ sees, so a fair complaint and an unfair one look identical afterwards.
 | `medium` | plus one advisory judgement call, asked only if something already holds the message | 0 | ~1.6s |
 | `high` | one separate check per concern, asked together, re-verified after each edit | 6 | ~12s |
 
-**Time stopped being what separates them.** `high` ran four checks one after another at +75s; it runs six
-now and asks them together, measured at **34.3s to 12.4s** on a 78-word review comment for the same six
-calls and the same verdict. The checks are independent — each reads the same unmodified text and none can
-see another's answer — so only the waiting changed. What separates the levels is the third column.
-
-The figures above are per message sent, and a slow message costs whatever its slowest check costs rather
-than the sum of all of them. On a real pull request review before this change: 39 guarded calls, median
-50.3s, 217.7s for a 925-word summary comment, and 34.5 minutes of a 168-minute session spent waiting on
-the guard.
+**The third column is what separates them.** `low` and `medium` cost no model call on a message nothing
+objects to; `high` costs six. Time barely does: `high`'s checks are asked at the same time, so a message
+costs the slowest of them rather than the sum, and a long or badly written one costs more than the figure
+above because a check that finds something is asked again.
 
 None of this has to be one number for everything you send: `destinations.py worth` sets it per
 destination, capped by the level you choose here. See [docs/reference.md](docs/reference.md).
 
 **Pick `medium` or `high`, and know what separates them.** `/prose-guard:setup` asks and writes the
-answer for you. `low` is not the cheap option, and the cost numbers above no longer separate `medium`
-from `high` now that the checks are asked at the same time.
+answer for you. `low` is not the cheap option: it makes no model call, but holding a message back costs a
+whole agent turn, which is dearer than a call.
 
-What separates them is what can hold a message back. At both levels the two arithmetic checks do, and
+What separates them is what can hold a message back. At every level the two arithmetic checks can, and
 they cost nothing. `high` adds five concerns asked separately, each of which can hold a message — the
 only mechanism here shown to change what goes out.
 

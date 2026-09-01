@@ -111,6 +111,27 @@ went out after one round, 7 after two, 6 after three, and none needed a fourth. 
 figure was 95 and 74/13/6. The shape survived — nothing ever needs a fourth round, which is what the
 per-check bound rests on — and the number did not.
 
+## Asking the checks together costs the slowest, not the sum
+
+The six checks at `high` were asked one after another, and each answer is a `claude -p` subprocess taking
+about eight seconds. On a real pull request review: **39 guarded calls, median 50.3s**, 217.7s for a
+925-word summary comment, and **34.5 minutes of a 168-minute session** spent waiting on the guard.
+
+They are independent — each reads the same unmodified text and none can see another's verdict — so when
+they are asked was always free to change. A/B on one 78-word review comment at `high`, same input, same
+config:
+
+    one after another   34.3s
+    at the same time    12.4s     same six model calls, same verdict
+
+The entry above about parallel checks is a different thing and worth not confusing with this one: it is
+about two checks that could each HOLD A MESSAGE BACK, each undoing the other's demand. That is about what
+may block, not about what may run, and exactly one finding blocks either way.
+
+What this does not fix is a check that keeps finding things: pooling asks it again until a run adds
+nothing, and those runs are sequential. The 217.7s comment was one check pooling repeatedly, so it
+improves by less than the ratio above.
+
 ## There is no cheap way to find out whether a message is worth checking
 
 `low` costs 0 model calls, `medium` 1, `high` 6 — one per paying check, since pooling stops on the first
