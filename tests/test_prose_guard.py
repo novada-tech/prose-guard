@@ -783,8 +783,8 @@ def test_what_a_destination_is_worth_is_your_policy_not_its_identity():
                                                               "message": PROSE + " " + PAD}}, bare)
                 line = (said or {}).get("systemMessage", "")
                 check("the hook runs the level you said this destination is worth",
-                      "prose-guard low" in line, True)
-                check("and not the level you set globally", "prose-guard high" in line, False)
+                      "· low ·" in line, True)
+                check("and not the level you set globally", "· high ·" in line, False)
 
             # `list` says what each destination will actually run at, and which of the three things
             # decided it. Absence was the only signal before: a destination with nothing set printed
@@ -871,7 +871,7 @@ def test_a_check_that_only_advises_is_asked_only_when_something_already_blocks()
 
         decision, _, line = run(clean, "quiet")
         check("a clean message is let through", decision, None)
-        check("and it is reported as checked", "prose-guard medium" in line, True)
+        check("and it is reported as checked", "prose-guard · medium" in line, True)
         check("and the advice-only check is never asked", "model call" in line, False)
 
         decision, spent, _ = run(doubled, "held")

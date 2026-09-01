@@ -20,26 +20,31 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/install_rule.py"
 What each level adds per message sent. Read the ordering rather than the digits — one fixture, one
 model:
 
-| level | what runs | added per message sent |
-|---|---|---|
-| `disabled` | nothing | — |
-| `low` | the two deterministic checks only, no model call | +12s |
-| `medium` | plus one advisory writing check | +19s |
-| `high` | one separate check per concern, all asked at the same time | +12s |
+| level | what runs | model calls on a clean message | added per message sent |
+|---|---|---|---|
+| `disabled` | nothing | — | — |
+| `low` | the two deterministic checks only | 0 | ~1.6s |
+| `medium` | plus one advisory writing check, asked only if something already holds the message | 0 | ~1.6s |
+| `high` | one separate check per concern, all asked at the same time | 6 | ~12s |
 
-Cost is not what separates `medium` from `high`, and two results are worth saying out loud because
-neither is what somebody expects:
+Read the ordering rather than the digits — one fixture, one model. Three results are worth saying out
+loud, because none of them is what somebody expects:
 
 - **`low` is not the cheap option.** No model call, but holding a message back costs a whole agent
-  turn on their own context, which is dearer than the small call `medium` adds.
-- **`medium`'s judgement half has never been measured changing anything.** Advice reaches the model
-  after the call has already run, so there is no turn in which the message could change: 41 messages
-  got advice and went out, and none was corrected afterwards. `high` asks the same concerns separately
-  and can hold a message, which is the only mechanism here shown to change what goes out.
+  turn on their own context, which is dearer than a model call.
+- **`medium` costs nothing on a message nothing objects to.** Its judgement half only advises, and
+  advice on its own has never been measured changing anything — 41 messages got advice and went out,
+  and none was corrected afterwards, because advice reaches the model after the call has already run.
+  So it is asked only once something is already holding the message, where it arrives while the agent
+  is rewriting anyway. On a held message it costs one call.
+- **`high` is what makes the judgement checks able to stop anything.** Five of its six can hold a
+  message, which is the only mechanism here shown to change what goes out. It costs six calls a
+  message, and more when a check finds something and is asked again.
 
-So **`high`** for somebody who wants the judgement checks to do something, and **`medium`** for
-somebody who wants the two arithmetic checks and nothing that can cost a held turn. The full argument,
-and the caveat on those 41 messages, is in
+So **`high`** for somebody who wants the judgement concerns to do something, and **`medium`** for
+somebody who wants the arithmetic checks now and a note when one of them fires. Either way, step 5 can
+raise or lower this per destination, so the answer here is a ceiling and not a commitment. The full
+argument, and the caveat on those 41 messages, is in
 [docs/design-notes.md](../../../../docs/design-notes.md).
 
 Take their answer and write it — this is the only place a level is set:
@@ -228,10 +233,11 @@ in step 3 does not apply until the next session they open.
 End by telling them, in this order, and in one short paragraph rather than a checklist:
 
 - **What is on.** The level, and which of their tools it now watches. Name the two or three they will
-  hit today, not the whole list.
+  hit today, not the whole list — and if step 5 gave any of those a level of its own, say which, because
+  the second field of that line will differ from the level they chose.
 - **What they will see.** One line on every message that goes out —
   `prose-guard · medium · no audience · clean` — and that its absence means nothing was checked.
-  Warn them the third field says `no audience` until step 5 happens, which is what stops anything being
+  Warn them the third field says `no audience` until step 6 happens, which is what stops anything being
   held back on terms.
 - **The one thing left.** `/prose-guard:audiences` if they skipped it, or a new session if they took the
   rule. Not both, and not a list of everything they could do.
