@@ -1,15 +1,18 @@
 # prose-guard
 
-A Claude Code plugin that reads what Claude is about to send — a chat message, a review comment, a
-commit message, a pull request description, a document — and asks whether the person receiving it could
-act on it. Most of what it finds it says and lets through. What it can settle objectively it holds the
-message back for, naming the one problem, so Claude fixes the draft before anybody sees it.
+You have read a review comment from an agent that nobody could digest: technically right, three
+clauses deep, and impossible to act on. You have seen a Slack message with six bolded section labels
+over four lines of content. You have been told a deploy is fixed in a paragraph that never says what
+you now have to run.
 
-Out of the box, that means a word typed twice. Spend a few minutes telling it who reads a given channel
-and it also means an acronym those particular readers have never used. Run it at `high` and the
-judgement calls can hold a message too.
+Nothing about those messages is badly written. They fail because they were not written for anybody in
+particular.
 
-Two questions decide everything below: **who is going to read this**, and **why should they care**.
+`prose-guard` is a Claude Code plugin that checks a message on its way out — a chat message, a review
+comment, a commit message, a pull request description, a document — against two questions:
+
+**Who is going to read this?**
+**Why should they care?**
 
 ## Install
 
@@ -46,20 +49,9 @@ mentioned. What it builds and why counting works is [below](#how-it-knows-who-is
 Needs `python3` and nothing else — no packages, no virtualenv, no API key beyond the one Claude Code
 already has. Nothing leaves your machine.
 
-## Why
-
-You have read a review comment from an agent that nobody could digest: technically right, three
-clauses deep, and impossible to act on. You have seen a Slack message with six bolded section labels
-over four lines of content. You have been told a deploy is fixed in a paragraph that never says what
-you now have to run.
-
-Nothing about those messages is badly written. They fail because they were not written for anybody in
-particular.
-
 ## What it checks
 
-Eight checks follow from **who is going to read this** and **why should they care**, and they are what
-actually runs. Two are arithmetic — no
+Eight checks follow from those two questions, and they are what actually runs. Two are arithmetic — no
 model call, and they run at every level. Six are judgement.
 
 | | | |
