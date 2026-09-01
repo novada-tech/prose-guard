@@ -732,6 +732,153 @@ def test_the_transcript_scan_keeps_shapes_and_never_content():
     check("nor the value of any other field", "C0FFEE" in everything, False)
 
 
+def test_what_a_destination_is_worth_is_your_policy_not_its_identity():
+    """One number for a whole install is a per-install answer to a per-message question.
+
+    A commit message and an announcement to two hundred people got the same budget. The dial existed —
+    `max_effort` on a destination — and on one real machine 8 of 9 destinations left it unset, because
+    `add --max-effort` only works at creation and destinations arrive from the shipped set, a team's file
+    or setup.
+
+    It lives in config.json beside the level, not in destinations.json. The first version wrote an
+    override into the destinations file and broke the destination: the layers replace a whole entry by
+    name, so an entry carrying only a name and a level threw away the pattern that recognises it and it
+    matched nothing at all — visible as `0 tool(s)` in `list`, with the real one shadowed behind it.
+    """
+    import destinations
+    from checks.config import capped
+    with tempfile.TemporaryDirectory() as home:
+        was = os.environ["PROSE_GUARD_HOME"]
+        os.environ["PROSE_GUARD_HOME"] = home
+        try:
+            importlib.reload(paths_module()); importlib.reload(destinations)
+            shipped = destinations.find("commit message")
+            check("the shipped destination caps itself at low", shipped.get("max_effort"), "low")
+
+            where = destinations.worth("commit message", "high")
+            check("it is written to config.json", where.endswith("config.json"), True)
+            importlib.reload(paths_module())
+            check("and the destination file is untouched",
+                  os.path.exists(os.path.join(home, "destinations.json")), False)
+
+            import paths
+            asked = (paths.config().get("worth") or {}).get("commit message")
+            check("your override is recorded", asked, "high")
+            # It raises past what the destination says it is worth...
+            check("it raises the destination", capped("high", asked), "high")
+            # ...and the level you set is still the ceiling.
+            check("and your level still caps it", capped("medium", asked), "medium")
+
+            # And the HOOK reads it, which the arithmetic above does not prove. Driven at `high` with
+            # the checker off the PATH, so no model call is possible and the tally still reports which
+            # level actually ran.
+            with tempfile.TemporaryDirectory() as tmp:
+                state = os.path.join(tmp, "state")
+                write_destinations(home, chat_destination())
+                importlib.reload(paths_module()); importlib.reload(destinations)
+                destinations.worth("our chat", "low")
+                bare = {**env(home, state, "high"), "PATH": path_without_the_checker(tmp)}
+                said = hook_reply({"tool_name": "mcp__ourchat__chat_send", "session_id": "worth",
+                                   "cwd": tmp, "tool_input": {"channel_id": "C1",
+                                                              "message": PROSE + " " + PAD}}, bare)
+                line = (said or {}).get("systemMessage", "")
+                check("the hook runs the level you said this destination is worth",
+                      "· low ·" in line, True)
+                check("and not the level you set globally", "· high ·" in line, False)
+
+            # `list` says what each destination will actually run at, and which of the three things
+            # decided it. Absence was the only signal before: a destination with nothing set printed
+            # nothing about effort, so the level doing the work was invisible — which is how 8 of 9
+            # stayed unset. The row is what setup now walks through.
+            listed = subprocess.run([sys.executable, os.path.join(LIB, "destinations.py"), "list"],
+                                    capture_output=True, text=True,
+                                    env={**os.environ, "PROSE_GUARD_HOME": home,
+                                         "PROSE_GUARD_EFFORT": "high"}, timeout=60).stdout
+            check("a destination you decided about says so",
+                  "runs at low (you said so)" in listed, True)
+            # The cap case needs a home where nobody overrode it — in this one the commit message was
+            # set to `high` a few lines up, so it correctly reports "(you said so)" instead.
+            with tempfile.TemporaryDirectory() as untouched:
+                fresh_list = subprocess.run(
+                    [sys.executable, os.path.join(LIB, "destinations.py"), "list"],
+                    capture_output=True, text=True,
+                    env={**os.environ, "PROSE_GUARD_HOME": untouched, "PROSE_GUARD_EFFORT": "high"},
+                    timeout=60).stdout
+            check("one the destination caps says that instead",
+                  "(the destination caps it)" in fresh_list, True)
+            check("and one nobody decided says it is only getting your level",
+                  "(your level)" in listed, True)
+
+            # A name nothing matches is refused rather than written, or a typo becomes a setting that
+            # never applies and never says so.
+            try:
+                destinations.worth("no such destination", "high")
+                check("an unknown destination is refused", "written", "refused")
+            except KeyError:
+                check("an unknown destination is refused", "refused", "refused")
+            try:
+                destinations.worth("commit message", "extremely")
+                check("an unknown level is refused", "written", "refused")
+            except ValueError:
+                check("an unknown level is refused", "refused", "refused")
+        finally:
+            os.environ["PROSE_GUARD_HOME"] = was
+            importlib.reload(paths_module()); importlib.reload(destinations)
+
+
+def test_a_check_that_only_advises_is_asked_only_when_something_already_blocks():
+    """Advice on its own is inert; riding along on a denial it is not.
+
+    41 advisory findings went out on one machine's transcripts and 0 were followed by a correction,
+    because advice reaches the model as `additionalContext` after the call has already run. Attached to a
+    denial it arrives while the agent is rewriting anyway, which `other_concerns` already arranges.
+
+    So a check that can never hold a message back is not asked until something else has. At `medium` that
+    is the whole of the token cost — the only paying check is `judgement`, it only advises, and what blocks
+    there is the two arithmetic checks, which cost nothing and answer before any model call. A clean
+    message at `medium` therefore costs nothing at all, and there is no extra waiting, because the gate is
+    free.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
+        os.makedirs(home)
+        write_destinations(home, chat_destination())
+        with open(os.path.join(home, "config.json"), "w") as fh:
+            json.dump({"effort": "medium"}, fh)
+        clean = ("The rollout finished last night and the dashboard has been quiet since then, so there "
+                 "is nothing else to do before the review meeting tomorrow morning at all.")
+        doubled = clean.replace("the dashboard", "the the dashboard")
+
+        # The checker is off the PATH, so no model call can happen — but a paying check that is ASKED
+        # still costs one against the session, which the state file records. That is the signal, because
+        # the "could not run" notice reaches the person only on the allow path and this test needs to read
+        # a denial too.
+        def run(message, session):
+            bare = {**env(home, state, "medium"), "PATH": path_without_the_checker(tmp)}
+            out = hook_reply({"tool_name": "mcp__ourchat__chat_send", "session_id": session,
+                              "cwd": tmp, "tool_input": {"channel_id": "C1", "message": message}}, bare)
+            said = out or {}
+            # `state["calls"]` is the signal on a DENIAL, where nothing resets it. On the allow path it is
+            # cleared as the message goes out, so reading it there says 0 whether or not anything was
+            # asked — the first version of this test asserted exactly that and was vacuous. The tally is
+            # read before the reset, so it is the signal there.
+            try:
+                with open(os.path.join(state, "sessions", session + ".json")) as fh:
+                    spent = json.load(fh).get("calls", 0)
+            except OSError:
+                spent = 0
+            return said.get("permissionDecision"), spent, said.get("systemMessage", "")
+
+        decision, _, line = run(clean, "quiet")
+        check("a clean message is let through", decision, None)
+        check("and it is reported as checked", "prose-guard · medium" in line, True)
+        check("and the advice-only check is never asked", "model call" in line, False)
+
+        decision, spent, _ = run(doubled, "held")
+        check("a doubled word still holds the message", decision, "deny")
+        check("and now the advice-only check is asked", spent >= 1, True)
+
+
 def teardown_function(_fn):
     """Make pytest as honest as running this file directly.
 
@@ -2020,8 +2167,10 @@ def test_a_session_stops_paying_for_model_checks_once_its_budget_is_spent():
 
     So the number bounded nothing a test could see: dropped from 20 to 2, the guard stops checking
     after the second call of a session and says nothing about having stopped. It is only visible from
-    outside the check, which is why this drives the hook itself — at `medium`, with no checker on PATH,
-    so no model call happens. Whether the check was ASKED is still visible: a check that could not run
+    outside the check, which is why this drives the hook itself — at `high`, with no checker on PATH, so
+    no model call happens. `high` rather than `medium`, because `medium`'s only paying check advises and
+    is no longer asked at all until something is already holding the message: a clean message there asks
+    nothing, so there is no budget to exercise. Whether the check was ASKED is still visible: a check that could not run
     is recorded and read out to the person, and a check that was skipped for budget is not.
     """
     with tempfile.TemporaryDirectory() as tmp:
@@ -2030,7 +2179,7 @@ def test_a_session_stops_paying_for_model_checks_once_its_budget_is_spent():
         write_destinations(home, chat_destination())
         os.makedirs(home, exist_ok=True)
         with open(os.path.join(home, "config.json"), "w") as fh:
-            json.dump({"effort": "medium"}, fh)
+            json.dump({"effort": "high"}, fh)
         # No acronym anybody could be missing, and nothing mechanical to find, so the two free checks
         # pass and the combined verdict is the next thing to be asked for.
         clean = ("The rollout finished last night and the dashboard has been quiet since then, so "
@@ -2043,13 +2192,15 @@ def test_a_session_stops_paying_for_model_checks_once_its_budget_is_spent():
                 json.dump({"passed": {}, "denials": {}, "calls": spent, "advised": []}, fh)
             payload = {"tool_name": "mcp__ourchat__chat_send", "session_id": session,
                        "cwd": tmp, "tool_input": {"channel_id": "C1", "message": clean}}
-            out = hook_reply(payload, {**env(home, state, "medium"),
+            out = hook_reply(payload, {**env(home, state, "high"),
                                        "PATH": path_without_the_checker(tmp)})
             return "not on PATH" in ((out or {}).get("systemMessage") or "")
 
-        check("five calls into a budget of twenty, the next check is still asked", asked_after(5),
-              True)
-        check("and once twenty are spent it is not", asked_after(20), False)
+        # The budget is `budget_for(text, paying)` — a share each, so at `high` on a short message it is
+        # about 36 rather than 20. The numbers here straddle it; hard-coding 20 was sized for `medium`,
+        # where one paying check made the budget 6.
+        check("part way into the budget, the next check is still asked", asked_after(5), True)
+        check("and once it is spent it is not", asked_after(90), False)
 
 
 def test_an_install_nobody_has_set_up_says_so_every_session():

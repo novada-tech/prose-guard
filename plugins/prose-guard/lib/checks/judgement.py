@@ -28,6 +28,10 @@ NAME = "judgement"
 # that separation worth its calls. The same measurement is in docs/design-notes.md, which is the copy
 # to edit if the number changes.
 MODE = VERDICT
+# It can never hold a message back, which the docstring above explains and every caller had to work out
+# for itself. Declared, so the hook can decide whether asking it is worth a call: a check that only ever
+# advises is worth asking when something else is already holding the message, and worth nothing otherwise.
+ADVISES = True
 
 PROMPT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "judgement_prompt.md")
 

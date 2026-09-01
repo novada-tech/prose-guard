@@ -76,8 +76,29 @@ an ordinary turn does not — so it is an upper bound on willingness rather than
 at the mechanism rather than the wording: an advisory finding reaches the model as `additionalContext` on
 PreToolUse and the call then proceeds, so there is no turn in which the message could have changed.
 
-What follows is a design question and not yet a change: an advisory finding could reach the person instead
-of the model, or ask rather than allow, or not be paid for at all. Each trades attention against effect.
+**The fix is not to pay for it until it can be acted on.** A check that can never hold a message back is
+not asked until something else has, and then its findings ride along on that denial, which
+`other_concerns` already arranges. Advice attached to an interruption reaches the model while it is
+rewriting anyway; advice on its own reaches it after the call has run.
+
+At `medium` that is the whole of the token cost. The only paying check there is `judgement`, it only
+advises, and what can block is the two arithmetic checks — which cost nothing and answer before any model
+call. So a clean message at `medium` now costs **0 model calls** rather than 1, with no extra waiting,
+because the gate is free:
+
+    clean    prose-guard medium …: nothing to say.            (no model call)
+    held     Hold this message.
+             "the the" — a word typed twice
+             Also worth fixing while you are here, though none of it is holding this back:
+             (judgement) Consider: … is backstory the reader didn't live through …
+
+At `high` the same rule gates `promise`, where the gate is the five blocking checks, so it costs one more
+round of waiting on a message that is being held anyway — 1% of claimed calls, at most 7% — and saves a
+call on the rest.
+
+Three denial sites had to route through one closure, and patching one of them was the first attempt: at
+`medium` what blocks is a free check, so the paid-check site never fires and the advice was never asked at
+all.
 
 ## A count that matched the refusal text anywhere counted files as messages
 
@@ -89,6 +110,85 @@ Corrected by requiring the result to BEGIN with the refusal, the real distributi
 went out after one round, 7 after two, 6 after three, and none needed a fourth. The earlier published
 figure was 95 and 74/13/6. The shape survived — nothing ever needs a fourth round, which is what the
 per-check bound rests on — and the number did not.
+
+## Asking the checks together costs the slowest, not the sum
+
+The six checks at `high` were asked one after another, and each answer is a `claude -p` subprocess taking
+about eight seconds. On a real pull request review: **39 guarded calls, median 50.3s**, 217.7s for a
+925-word summary comment, and **34.5 minutes of a 168-minute session** spent waiting on the guard.
+
+They are independent — each reads the same unmodified text and none can see another's verdict — so when
+they are asked was always free to change. A/B on one 78-word review comment at `high`, same input, same
+config:
+
+    one after another   34.3s
+    at the same time    12.4s     same six model calls, same verdict
+
+The entry above about parallel checks is a different thing and worth not confusing with this one: it is
+about two checks that could each HOLD A MESSAGE BACK, each undoing the other's demand. That is about what
+may block, not about what may run, and exactly one finding blocks either way.
+
+What this does not fix is a check that keeps finding things: pooling asks it again until a run adds
+nothing, and those runs are sequential. The 217.7s comment was one check pooling repeatedly, so it
+improves by less than the ratio above.
+
+## There is no cheap way to find out whether a message is worth checking
+
+`low` costs 0 model calls, `medium` 1, `high` 6 — one per paying check, since pooling stops on the first
+empty run. So the obvious saving is to find the messages worth six calls and spend one on the rest. Two
+ways were measured and both fail.
+
+**A free signal: none exists.** Comparing review comments the checks HELD against review comments that went
+out clean — same genre both sides, which matters, because comparing held code-review comments against
+well-built Slack messages produces a beautiful 72% on "backticked spans" that is measuring genre and not
+quality. Within one genre:
+
+    feature                held   passed
+    words                   47.0     60.0
+    longest sentence        25.5     30.0
+    mean sentence           15.9     18.0
+    backticked spans         4.0      4.0
+
+Held drafts are *shorter*, with shorter sentences. The best free rule reaches **0% recall** at under 25%
+false alarms. Nothing cheap predicts which messages have faults.
+
+**The one cheap question as an alarm: 4 of 8.** `medium`'s combined judgement question was measured as a
+verdict before and rejected as one. As a gate it needs recall and almost no precision, which is a much
+lower bar, so `measure_gate.py` asked it against real held drafts and the well-built fixtures:
+
+    recall     4/8 of drafts the specific checks held were flagged
+    precision  10/11 well-built fixtures passed cleanly
+
+Recall is half. And the precision figure is measured against eleven fixtures, which cannot carry a rate,
+so it was measured again against **42 review comments that the six specific checks approved** — same genre,
+real messages, known to have passed:
+
+    36 of 42 passed the cheap question.  It objects to 14% of messages the expensive checks approved.
+
+That settles two proposals at once. A **cascade** on this gate lets four of eight faulty messages through
+to save five calls, which is a cheaper way to miss things. **Blocking once on it** — one guaranteed
+interruption for one call — would hold roughly one good message in seven, and a held turn is the most
+expensive thing this tool does: a review session posting forty comments would be interrupted about six
+times for nothing. `high`'s blocking checks pass 9 or 10 of 10 well-built messages by comparison, and now
+cost 12 seconds of wall clock rather than 34.
+
+Two false starts on the way to that number, both the same mistake, and worth more than the number:
+
+- the first clean set was 11 well-built fixtures — too few to carry a rate at all;
+- the second was 17 of this repository's own commit messages, of which only 6 passed. That reads as a 65%
+  false-alarm rate and is measuring the wrong genre: the shipped commit-message destination caps at `low`
+  precisely *because* the judgement questions do not apply to a commit message, which has neither an
+  addressee nor an ask. Measuring a check against prose it is not meant for produces a confident number
+  about nothing — the same error as comparing held code-review comments against well-built Slack messages
+  and discovering "backticked spans".
+
+**So the cost of finding a fault is the cost of asking about it**, and effort cannot be saved by checking
+fewer messages or by checking them more cheaply first. What is left is choosing which messages deserve the
+spend — which is what a destination knows and an install-wide number cannot. Hence `worth`.
+
+For the same reason, splitting the text to check less is already ruled out twice over: it finds no more at
+nine times the calls, and the judgement checks are comparative, so a smaller window lowers the bar rather
+than saving money.
 
 ## A check that fires on everything carries no information
 

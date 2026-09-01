@@ -19,6 +19,7 @@ from typing import Any
 import command
 import paths
 import settings
+from checks import config
 import re
 import subprocess
 
@@ -559,6 +560,54 @@ def switch(name: str, on: bool) -> str | None:
     return _save_user(data)
 
 
+def _runs_at(entry: Dest) -> str:
+    """The level this destination really runs at, and where that came from.
+
+    Three things decide it and only one of them was ever shown: the level you set, what the destination
+    says it is worth (`max_effort`, from whoever wrote it), and your own `worth` override. Naming which one
+    won is the difference between a person seeing the dial and not knowing there is one.
+    """
+    level = config.effort()
+    mine = (paths.config().get("worth") or {}).get(entry.get("name", ""))
+    asked = mine or entry.get("max_effort")
+    runs = config.capped(level, asked)
+    if runs == "disabled":
+        return "not checked"
+    if mine and runs == mine:
+        return f"runs at {runs} (you said so)"
+    if asked and runs == asked:
+        return f"runs at {runs} (the destination caps it)"
+    return f"runs at {runs} (your level)"
+
+
+def worth(name: str, level: str) -> str:
+    """How hard to check one destination. Written into your config, not into the destination.
+
+    Effort was one number for a whole install, which is a per-install answer to a per-message question:
+    a commit message and an announcement to two hundred people got the same budget. `max_effort` on a
+    destination already said what that KIND of destination is worth, and on one real machine 8 of 9 left
+    it unset — `add --max-effort` only works at creation, and destinations mostly arrive from the shipped
+    set, a team's file, or setup.
+
+    Stored in config.json beside the level, because how hard you want something checked is your policy
+    rather than part of what the destination is. The first version of this wrote an override into your
+    destinations.json and broke the destination: the layers replace a whole entry by name, so an entry
+    carrying only a name and a level threw away the pattern that recognises it, and it matched nothing.
+
+    It replaces the destination's own `max_effort`, so it raises as well as lowers, and the level you set
+    still caps the result.
+    """
+    from checks.config import LEVELS
+    if level not in LEVELS:
+        raise ValueError(f"{level!r} is not one of {', '.join(LEVELS)}")
+    found = find(name)
+    if found is None:
+        raise KeyError(name)
+    settled = dict(paths.config().get("worth") or {})
+    settled[found.get("name", name)] = level
+    return paths.update_config(worth=settled)
+
+
 def add(entry: dict[str, Any]) -> tuple[str, str | None]:
     """Write one destination into your own file. The only writer, checked by the same declaration
     `load` reads with, so the file cannot hold a shape the loader will drop.
@@ -710,6 +759,9 @@ def _cli() -> None:
                         "the line between a document colleagues read and a scratch file")
     p = sub.add_parser("rm", help="delete one of your own")
     p.add_argument("name")
+    p = sub.add_parser("worth", help="how hard to check one: what this destination is worth to you")
+    p.add_argument("name")
+    p.add_argument("level", choices=list(config.LEVELS))
     p = sub.add_parser("off", help="stop checking one on this machine, whichever layer it came from")
     p.add_argument("name")
     p = sub.add_parser("on", help="resume checking one you switched off")
@@ -729,7 +781,10 @@ def _cli() -> None:
         seen = {}
         for entry in DESTINATIONS:
             caps = " ".join(filter(None, [
-                f"effort<={entry['max_effort']}" if entry.get("max_effort") else "",
+                # What this destination will ACTUALLY run at, not just what caps it. A reader asking
+                # "what does this cost me" was answered only by absence: a destination with nothing set
+                # printed nothing, so the level doing the work was invisible and 8 of 9 stayed unset.
+                _runs_at(entry),
                 f"severity<={entry['max_severity']}" if entry.get("max_severity") else ""]))
             lowered = str(entry.get("name", "")).lower()
             mark = f"  (shadowed by the {seen[lowered]} one)" if lowered in seen else ""
@@ -765,6 +820,17 @@ def _cli() -> None:
 
     if a.cmd == "share":
         print(share(a.to, a.only, with_off=a.with_off))
+        return
+
+    if a.cmd == "worth":
+        try:
+            where = worth(a.name, a.level)
+        except KeyError:
+            raise SystemExit(f"no destination called {a.name!r}. `list` shows every one of them.")
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        print(f"{a.name}: checked at {a.level} at most -> {where}")
+        print(f"  The level you set caps this, so it raises a destination only as far as you allow.")
         return
 
     if a.cmd in ("off", "on"):

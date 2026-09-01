@@ -119,7 +119,18 @@ CONFIG: dict[str, Rule] = {
     "shared": each(text),
     "unresolved_audience": text,
     # Terms never assumed known, whichever audience applies. See audiences.never_known.
-    "not_known": each(text)}
+    "not_known": each(text),
+    # What each destination is worth checking, by name: {"slack message": "high"}. Effort was one number
+    # for a whole install, which is a per-install answer to a per-message question — a commit message and
+    # an announcement to two hundred people got the same budget. `max_effort` on a destination already
+    # said what that KIND of destination is worth, and on one real machine 8 of 9 left it unset because
+    # there was no way to set it after the destination existed.
+    #
+    # Here rather than in destinations.json, because how hard you want something checked is your policy
+    # and not part of what the destination IS. Putting it there also broke the destination: the layers
+    # replace a whole entry by name, so an override carrying only a name and a level threw away the
+    # pattern that recognises it, and the destination stopped matching anything at all.
+    "worth": mapping}
 
 # A destination: which tool calls carry prose to which readers, and how hard to look. `max_effort` and
 # `max_severity` are the two that exist to make the guard LESS aggressive, which is why a typo in

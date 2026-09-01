@@ -11,6 +11,7 @@ plugin and nothing at runtime imports them.
 | `measure_thresholds.py` | re-derive the author cut and the share threshold on your own audiences |
 | `measure_advice.py` | is advisory feedback ever acted on, and would an agent act if it arrived in time |
 | `held_drafts.py` | build a corpus out of the messages this machine has actually held back |
+| `measure_gate.py` | could the one cheap question stand in for the six expensive ones — it cannot, 4/8 recall |
 | `fixtures/well-built/` | ordinary messages every check must pass |
 | `fixtures/one-reader/` | messages whose correctness depends on having a single addressee |
 
@@ -28,6 +29,12 @@ python3 measure/measure_advice.py --probe /tmp/held.json # would an agent act if
 
 `held_drafts.py` keeps message text, unlike everything else here — that is what makes it a corpus.
 Write it somewhere temporary and do not commit what comes out.
+
+`measure_gate.py` wants positives — real messages that were held — as JSON holding `{"body": ...}`:
+
+```
+python3 measure/measure_gate.py --held /tmp/held.json --reps 2
+```
 
 They are **not** in continuous integration for that reason. CI runs the two deterministic suites
 under `tests/`, which make no model calls at all.

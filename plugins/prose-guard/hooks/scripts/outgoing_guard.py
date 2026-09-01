@@ -406,6 +406,15 @@ def reader(audience: Resolved | None) -> str:
 MOST_AT_ONCE = 6
 
 
+def only_advises(check: Check) -> bool:
+    """Whether this check can never hold a message back.
+
+    A phase says so in its filename (`6-promise.advise.md`); the combined `judgement` check says so with
+    `ADVISES`. Both were readable only by knowing which was which.
+    """
+    return bool(getattr(check, "advises", False) or getattr(check, "ADVISES", False))
+
+
 def all_at_once(checks: list[Check], text: str, ctx: Context | None,
                 budget: int) -> dict[str, tuple]:
     """Ask every check that costs a model call at the same time, and return what each said.
@@ -516,7 +525,8 @@ def tally(level: str, rewrites: int, notes: int, calls: int,
 
 
 def say_together(findings: list[Finding], checks: list[Check], state: dict[str, Any], path: str,
-                 digest: str, advice: list[Advice], keep: Callable[[str, str], None]) -> bool:
+                 digest: str, advice: list[Advice], keep: Callable[[str, str], None],
+                 also: list[str] | None = None) -> bool:
     """One interruption carrying what every free check found. True when the call was denied.
 
     Nothing when there is nothing: the caller does not have to check first. The denial is counted
@@ -532,7 +542,7 @@ def say_together(findings: list[Finding], checks: list[Check], state: dict[str, 
         # each is held to its own two complaints about this message.
         if n:
             state["denials"][check.NAME] = state["denials"].get(check.NAME, 0) + 1
-    return say(joined, checks[0], state, path, digest, advice, keep)
+    return say(joined, checks[0], state, path, digest, advice, keep, also=also)
 
 
 def main() -> None:
@@ -613,7 +623,11 @@ def main() -> None:
     # reader will care and whether the ask is clear; a commit message has no addressee and no ask, and
     # paying four model calls for one is the wrong trade for something read years later, by someone
     # looking for when a line changed. See data/destinations.json.
-    level = checks_module.capped(EFFORT, dest.get("max_effort"))
+    # What this destination is worth, then what you are willing to pay. `worth` in config.json names a
+    # destination and replaces its own `max_effort`, so it can raise a cheap destination as well as lower
+    # an expensive one; EFFORT caps the result either way, so the level you set stays a ceiling.
+    asked = (paths.config().get("worth") or {}).get(dest.get("name", "")) or dest.get("max_effort")
+    level = checks_module.capped(EFFORT, asked)
     running = checks_module.for_effort(level)
     if not running:
         allow()
@@ -673,7 +687,40 @@ def main() -> None:
               and (state["verdicts"].get(c.NAME) or {}).get("digest") != digest]
     # Asked together, before the walk, so the walk spends no time waiting. The walk itself is unchanged:
     # same order, same caching, same one-finding-blocks rule — it just reads answers that already exist.
+    # A check that can never hold a message back is not asked until something else has. Advice was
+    # measured inert on its own — 41 given, 0 acted on, because it reaches the model after the call has
+    # run — and actionable when it rides along on a denial, which `other_concerns` already arranges. So it
+    # is worth a call at that moment and worth nothing before it.
+    #
+    # At `medium` this is the whole of the token cost: the only paying check is `judgement`, it only
+    # advises, and what can block there is the two arithmetic checks, which cost nothing and answer before
+    # any model call. So `medium` now costs 0 calls on a message nothing objects to, and 1 on a message
+    # already being held. No extra waiting either, because the gate is free.
+    #
+    # At `high` the gate is the five blocking checks, so this costs one more round of waiting on a message
+    # that is being held anyway — measured at 1% of claimed calls, at most 7% — and saves a call on the
+    # rest.
+    waiting = [c for c in unpaid if only_advises(c)]
+    unpaid = [c for c in unpaid if not only_advises(c)]
     answers = all_at_once(unpaid, text, ctx, max(0, budget - state["calls"]))
+
+    def mine(f: Finding) -> bool:
+        """Whether this finding is about text this call wrote."""
+        return written_here(text, f, ctx.mine)
+
+    def worth_asking_now(blocking: str) -> list[str]:
+        """Ask whatever was waiting, now that something is holding the message, and hand it all over.
+
+        Called from every point a denial can happen, and there are three of them: a paid check objecting,
+        and the two places the free checks say what they found together. Patching one of them left
+        `medium` never asking at all, because what blocks at `medium` is a free check.
+        """
+        if waiting:
+            answers.update(all_at_once(waiting, text, ctx, max(0, budget - state["calls"])))
+            for asked in waiting:
+                state["calls"] += answers.get(asked.NAME, ([], [], 0))[2]
+            waiting.clear()
+        return other_concerns(running, answers, blocking, mine, MOST_TO_SAY // 2)
     for check in running:
         remembered = state["verdicts"].get(check.NAME) or {}
         if remembered.get("digest") == digest:
@@ -691,6 +738,11 @@ def main() -> None:
             continue
         if costs_a_call(check) and state["calls"] >= budget:
             state["verdicts"][check.NAME] = {"digest": digest}
+            continue
+        if check in waiting:
+            # Advice-only, and nothing has held this message. Not asked at all, and no verdict recorded,
+            # so a later blocking finding on this same text still gets to ask it. Without this it fell
+            # through to the branch below and was asked inline, which is the branch for the free checks.
             continue
         if check.NAME in answers:
             # Already asked, at the same time as its siblings. See all_at_once: the budget is divided a
@@ -714,9 +766,11 @@ def main() -> None:
         # One message carrying everything this check found, so a caller pays one turn to fix several
         # things rather than one turn each.
         # Block only on what this call wrote. A complaint about a paragraph the edit never touched is
-        # worth saying and is not grounds for refusing the edit.
-        def mine(f: Finding) -> bool:
-            return written_here(text, f, ctx.mine)
+        # worth saying and is not grounds for refusing the edit. `mine` is defined above the loop: it
+        # closes over the text and nothing per-check, and defining it here left it unbound at the denial
+        # site that runs after the loop — which crashed the hook, and a hook that exits non-zero lets the
+        # call through.
+        #
         # Drop what has already been said about text this call did not write. Only those: a finding
         # about the edit in hand is about THIS text and is remembered by its digest, so an unchanged
         # resend re-says it and an edit that did not fix it earns the complaint again. See `repeated`.
@@ -749,16 +803,19 @@ def main() -> None:
             free_findings.append(finding)
             free_checks.append(check)
             continue
-        # Everything the free checks found goes out in one interruption, before anything is paid for.
-        if say_together(free_findings, free_checks, state, path, digest, advice, keep):
+        # Everything the free checks found goes out in one interruption, before anything is paid for —
+        # except what only advises, which is worth its call now that this is an interruption.
+        if say_together(free_findings, free_checks, state, path, digest, advice, keep,
+                        also=worth_asking_now(free_checks[0].NAME) if free_findings else None):
             return
         free_findings, free_checks = [], []
         if say(finding, check, state, path, digest, advice, keep,
-               also=other_concerns(running, answers, check.NAME, mine, MOST_TO_SAY // 2)):
+               also=worth_asking_now(check.NAME) if finding.severity == BLOCK else None):
             return
 
     # A free check objected and nothing after it did, so this is where that is said.
-    if say_together(free_findings, free_checks, state, path, digest, advice, keep):
+    if say_together(free_findings, free_checks, state, path, digest, advice, keep,
+                    also=worth_asking_now(free_checks[0].NAME) if free_findings else None):
         return
 
     # The message is going out, so the argument is over: a new message gets a fresh allowance and a
