@@ -465,7 +465,7 @@ def only_advises(check: Check) -> bool:
 
 
 def all_at_once(checks: list[Check], text: str, ctx: Context | None,
-                budget: int, ceiling: int) -> dict[str, tuple]:
+                budget: int, ceiling: int, charge: Callable[[int], None]) -> dict[str, tuple]:
     """Ask every check that costs a model call at the same time, and return what each said.
 
     They were asked one after another, and each answer is a `claude -p` subprocess taking about eight
@@ -485,6 +485,17 @@ def all_at_once(checks: list[Check], text: str, ctx: Context | None,
     what a run is worth is decided by what this call is answerable for. Deriving it here as well would
     be the same decision made twice from two different texts, and `min` below would take whichever came
     out smaller without anything saying they had disagreed. See `main`.
+
+    `charge` is called with every answer's spend as the answer arrives, and that is the only place the
+    session is charged for a model call. The money leaves here, all of it, before the caller looks at a
+    single answer — so charging where an answer is READ charges only the answers that get read, and the
+    walk over the checks returns at the first finding worth holding the message back for, which is the
+    outcome this whole tool is for. What every check after it spent would be billed to nobody: the
+    budget binds later than it claims, the state file carries a smaller number than the round spent, and
+    the line naming the allowance names that number.
+
+    Called from this loop rather than from the workers, so it runs in one thread and needs no lock:
+    `as_completed` yields in the caller's thread.
     """
     if not checks or budget <= 0:
         # Nothing left to spend, so nothing is asked. `max(1, 0 // n)` floors at one and asked anyway,
@@ -502,7 +513,10 @@ def all_at_once(checks: list[Check], text: str, ctx: Context | None,
             try:
                 out[check.NAME] = done.result()
             except Exception:
+                # Nothing spent is lost here: `pooled` counts a run that raised and says so, so what
+                # reaches this line raised before it ran anything — a check declaring no MODE, say.
                 out[check.NAME] = ([], [], 0)   # a broken check is a silent check, never a blocker
+            charge(out[check.NAME][2])
     return out
 
 
@@ -810,7 +824,21 @@ def main() -> None:
     # rest.
     waiting = [c for c in unpaid if only_advises(c)]
     unpaid = [c for c in unpaid if not only_advises(c)]
-    answers = all_at_once(unpaid, text, ctx, max(0, budget - state["calls"]), ceiling)
+
+    def charge(calls: int) -> None:
+        """Add what a check spent to this message's bill, and put it where the next round will read it.
+
+        Written to disk here rather than left for whichever exit the walk takes. The state file is what
+        carries a spend from one round of an argument to the next, and every model call this round made
+        was made before the walk started — so a spend recorded in memory and lost on the way out is a
+        round of checking somebody paid for twice. It is a few hundred bytes, at most once per paying
+        check.
+        """
+        if calls:
+            state["calls"] += calls
+            save_state(path, state)
+
+    answers = all_at_once(unpaid, text, ctx, max(0, budget - state["calls"]), ceiling, charge)
 
     def mine(f: Finding) -> bool:
         """Whether this finding is about text this call wrote."""
@@ -841,10 +869,10 @@ def main() -> None:
         `medium` never asking at all, because what blocks at `medium` is a free check.
         """
         if waiting:
+            # Charged inside, like the first round of asking: `all_at_once` is where the money leaves,
+            # so it is where the bill is written. See its `charge` argument.
             answers.update(all_at_once(waiting, text, ctx, max(0, budget - state["calls"]),
-                                       ceiling))
-            for asked in waiting:
-                state["calls"] += answers.get(asked.NAME, ([], [], 0))[2]
+                                       ceiling, charge))
             waiting.clear()
         return other_concerns(running, answers, blocking, rides_along, MOST_TO_SAY // 2)
     for check in running:
@@ -862,26 +890,33 @@ def main() -> None:
             if say(finding, check, state, path, digest, advice, hatch, keep):
                 return
             continue
-        if costs_a_call(check) and state["calls"] >= budget:
-            # A check the budget stopped is a check that did not run, and the verdict recorded on the
-            # next line is a pass — which is what a check with nothing to say records too. Collected
-            # here and said once below, because a spent budget is one fact about the message rather
-            # than one fact per check.
-            unasked.append(check.NAME)
-            state["verdicts"][check.NAME] = {"digest": digest}
-            continue
-        if check in waiting:
+        if check.NAME in answers:
+            # Already asked, at the same time as its siblings, and already charged where it was spent —
+            # see all_at_once. The budget is divided a share each, which is what the sequential version
+            # was aiming at: handing each check whatever was left meant the first one took it, and on an
+            # edit of one sentence in a 1,960-word file all nineteen calls went to `relevance` while four
+            # concerns never ran.
+            #
+            # Read before the budget test below, and that order is the point. `answers` is the record of
+            # what was asked; `state["calls"] >= budget` is a guess at it, and it is wrong in the one
+            # case that matters — a round that spends its whole allowance makes it true of every check
+            # whose answer is already sitting here, so the answers get thrown away and reported as
+            # checks the budget stopped.
+            found, firm, _ = answers[check.NAME]
+        elif check in waiting:
             # Advice-only, and nothing has held this message. Not asked at all, and no verdict recorded,
             # so a later blocking finding on this same text still gets to ask it. Without this it fell
             # through to the branch below and was asked inline, which is the branch for the free checks.
             continue
-        if check.NAME in answers:
-            # Already asked, at the same time as its siblings. See all_at_once: the budget is divided a
-            # share each, which is what the sequential version was aiming at — handing each check
-            # whatever was left meant the first one took it, and on an edit of one sentence in a
-            # 1,960-word file all nineteen calls went to `relevance` while four concerns never ran.
-            found, firm, spent = answers[check.NAME]
-            state["calls"] += spent
+        elif costs_a_call(check):
+            # Not in `answers`, so it was never asked: `all_at_once` asks nothing when there is nothing
+            # left to spend, and answers everything it asks. A check that did not run records a pass on
+            # the next line, which is what a check with nothing to say records too — so it is collected
+            # here and said once below, because a spent budget is one fact about the message rather than
+            # one fact per check.
+            unasked.append(check.NAME)
+            state["verdicts"][check.NAME] = {"digest": digest}
+            continue
         else:
             try:
                 # Costs nothing, so there is nothing to gain by asking it early: the free checks are
@@ -890,8 +925,11 @@ def main() -> None:
                 # is passed for the same reason the argument exists, so that a check arriving here with
                 # a different mode is priced like every other.
                 found, firm, spent = pooled(check, text, ctx, ceiling)
-                state["calls"] += spent
+                charge(spent)                # zero for every check that reaches here, and charged anyway
             except Exception:
+                # What `pooled` raises rather than absorbs happens before it runs anything — a check
+                # declaring no MODE, say — so nothing spent is lost here. A run that raises is counted
+                # and said out loud by `pooled` itself; see checks/pooling._asked.
                 found, firm = [], []         # a broken check is a silent check, never a blocker
         if not found:
             state["verdicts"][check.NAME] = {"digest": digest}

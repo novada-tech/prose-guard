@@ -624,6 +624,18 @@ how the cases are known to be load-bearing:
 - the hook never arming the deadline, so the allowance is correct and nothing switches it on
 - a call started past the deadline, a call past it passing in silence, and one call allowed a timeout
   longer than what is left of the whole allowance
+- the answers `all_at_once` brings back charged where the walk reads them rather than where they were
+  spent, which is the defect: the walk returns at the first finding worth holding the message for, and
+  the calls every check after it made are billed to nobody. Three cases, and a fourth for charging one
+  call a check rather than what the check spent
+- the running total consulted before the answer in hand, so a round that spends its whole allowance
+  reports every check it has just paid for as one the budget stopped, records a pass for each, and lets
+  the message go. Reachable only once the charging is right, which is why it is one commit with it
+- the charge kept in memory rather than written where it is made, so a walk that raises after the calls
+  are gone hands the next round the same allowance to spend on the same message
+- a run that raised counted as no run, which makes a check that breaks part way through free — and free
+  means asked again on the next round and every round after it. Three of them: the count dropped, the
+  break not stopping the pooling, and the notice not said
 
 - `examine` no longer dropping a term from `unexplained` when the message writes it out, which is the
   clause that makes the flagged terms and the expanded terms disjoint. Three cases of
@@ -631,6 +643,13 @@ how the cases are known to be load-bearing:
   `test_detection`. The first fixture written for it survived, because its expansion was ALSO found by
   `expanded_in_prose` and that route still excluded the term — a mutation the test could not see needed
   a fixture where only one of the two routes fires
+
+Two survivors from the sweep over the call accounting, both with a proof rather than a shrug, and both
+kept. Dropping the `charge` in the walk's inline branch changes nothing, because that branch is reached
+only by a check whose mode is `EXACT` and `pooled` returns no runs for one — pinned two assertions
+above it in the same test. It stays so that every place a spend can appear goes through the one function
+that charges it, and a check arriving there with a paying mode is charged rather than free. Charging a
+zero without the `if` that skips it changes nothing either: it writes the file to say the same number.
 
 One survivor, recorded rather than claimed equivalent: marking not-mine findings from `found` instead
 of from what `one_message` actually showed. The two differ only when the turn's budget drops a finding,
