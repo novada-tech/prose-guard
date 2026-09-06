@@ -148,6 +148,42 @@ def skipped(tool_input: dict[str, Any]) -> str | None:
     return None
 
 
+def hatch_for(tool_input: dict[str, Any]) -> str:
+    """What to tell a caller that editing cannot help, for THIS kind of call.
+
+    Derived from the field `skipped` reads, and not from what the destination declares. Those are the
+    same fact, and a destination is free to carry a `bash` pattern and a tool list at once — it is the
+    call that decides which of them matched, so a second classification beside `skipped` would drift and
+    then describe a mechanism the caller cannot reach.
+
+    An assignment in front of a command is the only place `skipped` looks, so a call carrying no command
+    has no escape hatch at all: a `Write`, an `Edit`, and every MCP destination. One fixed sentence used
+    to name the shell one to all of them, and a subagent was told to put an assignment in front of a
+    `Write`. That costs a round trip and teaches a move that does not exist, so where there is no hatch
+    this says so instead of inventing one.
+
+    Giving those calls a hatch of their own was the alternative and it is worse. Nothing a `Write` can
+    carry reaches here: an environment variable is not per-call — it is the session-wide off switch
+    `SKIP_VAR` exists to avoid — and a marker in the text would be published to the reader. A sentinel
+    field is refused by the tool's own schema before the hook ever sees it.
+
+    The variable is still named where it cannot be used, and the reroute to a shell is closed in the
+    same sentence. An agent that has read `/prose-guard:rewrite-for-audience` or docs/reference.md
+    already knows the name, and leaving it unmentioned answers neither "can I use it here" nor the move
+    that follows from believing it — writing the same text out through `bash` to get in front of a
+    command, which is prose going out looking checked.
+    """
+    lasting = ("If a term is fine for this reader in general, `/prose-guard:audiences` is the "
+               "lasting fix.")
+    if isinstance(tool_input.get("command"), str):
+        return ("\n\nIf editing cannot fix this — you are reproducing text you did not write, "
+                "or quoting someone — say so and send it anyway: "
+                f'{SKIP_VAR}="<why>" in front of the command excuses that one command. ' + lasting)
+    return (f"\n\nEditing the text is the only thing that clears this. {SKIP_VAR} excuses one command "
+            f"and this call is not a command, so there is nothing to put it in front of — and routing "
+            f"the same text through a shell to reach it is prose going out looking checked. " + lasting)
+
+
 def default_audience() -> str:
     return paths.config().get("unresolved_audience") or "engineers"
 
@@ -326,13 +362,17 @@ class Advice(NamedTuple):
 
 
 def say(finding: Finding, check: Check, state: dict[str, Any], path: str, digest: str,
-        advice: list[Advice], keep: Callable[[str, str], None] | None = None,
+        advice: list[Advice], hatch: str, keep: Callable[[str, str], None] | None = None,
         also: list[str] | None = None) -> bool:
     """Deny on this finding, or add it to the advice. True when the call was denied and we are done.
 
     Split out because an identical resend re-says what a check already decided, and doing that had to
     mean re-running the check. The decision — deny, or advise — depends on the session's ledger rather
     than on the text, so it is the same code either way.
+
+    `hatch` is what this kind of call can do when editing cannot help — see `hatch_for`, which is where
+    that sentence is decided. Passed in rather than defaulted, so a caller that forgets is a TypeError
+    the suite sees rather than a denial that quietly stops naming the way out.
     """
     if finding.severity == BLOCK:
         used = state["denials"].get(check.NAME, 0)
@@ -343,12 +383,7 @@ def say(finding: Finding, check: Check, state: dict[str, Any], path: str, digest
             # moment it is the right answer. Naming it in every denial would teach the cheaper move
             # before the correct one, and the correct one is almost always to edit the text. An agent
             # that has already tried twice is a different situation.
-            hint = ("" if used + 1 < MAX_PER_CHECK else
-                    "\n\nIf editing cannot fix this — you are reproducing text you did not write, "
-                    "or quoting someone — say so and send it anyway: "
-                    'PROSE_GUARD_SKIP="<why>" in front of the command excuses that one command. '
-                    "If a term is fine for this reader in general, "
-                    "`/prose-guard:audiences` is the lasting fix.")
+            hint = "" if used + 1 < MAX_PER_CHECK else hatch
             if keep:
                 keep(check.NAME, finding.message)
             # What the other checks found, in the same interruption. Only this one holds the message
@@ -525,7 +560,7 @@ def tally(level: str, rewrites: int, notes: int, calls: int,
 
 
 def say_together(findings: list[Finding], checks: list[Check], state: dict[str, Any], path: str,
-                 digest: str, advice: list[Advice], keep: Callable[[str, str], None],
+                 digest: str, advice: list[Advice], hatch: str, keep: Callable[[str, str], None],
                  also: list[str] | None = None) -> bool:
     """One interruption carrying what every free check found. True when the call was denied.
 
@@ -542,7 +577,7 @@ def say_together(findings: list[Finding], checks: list[Check], state: dict[str, 
         # each is held to its own two complaints about this message.
         if n:
             state["denials"][check.NAME] = state["denials"].get(check.NAME, 0) + 1
-    return say(joined, checks[0], state, path, digest, advice, keep, also=also)
+    return say(joined, checks[0], state, path, digest, advice, hatch, keep, also=also)
 
 
 def main() -> None:
@@ -634,6 +669,9 @@ def main() -> None:
 
     digest = hashlib.sha1(text.encode()).hexdigest()[:16]
     ctx = context_for(dest, tool, tool_input, cwd)
+    # What a caller can do when editing is not available to it. One call, so one sentence: worked out
+    # here rather than at each denial, and read from the call rather than from the destination.
+    hatch = hatch_for(tool_input)
 
     # A held message is an exchange nobody sees: the guard objects, the agent rewrites, and only the
     # last version reaches anybody — so a bad complaint and a good one look identical afterwards. This
@@ -733,7 +771,7 @@ def main() -> None:
                 free_findings.append(finding)
                 free_checks.append(check)
                 continue
-            if say(finding, check, state, path, digest, advice, keep):
+            if say(finding, check, state, path, digest, advice, hatch, keep):
                 return
             continue
         if costs_a_call(check) and state["calls"] >= budget:
@@ -805,16 +843,16 @@ def main() -> None:
             continue
         # Everything the free checks found goes out in one interruption, before anything is paid for —
         # except what only advises, which is worth its call now that this is an interruption.
-        if say_together(free_findings, free_checks, state, path, digest, advice, keep,
+        if say_together(free_findings, free_checks, state, path, digest, advice, hatch, keep,
                         also=worth_asking_now(free_checks[0].NAME) if free_findings else None):
             return
         free_findings, free_checks = [], []
-        if say(finding, check, state, path, digest, advice, keep,
+        if say(finding, check, state, path, digest, advice, hatch, keep,
                also=worth_asking_now(check.NAME) if finding.severity == BLOCK else None):
             return
 
     # A free check objected and nothing after it did, so this is where that is said.
-    if say_together(free_findings, free_checks, state, path, digest, advice, keep,
+    if say_together(free_findings, free_checks, state, path, digest, advice, hatch, keep,
                     also=worth_asking_now(free_checks[0].NAME) if free_findings else None):
         return
 
