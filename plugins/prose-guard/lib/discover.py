@@ -3,7 +3,7 @@
 
     python3 lib/discover.py
 
-Four sources, all deterministic and all local. Nothing here decides anything: it hands a list to
+Every source below is deterministic and local. Nothing here decides anything: it hands a list to
 `/prose-guard:setup`, which proposes destinations and asks you to confirm. Guessing wrong in either
 direction is cheap — a missed destination goes unchecked, an invented one checks something harmless —
 but only if a person sees the list, which is why this prints rather than writes.
@@ -15,6 +15,9 @@ but only if a person sees the list, which is why this prints rather than writes.
                command NAMES are counted; no arguments are read, because arguments carry content.
     unclaimed  tools that already carried long prose past the hook without any destination
                claiming them. The best evidence of all, because it happened.
+    claimed    what came of the calls each configured destination DID claim. A destination that keeps
+               matching and never finds a word is a defect in whatever claims it, and from outside it
+               looks exactly like a clean pass — see `never_recovered`.
 """
 from __future__ import annotations
 
@@ -175,6 +178,18 @@ def unclaimed() -> dict[str, dict[str, Any]]:
         out[key[len("unclaimed: "):]] = {"uses": entry.get("seen", 0),
                                          "mentioned": bool(entry.get("said")),
                                          "declined": bool(entry.get("declined"))}
+    return out
+
+
+def claimed() -> dict[str, dict[str, int]]:
+    """What has come of the calls each destination claimed, by outcome. Counts only, never text."""
+    out: dict[str, dict[str, int]] = {}
+    for key, entry in telling.everything().items():
+        if not key.startswith("claimed "):
+            continue
+        outcome, _, name = key[len("claimed "):].partition(": ")
+        if outcome in destinations.OUTCOMES and name:
+            out.setdefault(name, {})[outcome] = entry.get("seen", 0)
     return out
 
 
@@ -346,6 +361,58 @@ def record_candidate(tool: str, tool_input: dict[str, Any]) -> str | None:
             + f". This is the only time it will be mentioned.")
 
 
+# The mirror of MENTION_AFTER, for a destination that DOES claim calls and never finds a word in one.
+# Higher, because the evidence is weaker: an unclaimed shape carrying prose three times is a
+# destination somebody wants, whereas a destination that has found nothing yet may simply not have been
+# used for anything with prose in it. `measure/measure_silence.py` prints the figure this has to sit
+# above: over 6,170 local transcripts, the later of the two shipped Bash destinations to get going
+# recovered its first text inside 8 claimed calls, whichever way those calls are counted. So a
+# destination that works is well clear of this, and neither of them would have been reported.
+SILENT_AFTER = 20
+
+
+def record_outcome(destination: str, outcome: str) -> None:
+    """Count what one claimed call yielded. Never says anything — see `never_recovered` for that.
+
+    Counting and saying are two calls rather than one, unlike `record_candidate`, because the caller
+    that counts is not always a caller that can speak: a call held back over `unreadable` returns
+    before anything else is printed. A note marked said and then dropped is suppressed having never
+    been read once, which is the mistake `telling.py`'s own docstring names.
+    """
+    if destination and outcome in destinations.OUTCOMES:
+        telling.Ledger().seen(f"claimed {outcome}: {destination}")
+
+
+def never_recovered(destination: str) -> str | None:
+    """A note when a destination has matched enough calls and has never once found the text.
+
+    A destination that matches and extracts nothing produces exactly what a clean pass produces:
+    silence, and no state. So `git commit -am "…"` — a bundled short flag no shipped `text_arg` lists —
+    went out unchecked and unmentioned for as long as anybody used it, and the only way to notice was
+    to go looking. One recovered message settles the question for good: after that the destination
+    demonstrably works and the silent calls are commits and comments that carry no prose.
+
+    Returns None almost always: at most one note per destination for the lifetime of the config, and
+    only from a caller that is about to print it.
+    """
+    tally = claimed().get(destination) or {}
+    if tally.get(destinations.CHECKED):
+        return None                          # it has found the text before, so it can
+    quiet = tally.get(destinations.UNDER_FLOOR, 0) + tally.get(destinations.NO_TEXT, 0)
+    if quiet < SILENT_AFTER:
+        return None
+    ledger = telling.Ledger()
+    if not ledger.worth_saying(f"never recovered: {destination}", for_good=True):
+        return None
+    short = tally.get(destinations.UNDER_FLOOR, 0)
+    return (f"prose-guard has matched `{destination}` {quiet} times and never found the text: "
+            f"{tally.get(destinations.NO_TEXT, 0)} with nothing it knows how to read, {short} with "
+            f"text under the {destinations.MIN_WORDS}-word floor. Either the destination does not "
+            f"name the flag or field you actually use — `python3 lib/destinations.py show "
+            f"'{destination}'` — or those calls genuinely carry no prose, which is fine. This is the "
+            f"only time it will be mentioned.")
+
+
 def main() -> None:
     import argparse
     ap = argparse.ArgumentParser(description="What here could be sending prose to a person.")
@@ -369,7 +436,7 @@ def main() -> None:
 
     if a.from_transcripts:
         counted = from_transcripts()
-        claimed = {d.get("name") for d in destinations.DESTINATIONS}
+        configured = {d.get("name") for d in destinations.DESTINATIONS}
         print("Tools that have carried prose to somebody here, most used first.")
         print("Shapes only — a tool name and a field name, never a value from a message.\n")
         if not counted:
@@ -380,7 +447,7 @@ def main() -> None:
             print(f"  {uses:5d}  {shape}")
         print(f"\n{len(counted)} shape(s). Ones already covered by a destination need nothing; for the "
               f"rest, /prose-guard:setup writes them.")
-        print(f"Destinations configured now: {', '.join(sorted(n for n in claimed if n)) or 'none'}")
+        print(f"Destinations configured now: {', '.join(sorted(n for n in configured if n)) or 'none'}")
         return
 
     servers = mcp_servers()
@@ -422,9 +489,23 @@ def main() -> None:
     if declined:
         print(f"\nDeclined, and never suggested again: {', '.join(declined)}")
 
-    print("\nAlready covered:")
+    # Not just which destinations exist, but whether they ever see a word. A destination listed with
+    # counts against every outcome but `checked` is one that matches and cannot read what it matched,
+    # which is the one failure here that looks identical to working — see `never_recovered`.
+    print("\nAlready covered, and what came of the calls each one claimed:")
+    tally = claimed()
     for d in covered():
+        counts = tally.get(d["name"]) or {}
         print(f"  {d['name']}")
+        for outcome in destinations.OUTCOMES:
+            if counts.get(outcome):
+                print(f"    {counts[outcome]:7d}  {outcome}")
+        if not counts:
+            print(f"    {'—':>7}  nothing claimed yet")
+    print(f"\n  `{destinations.UNDER_FLOOR}` is a message shorter than {destinations.MIN_WORDS} words, "
+          f"which is deliberate and not a gap.")
+    print(f"  `{destinations.NO_TEXT}` with no `{destinations.CHECKED}` beside it is the one worth "
+          f"looking at: it matched and could not read what it matched.")
 
 
 if __name__ == "__main__":

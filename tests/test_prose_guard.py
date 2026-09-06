@@ -2172,6 +2172,110 @@ def test_the_hook_surfaces_a_candidate_once():
               "post_update" in (note.get("additionalContext") or ""), True)
 
 
+
+def test_what_a_claimed_call_yielded_is_four_answers_not_two():
+    """`extract` returns None both for a commit with no message and for one whose message it threw
+    away, and those are not the same fact about the tool.
+
+    `measure/measure_silence.py --unique`, over 6,170 local transcripts: the `commit message`
+    destination claimed 978 calls and recovered nothing from 435 of them. 269 carried nothing it knows
+    how to read, which for `git commit --amend --no-edit` is correct; 166 had a message the MIN_WORDS
+    floor dropped. One of those numbers is the tool working and the other is the tool hiding a hole,
+    and from outside both were silence.
+    """
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as repo:
+        _, D = fresh(home)
+        for argv in (["init", "-q"], ["config", "user.email", "a@b.c"], ["config", "user.name", "t"]):
+            subprocess.run(["git", "-C", repo, *argv], capture_output=True, timeout=60)
+
+        def outcome(cmd):
+            dest = D.match("Bash", {"command": cmd})
+            return D.recovered(dest, "Bash", {"command": cmd}, repo)
+
+        got = outcome(f'git commit -m "{PROSE}"')
+        check("a message long enough to judge is checked", got.outcome, D.CHECKED)
+        check("and the text comes back with it", got.text, PROSE)
+
+        got = outcome('git commit -m "wip"')
+        check("a message the floor threw away says so", got.outcome, D.UNDER_FLOOR)
+        check("and there is no text to check", got.text, None)
+
+        got = outcome("git commit --amend --no-edit")
+        check("an amend with no message found none", got.outcome, D.NO_TEXT)
+
+        got = outcome('gh pr create --title "T" --body "${SUMMARY}"')
+        check("a substitution nothing can resolve is reported", got.outcome, D.SAID)
+        check("and the sentence for the person comes back with it",
+              "substitution" in (got.why or ""), True)
+
+        # Every outcome is one of the four the report knows how to print. Named, not filtered: a
+        # comprehension over the outcomes a loop happened to produce is true when it produced none.
+        check("and those are all of them", sorted(D.OUTCOMES),
+              sorted([D.CHECKED, D.SAID, D.UNDER_FLOOR, D.NO_TEXT]))
+
+
+def test_a_destination_that_never_finds_the_text_reports_itself():
+    """A claimed destination that matches and recovers nothing emits exactly what a clean pass emits.
+
+    An unclaimed shape is counted and eventually mentioned; a claimed one that never yields text was
+    counted nowhere, so `git commit -am "…"` — a form no shipped `text_arg` lists — went out unchecked
+    and unmentioned for as long as anybody used it, and the only way to notice was to go looking.
+    """
+    import destinations as D
+    import discover as V
+    with tempfile.TemporaryDirectory() as tmp:
+        home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
+        # A commit form that carries no message the tool can read, sent until it is worth saying.
+        payload = {"tool_name": "Bash", "session_id": "silent", "cwd": tmp,
+                   "tool_input": {"command": "git commit --amend --no-edit"}}
+        replies = [hook_reply(payload, env(home, state)) for _ in range(V.SILENT_AFTER + 3)]
+        said = [n for n, r in enumerate(replies) if r and (r.get("systemMessage") or "")]
+        check("it is mentioned once, and not before it matters", said, [V.SILENT_AFTER - 1])
+        note = replies[V.SILENT_AFTER - 1]
+        check("the note names the destination",
+              "commit message" in (note.get("systemMessage") or ""), True)
+        check("and reaches the model, which is what can offer to fix it",
+              "commit message" in (note.get("additionalContext") or ""), True)
+        check("and nothing was held back over it", note.get("permissionDecision"), None)
+
+        # Where the field SITS, from what a real run printed. Nested inside hookSpecificOutput it is
+        # well-formed JSON that Claude Code discards, and a test that reads it back from there agrees
+        # with the code rather than with Claude Code.
+        raw = raw_hook_output(dict(payload, session_id="sits"), env(home, state))
+        check("systemMessage is a sibling of hookSpecificOutput, never a field inside it",
+              "systemMessage" in (raw.get("hookSpecificOutput") or {}), False)
+
+        # The tally stays four separate numbers, because "no message on the command line" is the tool
+        # working and "a message the floor threw away" is not.
+        was = os.environ["PROSE_GUARD_HOME"]
+        os.environ["PROSE_GUARD_HOME"] = home    # the ledger the hook subprocess actually wrote
+        try:
+            tally = V.claimed().get("commit message") or {}
+        finally:
+            os.environ["PROSE_GUARD_HOME"] = was
+        check("every claimed call is counted", tally.get(D.NO_TEXT), V.SILENT_AFTER + 4)
+        check("and an outcome that never happened is not invented", tally.get(D.CHECKED, 0), 0)
+
+
+def test_a_destination_that_does_find_the_text_is_never_reported():
+    """The thing worth interrupting for is a destination that never yields text.
+
+    A commit with no message on the command line is a fact about that commit, not a defect, and
+    nagging about it is how a tool gets switched off. One recovered message settles it for good.
+    """
+    import discover as V
+    with tempfile.TemporaryDirectory() as tmp:
+        home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
+        works = {"tool_name": "Bash", "session_id": "works", "cwd": tmp,
+                 "tool_input": {"command": 'git commit -m "' + PROSE + '"'}}
+        hook_reply(works, env(home, state))
+        amend = {"tool_name": "Bash", "session_id": "works", "cwd": tmp,
+                 "tool_input": {"command": "git commit --amend --no-edit"}}
+        replies = [hook_reply(amend, env(home, state)) for _ in range(V.SILENT_AFTER + 3)]
+        check("a destination that has found the text once is never reported",
+              [r.get("systemMessage") for r in replies
+               if r and "never found" in (r.get("systemMessage") or "")], [])
+
 # ------------------------------------------------------------------- the hook
 def env(home, state, effort="low"):
     e = {k: v for k, v in os.environ.items() if not k.startswith("PROSE_GUARD")}
@@ -5626,6 +5730,30 @@ def test_one_name_switched_off_does_not_have_to_be_a_list():
             os.environ.pop("PROSE_GUARD_HOME") if was is None else os.environ.update(PROSE_GUARD_HOME=was)
         check("the name is read as one name", [n for n, _, _ in switched], ["commit message"])
         check("and it is switched off", [d for d in found if d["name"] == "commit message"], [])
+
+
+def test_the_report_setup_reads_actually_runs():
+    """`discover.py` is what /prose-guard:setup runs, and nothing here had ever run it.
+
+    A local name in `main()` shadowed the module function that reads the per-destination tally, so the
+    report raised `UnboundLocalError` on every invocation while the whole suite stayed green. A
+    traceback there is not silent — setup sees it — but it is the wrong place to find out.
+    """
+    import destinations as D
+    with tempfile.TemporaryDirectory() as tmp:
+        home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
+        environment = env(home, state)
+        for command in ('git commit -m "' + PROSE + '"', "git commit --amend --no-edit"):
+            hook_reply({"tool_name": "Bash", "session_id": "report", "cwd": tmp,
+                        "tool_input": {"command": command}}, environment)
+        got = subprocess.run([sys.executable, os.path.join(LIB, "discover.py")],
+                             capture_output=True, text=True, env=environment, timeout=120)
+        check("the report runs", (got.returncode, got.stderr.strip()[-400:]), (0, ""))
+        # The destination and both of its outcomes, so a report that runs and prints an empty section
+        # is not mistaken for one that works.
+        check("and names the destination it counted", "commit message" in got.stdout, True)
+        check("and what came of the calls it claimed",
+              [o for o in (D.CHECKED, D.NO_TEXT) if o not in got.stdout], [])
 
 
 def main():
