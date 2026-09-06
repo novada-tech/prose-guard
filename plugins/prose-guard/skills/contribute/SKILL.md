@@ -84,8 +84,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/lib/check_prose.py" repro.md --for engineers --ef
 Name `engineers` rather than their own audience. It is the baseline that ships, so it is the one a
 maintainer also has, and a report naming a private audience is one nobody else can run.
 
-Keep the reproduction over 25 words. Below that nothing is checked at all, so a shorter one proves
-nothing either way.
+Keep the reproduction long enough to be worth a model call — the floor is
+`checks.MIN_WORDS_FOR_A_CALL`. Below it no model-based check is asked, so a shorter reproduction proves
+nothing either way about one. The two deterministic checks read a message of any length.
 
 **If it no longer fails, that is the finding — report it that way.** A check disagreeing with itself
 between runs is a measured property of this tool rather than a surprise, and CONTRIBUTING carries the

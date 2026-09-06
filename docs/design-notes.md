@@ -601,8 +601,6 @@ how the cases are known to be load-bearing:
   and finding no words indistinguishable from a clean pass
 - a destination that HAS recovered text before still reported for its silent calls, which turns the one
   interruption this adds into a nag about every `git commit --amend --no-edit`
-- `under the floor` collapsed into `no text found`, so a `text_arg` recovering a fragment of the real
-  message reads as a commit that carried none
 - the never-recovered note sent to the model and not to the person, which leaves it reaching nobody who
   can change a destination
 - a local name in `discover.main()` shadowing the module function that reads the per-destination tally,
@@ -644,12 +642,47 @@ how the cases are known to be load-bearing:
   `expanded_in_prose` and that route still excluded the term — a mutation the test could not see needed
   a fixture where only one of the two routes fires
 
+- the word floor capping nothing, so a message too short to be worth a model call pays for six checks
+- the word floor's comparison loosened by one word, which moves the boundary with nothing else to see.
+  This one survived the first pass: the test named a four-word message and a long one, and neither is
+  next to the boundary. What kills it is a case built from the constant itself, from both sides
+- `free_level()` reading the highest level rather than the highest that spends nothing, which is what
+  makes the cap on a short message mean "no model call" instead of "level named low"
+- the length floor back in `recovered`, so a short message is discarded rather than read. Every one of
+  the five cases that then fail is about a short message being allowed in silence
+- a text argument that is nothing but a shell substitution checked as the placeholder word, so the guard
+  reports having read a message when it read none of it
+- a substitution-only text argument ending the whole extraction rather than contributing nothing, so a
+  later `text_arg` on the same command is never reached
+- a fourth outcome declared with no call anywhere that produces it, which is a tally row that never
+  fills and reads from outside like a destination with nothing to report
+- `extract` reading one `text_fields` entry instead of every one — the first, and the last, since a
+  destination with two fields is the whole reason to read them all
+- `terms` reading the whole commit message again, subject included
+- `terms` reading the subject instead of the body, which is the same mistake with the opposite sign
+- the commit destination no longer declaring `subject_line`, so the fact lives in the code instead of
+  the data
+- a bundled short flag left unparsed, so `git commit -am "…"` carries nothing
+- the bundled letter paired with the wrong end of the cluster, and the named-field yield dropped from
+  the same loop — the two additions to `flag_values` sit one after the other, so each has to be pinned
+  against losing the other
+- every letter of a cluster given the following word, so `git commit -m "real" && find . -maxdepth 2`
+  reads `2` as a second `-m`
+
+A note on how those were run, because a pass reported catches it had not earned: a restored source file
+can land with a modification time and size that the bytecode compiled from the mutated one still
+matches, and then the suite is red for the *previous* mutation. Clear `__pycache__` between runs.
+
 Two survivors from the sweep over the call accounting, both with a proof rather than a shrug, and both
 kept. Dropping the `charge` in the walk's inline branch changes nothing, because that branch is reached
 only by a check whose mode is `EXACT` and `pooled` returns no runs for one — pinned two assertions
 above it in the same test. It stays so that every place a spend can appear goes through the one function
 that charges it, and a check arriving there with a paying mode is charged rather than free. Charging a
 zero without the `if` that skips it changes nothing either: it writes the file to say the same number.
+
+One more equivalent survivor, with the proof rather than a shrug: adding `checked` into the count of
+quiet calls in `never_recovered`. That count is only reached after an early return on any `checked` at
+all, so the term it adds is zero wherever the line runs.
 
 One survivor, recorded rather than claimed equivalent: marking not-mine findings from `found` instead
 of from what `one_message` actually showed. The two differ only when the turn's budget drops a finding,
@@ -923,6 +956,100 @@ survive being read one by one.
 
 Shipping the sentence anyway would spend words on the one message in eight thousand that has the shape,
 and be wrong on it. The two hops in the story stay two hops.
+
+## Two ways of quietening terms on commit messages, neither needed
+
+Letting short messages through to the free checks was planned on the expectation that `terms` would be
+too loud on commit messages to block, and the fallback was to demote it to advice there. The numbers
+say the opposite, and they say it because of which denominator the rate is taken over.
+
+Over every scored commit message, `terms` blocks on 2.7% once it reads the body rather than the whole
+message — above the roughly 2% the shipped mechanical rules set. But that number mixes the messages this
+change adds with the ones already being checked. Split:
+
+| | before | after |
+|---|---|---|
+| short messages (2,719), nothing ran on them at all | — | **0.44%** |
+| long messages (706), already checked | 14.87% | **11.47%** |
+| all 3,425, anything said at all | 3.30% | **3.04%** |
+
+So reading the body instead of the whole message is what a demotion was being considered for: it takes
+`terms` on the messages already in scope down by 3.4 points, and on the messages too short for a model
+call it fires at 0.44%. The tool covers four times as many commit messages and says less overall.
+Demoting the check would have spent that on nothing — and advice was measured inert at 41 given, 0
+acted on, so "advise instead" is closer to "stop checking" than the phrase suggests.
+
+The second rejected version is a special case for a long message written on a single line. `terms` reads
+what is after the first newline, so a message with no body is one it says nothing about — which is 66.1%
+of 4,282 real commit messages, and right for all but the ones where a whole paragraph was crammed onto
+the subject line. Those are 0.19% of the corpus, eight messages. A rule for them is a branch bought with
+eight messages, and the branch would have to guess at what makes a first line too long to be a subject.
+
+`measure_check.py` was not run for either: both checks are deterministic, so there is nothing for it to
+measure about them and no model call to spend.
+
+## A fourth outcome for a short message, deleted rather than kept empty
+
+`destinations.recovered` reports what came of a call a destination claimed, and `discover` tallies those
+per destination so that a destination matching every call and reading none of them stops looking like a
+destination with nothing to say. One of the answers it could give was "text was recovered and dropped as
+too short to judge" — which cannot happen once length stops being a reason to drop anything, because a
+short message is read and checked at the level that spends nothing.
+
+Keeping it as a row that never fills was rejected, and the reason is the thing the tally exists for. A
+row at zero says "this never happens here", which is what a working destination and a broken one both
+look like; the report would then carry an explanation of a decision nothing makes. So the outcome goes,
+the tally is three answers, and `discover.never_recovered` counts the one that means the tool could not
+read what it matched.
+
+Nothing new is built for it. A run that cannot answer looking exactly like a run with nothing to say is
+this repository's standing failure shape, and `checks/pooling.py` already has the answer for it: a check
+that raises is counted, stopped, and said once through `telling`. The tally is the same answer for a
+destination that keeps matching and reads nothing, which is why removing an outcome from it is a
+subtraction and not a gap.
+
+**It was not dead code before the merge, which is worth establishing rather than assuming.** Reinstating
+the floor over the merged extraction and counting it with
+
+```
+python3 measure/measure_silence.py --unique
+```
+
+over 6,787 local transcripts puts 223 claimed calls in that outcome — 201 of the `commit message`
+destination's, 18 `github api`, 4 `github cli`. Every one of them is a message a person wrote and sent,
+and every one now comes back `checked`. The outcome was reachable; removing the floor is what makes it
+unreachable, and `recovered` is the only thing that ever constructs one, so there is nowhere else it
+could still be produced from.
+
+The same run is where the `commit message` figures in
+`test_what_a_claimed_call_yielded_is_three_answers_not_one` come from: 995 claimed, 739 read, 229 with
+nothing the destination knows how to read, 27 where `unreadable` had a sentence for the person.
+Recovering the text of three calls in four, against a little over half before, is `-am` becoming
+readable and the floor no longer discarding what was read.
+
+Two shapes go with it, which is why extraction looks the way it does.
+
+**One function, not two.** The fourth outcome needed something between finding the text and gating it,
+because only a caller inside the module could know that a message had been found and thrown away. With
+the outcome gone there is nothing to know: `extract` finds what the call carries and `recovered` says
+which of the three answers that is. A function in between would exist to keep a distinction nothing
+draws.
+
+**Every `text_fields` entry, not a favourite among them.** The floor also served as a tie-break, and
+neither "the longest" nor "the first" survives, because the question does not need answering.
+`extract` reads every entry the call carries and joins them, which is the rule `_from_bash` already
+applies to every `text_arg`. Both halves of extraction then answer "which piece of prose is the one to
+read" the same way — all of them — instead of two different ways, and what a tie-break risks is half a
+message read and the other half silently dropped, which from outside is a message that passed. No
+shipped destination is affected either way: the only one with two fields is `content` for a `Write` and
+`new_string` for an `Edit`, and no call carries both.
+
+**Two fixtures are deliberately not updated.** `measure/fixtures/long-body.md` and
+`measure/fixtures/well-built-long/substitution.md` are commit messages from this repository's history,
+and one paragraph of each describes a resolved substitution going unchecked for being short. They are
+corpus, not documentation: the scores in [CONTRIBUTING.md](../CONTRIBUTING.md) were measured against
+these exact bytes, and editing them would invalidate the table rather than fix anything. The live
+statement of that behaviour is in [reference.md](reference.md).
 
 ## Thresholds
 

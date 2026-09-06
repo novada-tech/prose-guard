@@ -4,7 +4,8 @@
   "extend": "Put a file with this shape at <config dir>/destinations.json. Your entries are tried BEFORE these, so you can override one as well as add one. /prose-guard:setup will offer to write it for you, from what it finds on your machine.",
   "match": "tool: matched as a substring of the tool name, so MCP prefixes need not be spelled out. bash: a regex over the command. file: a regex over file_path.",
   "identifiers": "Which tool-call fields carry the channel, repo, owner or path. audiences.json matches on these, so a destination with no identifiers can never resolve an audience. `cwd_repo: true` is the repository the command runs in; `url_repo: true` is the one it names in a REST path, which is the one being written to when the two differ.",
-  "text": "text_fields: input fields that may hold the prose. text_arg: for Bash, flags whose value is the prose; a flag ending in -file, or -F or --input, is read from disk, and a JSON payload read that way contributes its body fields rather than its punctuation. Two words is a named field carried by a flag \u2014 `-f body` is how `gh api -f body=\u2026` passes one, and there a leading @ names a file. Every text_arg a command carries is read, not the first one that yields anything."
+  "text": "text_fields: input fields that may hold the prose. text_arg: for Bash, flags whose value is the prose; a flag ending in -file, or -F or --input, is read from disk, and a JSON payload read that way contributes its body fields rather than its punctuation. Two words is a named field carried by a flag \u2014 `-f body` is how `gh api -f body=\u2026` passes one, and there a leading @ names a file. Every text_arg a command carries is read, not the first one that yields anything.",
+  "shape": "subject_line: the first line is a title with the body under it, so the term check asks about the body only \u2014 a subject has nowhere to put an explanation."
  },
  "destinations": [
   {
@@ -50,8 +51,9 @@
     "cwd_repo": true
    },
    "note": "everyone who reads this repository's history, including you in a year. It is permanent and it is not edited later.",
-   "caveat": "Only the forms that put the text on the command line can be seen. `git commit` with no -m opens an editor, and that text never reaches the tool call. And it is checked at `low` whatever level you set: the terms check only, no model call. A commit message has no addressee and no ask, so most of what the higher levels ask does not apply to it.",
-   "max_effort": "low"
+   "caveat": "Only the forms that put the text on the command line can be seen. `git commit` with no -m opens an editor, and that text never reaches the tool call. Whatever level you set, it is checked at `low`: the two deterministic checks, no model call. A commit message has no addressee and no ask, so most of what the higher levels ask does not apply to it. Terms are asked about the body only, because a subject line has nowhere to put an explanation.",
+   "max_effort": "low",
+   "subject_line": true
   },
   {
    "name": "prose file someone will read",

@@ -144,6 +144,9 @@ DESTINATION: dict[str, Rule] = {
     # told, because a reader looking at that code already has the terms it defines.
     "anchored_to": each(text),
     "require_tracked": flag,
+    # Whether the first line is a subject: a title with no room for an explanation under it. See
+    # checks/context.py, where it decides what the term check reads.
+    "subject_line": flag,
     "max_effort": one_of(*LEVELS),
     "max_severity": one_of(*SEVERITIES)}
 

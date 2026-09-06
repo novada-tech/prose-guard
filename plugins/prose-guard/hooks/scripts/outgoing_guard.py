@@ -112,7 +112,10 @@ def context_for(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | No
         # including the ones with no file behind them: a `gh pr create --body-file` sent again after a
         # hold is the case it exists for, and it is where the whole document was being read out a
         # second time.
-        resent=wrote_which(text, what_changed(held, text)) if text else None)
+        resent=wrote_which(text, what_changed(held, text)) if text else None,
+        # A commit message and a pull request title are a line of their own with the body under them.
+        # The destination knows; the prose does not say.
+        subject_line=bool(dest.get("subject_line")))
     # A destination can say the readers are better informed than the audience assumes, e.g. a direct
     # message inside a channel-wide audience. Never the other way round.
     override = ctx.situation.pop("_shared_context", None)
@@ -716,6 +719,10 @@ def main() -> None:
     # an expensive one; EFFORT caps the result either way, so the level you set stays a ceiling.
     asked = (paths.config().get("worth") or {}).get(dest.get("name", "")) or dest.get("max_effort")
     level = checks_module.capped(EFFORT, asked)
+    # Then what the text itself is worth. A message too short for a model call to have anything to say
+    # is capped to the level that spends none, so the free checks still read it and the line the person
+    # sees names the level that actually ran. See checks.worth_paying_for.
+    level = checks_module.capped(level, checks_module.worth_paying_for(text))
     running = checks_module.for_effort(level)
     if not running:
         allow()

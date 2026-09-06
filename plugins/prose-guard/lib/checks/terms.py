@@ -1,5 +1,8 @@
 """Terms this reader cannot be assumed to know. Deterministic, instant, no model call.
 
+What it reads is the part of the message an explanation could go in, which is all of it unless the
+destination says the first line is a subject — see `Context.where_an_explanation_fits`.
+
 Severity is decided per message, from two things the check knows and the caller does not.
 
 **Is the audience known?** If no audience matched the destination, the tool is working from a
@@ -78,7 +81,9 @@ def _ambiguous(said: dict[str, str], considered: list[str], ctx: Context) -> str
 
 def run(text: str, ctx: Context) -> finding.Finding | None:
     from . import ADVISE, BLOCK, Finding
-    bad, considered, said = jargon.examine(text, ctx.audience.is_known)
+    # Where an explanation could actually go, which is everything but a subject line. See
+    # Context.where_an_explanation_fits.
+    bad, considered, said = jargon.examine(ctx.where_an_explanation_fits(text), ctx.audience.is_known)
     # Terms the previous version already used are not terms this text introduces. Rewriting a
     # published commit message to remove a client's name should not require also explaining the
     # original author's shorthand, and demanding it produces a block nobody can clear.

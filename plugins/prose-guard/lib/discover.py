@@ -226,6 +226,12 @@ NOT_OUTGOING = ("old_string", "prompt", "pattern", "command", "query", "regex", 
 # was never checked and, with the exclusion in place, was never mentioned either.
 
 
+# Discovery's own floor, and deliberately its own. The question here is not "is this worth checking"
+# — it is "is this worth interrupting somebody to propose a destination for", which is asked once per
+# shape, ever. A one-line message is worth checking and is no evidence at all that a tool sends prose.
+MIN_WORDS = 25
+
+
 def _reads_like_prose(text: str) -> bool:
     """Long text that is prose rather than a pattern, a script or a payload.
 
@@ -234,7 +240,7 @@ def _reads_like_prose(text: str) -> bool:
     Word count alone cannot tell a paragraph from a regex; sentences and ordinary words can.
     """
     words = text.split()
-    if len(words) < destinations.MIN_WORDS:
+    if len(words) < MIN_WORDS:
         return False
     if sum(text.count(c) for c in ".!?") < 2:
         return False                         # a paragraph has sentences; a pattern does not
@@ -365,9 +371,9 @@ def record_candidate(tool: str, tool_input: dict[str, Any]) -> str | None:
 # Higher, because the evidence is weaker: an unclaimed shape carrying prose three times is a
 # destination somebody wants, whereas a destination that has found nothing yet may simply not have been
 # used for anything with prose in it. `measure/measure_silence.py` prints the figure this has to sit
-# above: over 6,170 local transcripts, the later of the two shipped Bash destinations to get going
-# recovered its first text inside 8 claimed calls, whichever way those calls are counted. So a
-# destination that works is well clear of this, and neither of them would have been reported.
+# above: over 6,787 local transcripts, the slowest of the three shipped Bash destinations to get going
+# recovered its first text inside 10 claimed calls, counting each distinct command once. So a
+# destination that works is well clear of this, and none of the three would have been reported.
 SILENT_AFTER = 20
 
 
@@ -387,10 +393,10 @@ def never_recovered(destination: str) -> str | None:
     """A note when a destination has matched enough calls and has never once found the text.
 
     A destination that matches and extracts nothing produces exactly what a clean pass produces:
-    silence, and no state. So `git commit -am "…"` — a bundled short flag no shipped `text_arg` lists —
-    went out unchecked and unmentioned for as long as anybody used it, and the only way to notice was
-    to go looking. One recovered message settles the question for good: after that the destination
-    demonstrably works and the silent calls are commits and comments that carry no prose.
+    silence, and no state. A `text_arg` list that misses the flag somebody actually passes is that
+    shape — every call claimed, none of them read, nothing said about either — and the only way to
+    notice one is to go looking. One recovered message settles the question for good: after that the
+    destination demonstrably works and the silent calls are commits and comments that carry no prose.
 
     Returns None almost always: at most one note per destination for the lifetime of the config, and
     only from a caller that is about to print it.
@@ -398,19 +404,16 @@ def never_recovered(destination: str) -> str | None:
     tally = claimed().get(destination) or {}
     if tally.get(destinations.CHECKED):
         return None                          # it has found the text before, so it can
-    quiet = tally.get(destinations.UNDER_FLOOR, 0) + tally.get(destinations.NO_TEXT, 0)
+    quiet = tally.get(destinations.NO_TEXT, 0)
     if quiet < SILENT_AFTER:
         return None
     ledger = telling.Ledger()
     if not ledger.worth_saying(f"never recovered: {destination}", for_good=True):
         return None
-    short = tally.get(destinations.UNDER_FLOOR, 0)
-    return (f"prose-guard has matched `{destination}` {quiet} times and never found the text: "
-            f"{tally.get(destinations.NO_TEXT, 0)} with nothing it knows how to read, {short} with "
-            f"text under the {destinations.MIN_WORDS}-word floor. Either the destination does not "
-            f"name the flag or field you actually use — `python3 lib/destinations.py show "
-            f"'{destination}'` — or those calls genuinely carry no prose, which is fine. This is the "
-            f"only time it will be mentioned.")
+    return (f"prose-guard has matched `{destination}` {quiet} times and never found anything it knows "
+            f"how to read. Either the destination does not name the flag or field you actually use — "
+            f"`python3 lib/destinations.py show '{destination}'` — or those calls genuinely carry no "
+            f"prose, which is fine. This is the only time it will be mentioned.")
 
 
 def main() -> None:
@@ -502,10 +505,9 @@ def main() -> None:
                 print(f"    {counts[outcome]:7d}  {outcome}")
         if not counts:
             print(f"    {'—':>7}  nothing claimed yet")
-    print(f"\n  `{destinations.UNDER_FLOOR}` is a message shorter than {destinations.MIN_WORDS} words, "
-          f"which is deliberate and not a gap.")
-    print(f"  `{destinations.NO_TEXT}` with no `{destinations.CHECKED}` beside it is the one worth "
-          f"looking at: it matched and could not read what it matched.")
+    print(f"\n  `{destinations.NO_TEXT}` with no `{destinations.CHECKED}` beside it is the one worth "
+          f"looking at: it matched and could not read what it matched. Length is not a reason a call "
+          f"lands there — a short message is checked, at the level `checks.worth_paying_for` allows.")
 
 
 if __name__ == "__main__":

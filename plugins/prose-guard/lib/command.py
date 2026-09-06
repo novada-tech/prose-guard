@@ -338,6 +338,9 @@ def flag_values(cmd: str) -> Iterator[tuple[str, str]]:
     commands the flag alone does not say what it carries: `gh api -f body=… -f event=APPROVE` passes
     two named fields through one flag, and only one of them is prose. As well as, never instead of, so
     a caller that asks for `-f` still gets what it always got.
+
+    A cluster of short flags is yielded again under its last letter, for the same reason and with the
+    same "as well as" rule — see `_BUNDLED`.
     """
     parsed = words(cmd) or []
     for i, word in enumerate(parsed):
@@ -353,11 +356,27 @@ def flag_values(cmd: str) -> Iterator[tuple[str, str]]:
         name, sep, rest = value.partition("=")
         if sep and _FIELD_NAME.fullmatch(name):
             yield f"{flag} {name}", rest
+        bundled = _BUNDLED.match(word)
+        if bundled:
+            yield "-" + bundled.group(1)[-1], value
+
 
 # The name half of a `name=value` argument. A name, so that `-m "before=after is what changed"` is not
 # read as passing a field called `before`; no destination asks for one, but a flag whose value happens
 # to hold an equals sign is common and this keeps the second yield meaningful.
 _FIELD_NAME = re.compile(r"[A-Za-z_][\w.-]*")
+
+# Short flags written as one word: `git commit -am "…"` is `-a -m`, and no word in that command equals
+# `-m`, so a `text_arg` list naming `-m` finds nothing in it without this. Measured over 25,866
+# distinct local commands, 986 of which route to the commit destination: 53 pass their message this
+# way, 14 of them long enough for a model call to be worth making — see `checks.worth_paying_for`.
+#
+# Only the LAST letter is paired with the value, because only the last one can take it: the ones in
+# front of it take no argument, or the shell would have ended the cluster there. Pairing the value with
+# every letter would make `git commit -m "the real message" && find . -maxdepth 2` read `2` as a second
+# `-m`, and both would be joined into the message. The cost of the narrow version is that `-maxdepth 2`
+# also reads as `-h 2` — junk, but junk no destination asks for.
+_BUNDLED = re.compile(r"^-([A-Za-z]{2,})$")
 
 READS_A_FILE = re.compile(r"""^\$\(\s*(?:cat|<)\s+['"]?([^'"\s)]+)['"]?\s*\)$""")
 # Subcommand -> the flags whose presence still leaves the invocation a report. A flag that is not listed
