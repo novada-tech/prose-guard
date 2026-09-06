@@ -57,10 +57,19 @@ per check is what good prose costs at any length. The cap only binds on a docume
 
 ## What counts as sending
 
-Out of the box: **`git commit` and `git tag -m`**, `gh pr` and `gh issue` comments and descriptions, and
-prose files inside a git working tree that are not ignored. Those are the ones worth shipping — on
-essentially every developer machine, and each carrying something a tool schema does not show: which flag
-holds the body, that a commit message has no addressee, that a tracked file is one somebody will read.
+Out of the box: **`git commit` and `git tag -m`**, `gh pr` and `gh issue` comments and descriptions,
+`gh api` calls carrying a body, and prose files inside a git working tree that are not ignored. Those are
+the ones worth shipping — on essentially every developer machine, and each carrying something a tool
+schema does not show: which flag holds the body, that a commit message has no addressee, that a tracked
+file is one somebody will read.
+
+`gh api` is how everything outside `gh pr|issue|release` is posted — review replies, review threads,
+releases, issue transfers — and an agent reaches for it as soon as the `gh pr` surface runs out, which for
+a review with inline comments is immediately. It is also how everything is read, so a call is claimed only
+when it carries `--input` or a body field, never on `gh api` alone. A `--input` payload is JSON, and what
+is checked is its body fields: a review body and one per inline comment, in a single call. The repository
+comes from the `/repos/OWNER/REPO/…` path rather than from the working directory, because the call names
+the repository it writes to and the directory it runs in may be a different checkout.
 
 Everything else is yours and is found rather than assumed. Chat, issue trackers, wikis and vendor
 command-line tools go in at `/prose-guard:setup`, which reads the tool list `data/destinations.json`
@@ -100,6 +109,10 @@ the pull request that introduced the note went out unchecked while the note expl
 it had. Bounded at two like every other denial, then said as advice, so a caller that cannot comply is
 not stuck. "Resolved but too short to judge" is silent — that is not a gap, and sending someone to
 fix a working command would be noise.
+
+A command carrying several messages is read to the end of them: a review body and its inline comments in
+one `--input`, two replies chained with `&&`, a subject and a body as two `-m` flags. Stopping at the
+first was worth 3% of the commands claimed, measured over 25,878 unique local Bash commands.
 
 All of it is per destination without naming any: both halves read the destination's own `text_arg`, so
 `git commit -m "$(...)"` and the `--message` of a command-line destination setup added for you — `glab

@@ -191,46 +191,86 @@ def match(tool: str, tool_input: Any) -> Dest | None:
     return None
 
 
+# A flag whose value is a path rather than the prose itself: `--body-file`, `git commit -F`, and
+# `gh api --input`, whose payload is JSON.
+NAMES_A_FILE = ("-F", "--file", "--input")
+
+
+def _reads_a_file(flag: str) -> bool:
+    """Whether this text_arg can be handed a file to read, which is also the advice `unreadable` gives.
+
+    A text_arg written as two words is a NAMED field — `gh api -F body=@reply.md` passes `body` — and
+    there the flag alone says nothing, so it is the flag half that decides. Only `--field`/`-F`: `-f`
+    and `--raw-field` send the value literally, `@` and all, and reading a file for one of those would
+    check prose that is not being sent.
+    """
+    head, _, named = flag.partition(" ")
+    if named:
+        return head in ("-F", "--field")
+    return head.endswith("-file") or head in NAMES_A_FILE
+
+
+def _path_in(flag: str, value: str) -> str | None:
+    """The file this (flag, value) names, or None when the value IS the prose.
+
+    The path came from the command's own argument, so a hidden one is the caller's choice.
+    """
+    if not _reads_a_file(flag):
+        return None
+    if " " in flag:
+        return value[1:] if value.startswith("@") else None
+    return value
+
+
 def _from_bash(dest: Dest, cmd: str, cwd: str | None = None) -> str | None:
+    """Every message this command carries, in the order its destination declares them.
+
+    Every one, not the first. A `gh api --input review.json` holds a review body and an inline comment
+    per file, `cmd -F body=@a.md && cmd -F body=@b.md` is two replies in one call, and stopping at the
+    first meant the rest went out unread — 19 `gh` and 23 `git commit` calls in a corpus of 25,368
+    unique commands, about 3% of the ones a destination claims. It costs the writer too: five review
+    replies took five files and five commands because one command carrying several was not accepted.
+    """
     passed = list(command.flag_values(cmd))
+    found: list[str] = []
     for flag in dest.get("text_arg") or ():
-        values = [v for f, v in passed if f == flag]
-        if not values:
-            continue
-        # A flag ending in -file, or the short -F, names a file whose contents are the prose. That
-        # is how a long body is really passed, so it is read rather than matched. The path came from the
-        # command's own argument, so a hidden one is the caller's choice.
-        if flag.endswith("-file") or flag in ("-F", "--file"):
-            for value in values:
-                # `-F -` is stdin, and stdin is the heredoc in this same tool call. Measured on 4,154
-                # local transcripts: 151 of 817 prose-carrying commands are that idiom — the second
-                # most common way prose is passed, and every one of them went out unchecked AND
-                # unmentioned, because `-` is not a filename and nothing looked further.
-                if value == command.STDIN:
-                    got = command.heredoc_body(cmd)
-                    if got is not None:
-                        return got
-                    continue
-                got = command.read_prose_file(value, cwd, inside=False)
-                if got is not None:
-                    return got
+        literal = []
+        for value in [v for f, v in passed if f == flag]:
+            path = _path_in(flag, value)
+            if path is None:
+                literal.append(value)
+                continue
+            # `-` is stdin, and stdin is the heredoc in this same tool call. Measured on 4,154 local
+            # transcripts: 151 of 817 prose-carrying commands are that idiom — the second most common
+            # way prose is passed, and every one of them went out unchecked AND unmentioned, because
+            # `-` is not a filename and nothing looked further.
+            got = (command.heredoc_body(cmd) if path == command.STDIN
+                   else command.read_prose_file(path, cwd, inside=False))
+            if got is None:
+                continue
+            # A payload is a document, not a message: what a check can say anything about is its body
+            # fields. Anything that does not parse as one is prose exactly as it stands.
+            structured = command.prose_in_json(got)
+            found.append(got if structured is None else structured)
+        if not literal:
             continue
         # Several -m flags concatenate into one message, which is how a subject and body are given.
-        joined = "\n\n".join(values)
+        joined = "\n\n".join(literal)
         # The prose may be behind a substitution rather than in the command. Where it can be had
         # without risking a side effect, have it: nobody should have to restructure a command to
         # get their writing checked.
         if joined.strip().startswith("$"):
             got = command.resolve(joined, cwd)
             if got is not None:
-                return got
+                found.append(got)
+                continue
         # A substitution INSIDE otherwise ordinary text is the common case, not a wall of it: measured
         # across 4,154 local transcripts, such an argument is 87% literal at the median and never below
         # 64%. Refusing all of it threw away most of a message to avoid guessing at a fraction, and held
         # the call back for a defect nobody had looked for.
         seen, unseen = command.visible(joined)
-        return seen if unseen and len(seen.split()) >= MIN_WORDS else joined
-    return None
+        found.append(seen if unseen and len(seen.split()) >= MIN_WORDS else joined)
+    return "\n\n".join(t for t in found if t.strip()) or None
 
 
 def resulting(dest: Dest, tool: str, tool_input: dict[str, Any],
@@ -280,16 +320,24 @@ def extract(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None =
     return text if text and len(text.split()) >= MIN_WORDS else None
 
 
+# Identifiers a destination declares with `true` because they come from the call itself rather than
+# from one of its fields. The repository is the whole set of them so far, and there are two ways to
+# have it: a command that names it, and a command that merely runs inside it.
+FROM_THE_CALL = {
+    "url_repo": lambda tool_input, cwd: command.repo_named(str(tool_input.get("command") or "")),
+    "cwd_repo": lambda tool_input, cwd: _repo_at(cwd or os.getcwd())}
+
+
 def identifiers(dest: Dest, tool: str, tool_input: dict[str, Any],
                 cwd: str | None = None) -> dict[str, str]:
     """What the call reveals about who will read it. audiences.py matches on exactly this."""
     spec = dest.get("identifiers") or {}
     out = {}
     for key, source in spec.items():
-        if source is True and key == "cwd_repo":
-            repo = _repo_at(cwd or os.getcwd())
-            if repo:
-                out["cwd_repo"] = repo
+        if source is True and key in FROM_THE_CALL:
+            got = FROM_THE_CALL[key](tool_input, cwd)
+            if got:
+                out[key] = got
         elif isinstance(source, list):
             values = [str(tool_input.get(f) or "") for f in source]
             if all(values):
@@ -298,8 +346,11 @@ def identifiers(dest: Dest, tool: str, tool_input: dict[str, Any],
             v = tool_input.get(source)
             if v:
                 out[key] = str(v)
-    if "cwd_repo" in out and "repo" not in out:
-        out["repo"] = out["cwd_repo"]
+    # audiences.json routes on `repo`. A command that NAMES the repository beats one that merely runs
+    # inside a checkout of some repository, which may not be the one being written to.
+    for key in ("url_repo", "cwd_repo"):
+        if key in out and "repo" not in out:
+            out["repo"] = out[key]
     return out
 
 
@@ -324,9 +375,9 @@ def unreadable(dest: Dest, tool: str, tool_input: dict[str, Any],
                 "an unpaired quote is the usual cause")
     passed = list(command.flag_values(cmd))
     for flag in dest.get("text_arg") or ():
-        if flag.endswith("-file") or flag in ("-F", "--file"):
-            continue
         for value in (v for f, v in passed if f == flag):
+            if _path_in(flag, value) is not None:
+                continue                      # a file, which is read rather than complained about
             if not value.startswith(command.SUBSTITUTED):
                 continue
             # Only complain about what could not be worked out. A substitution the tool can resolve is
@@ -335,7 +386,7 @@ def unreadable(dest: Dest, tool: str, tool_input: dict[str, Any],
             # here runs nothing.
             if command.resolve(value, cwd):
                 continue
-            readable = next((f for f in dest.get("text_arg") or () if f.endswith("-file")), None)
+            readable = next((f for f in dest.get("text_arg") or () if _reads_a_file(f)), None)
             return (f"This is going to {dest['name']} and the text came from a shell substitution, so "
                     f"nothing was checked — the prose is not in the command."
                     + (f" Write it to a file and pass {readable} if you want it checked."
@@ -705,7 +756,7 @@ def _how(entry: Dest) -> str:
 
 
 def _identifiers(pairs: list[str]) -> dict[str, Any]:
-    """`channel=channel_id`, `repo=owner,name` or `cwd_repo=true`, as the map audiences route on.
+    """`channel=channel_id`, `repo=owner,name`, `cwd_repo=true` or `url_repo=true`, as audiences route on.
 
     An identifier is what turns a tool call into a reader: the channel id in the call is what says
     which audience is about to read this. A destination without one is checked against whatever
@@ -715,8 +766,9 @@ def _identifiers(pairs: list[str]) -> dict[str, Any]:
     for pair in pairs:
         key, _, source = str(pair).partition("=")
         if not key or not source:
-            raise ValueError(f"{pair!r} is not KEY=FIELD — for example channel=channel_id, or "
-                             f"cwd_repo=true for the repository the command runs in")
+            raise ValueError(f"{pair!r} is not KEY=FIELD — for example channel=channel_id, "
+                             f"cwd_repo=true for the repository the command runs in, or url_repo=true "
+                             f"for the one it names in a REST path")
         out[key] = True if source.lower() == "true" else (
             source.split(",") if "," in source else source)
     return out
@@ -743,11 +795,12 @@ def _cli() -> None:
     # unrecognised option and refused the whole command.
     p.add_argument("--text-arg", action="append", metavar="FLAG",
                    help="which flag carries it, for --bash — written as --text-arg=--body, and "
-                        "repeated for more than one. A flag ending in -file, or -F, names a file "
-                        "whose contents are read")
+                        "repeated for more than one. A flag ending in -file, or -F or --input, names "
+                        "a file whose contents are read. Two words is a named field: `-f body` is "
+                        "how `gh api -f body=…` passes one")
     p.add_argument("--identifier", nargs="+", metavar="KEY=FIELD",
                    help="what the call reveals about who will read it, so an audience can be matched: "
-                        "channel=channel_id, repo=owner,name, cwd_repo=true")
+                        "channel=channel_id, repo=owner,name, cwd_repo=true, url_repo=true")
     p.add_argument("--note", metavar="TEXT", help="what this destination is, for the checks to read")
     p.add_argument("--caveat", metavar="TEXT", help="what a person should know before it holds a call")
     p.add_argument("--max-effort", choices=settings.LEVELS,

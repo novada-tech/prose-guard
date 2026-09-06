@@ -31,6 +31,7 @@ that later runs this through a shell - removing it changes no behaviour today, w
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -110,6 +111,70 @@ def command_itself(cmd: str) -> str:
     carrying scripts are far more common than heredocs writing documents.
     """
     return HEREDOC.sub(" ", cmd)
+
+
+# The field a REST API puts prose in. A `--input` payload is a document rather than a message:
+# `{"body": …, "comments": [{"path": …, "body": …}]}` is a review and its inline comments, and the rest
+# of it is paths, line numbers and event names that no writing check can say anything about. One name,
+# because that is the one GitHub uses for prose everywhere — a title is never long enough to be judged,
+# and a commit message reaches this tool as a commit.
+PROSE_FIELDS = ("body",)
+
+
+def prose_in_json(text: str) -> str | None:
+    """Every prose field of a JSON payload, at any depth, or None when this is not a payload at all.
+
+    None and "" are different answers and the caller needs them apart: None is "read this as prose",
+    "" is "this is structured and holds none of it". A branch-protection payload is the second, and
+    handing its braces to a writing check would earn a complaint about JSON.
+
+    A scalar is not a payload. `json.loads` accepts `"hello"` and `42`, and a body file holding either
+    is prose that happens to parse, so only an object or a list counts.
+    """
+    try:
+        got = json.loads(text)
+    except (ValueError, RecursionError):
+        return None
+    if not isinstance(got, (dict, list)):
+        return None
+    found: list[str] = []
+    # Iterative, in document order. The payload comes off disk or out of a heredoc and its nesting is
+    # not this tool's to trust: recursing through 400KB of `[[[[…]]]]` raises RecursionError out of the
+    # hook, and a PreToolUse hook that exits non-zero lets the tool call through.
+    stack: list[Any] = [got]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            rest = []
+            for key, value in node.items():
+                if key in PROSE_FIELDS and isinstance(value, str):
+                    found.append(value)
+                else:
+                    rest.append(value)
+            stack.extend(reversed(rest))
+        elif isinstance(node, list):
+            stack.extend(reversed(node))
+    return "\n\n".join(found)
+
+
+# `owner/name` out of a REST path: `/repos/OWNER/REPO/pulls/1381/comments`, with or without the leading
+# slash or `https://api.github.com` in front of it.
+_REPO_IN_URL = re.compile(r"\brepos/([\w.-]+)/([\w.-]+)")
+
+
+def repo_named(cmd: str) -> str | None:
+    """The repository a command names in a REST path, or None.
+
+    A call that names the repository is telling you which one it writes to, and the directory it runs
+    in may be a different checkout — an agent answers a review from wherever it happens to be.
+    audiences.json routes on the repository, so taking it from the directory instead resolves the
+    wrong reader or none at all.
+
+    Read from the command with its heredoc bodies stripped, so a payload that quotes a URL names
+    nothing. See `command_itself`.
+    """
+    m = _REPO_IN_URL.search(command_itself(cmd))
+    return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
 # A message is at most this long. Past it the thing being read is not a message, and the checks cannot
@@ -268,15 +333,31 @@ def flag_values(cmd: str) -> Iterator[tuple[str, str]]:
     string: a command this tool cannot read is one it must not claim to have checked. Refusing is
     right; refusing in silence is not, which is why `words` reports the difference and `unreadable`
     says so — see below.
+
+    A value of the form `name=text` is yielded a SECOND time under `flag name`, because for some
+    commands the flag alone does not say what it carries: `gh api -f body=… -f event=APPROVE` passes
+    two named fields through one flag, and only one of them is prose. As well as, never instead of, so
+    a caller that asks for `-f` still gets what it always got.
     """
     parsed = words(cmd) or []
     for i, word in enumerate(parsed):
         if not word.startswith("-"):
             continue
         if "=" in word:
-            yield tuple(word.split("=", 1))
+            flag, value = word.split("=", 1)
         elif i + 1 < len(parsed):
-            yield word, parsed[i + 1]
+            flag, value = word, parsed[i + 1]
+        else:
+            continue
+        yield flag, value
+        name, sep, rest = value.partition("=")
+        if sep and _FIELD_NAME.fullmatch(name):
+            yield f"{flag} {name}", rest
+
+# The name half of a `name=value` argument. A name, so that `-m "before=after is what changed"` is not
+# read as passing a field called `before`; no destination asks for one, but a flag whose value happens
+# to hold an equals sign is common and this keeps the second yield meaningful.
+_FIELD_NAME = re.compile(r"[A-Za-z_][\w.-]*")
 
 READS_A_FILE = re.compile(r"""^\$\(\s*(?:cat|<)\s+['"]?([^'"\s)]+)['"]?\s*\)$""")
 # Subcommand -> the flags whose presence still leaves the invocation a report. A flag that is not listed
