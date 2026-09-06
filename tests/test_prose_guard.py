@@ -6207,6 +6207,38 @@ def test_a_resend_that_keeps_the_flagged_term_is_still_held():
         verdict, said = send(again)
         check("and it still holds the resend that kept it", [verdict, "GKE" in said],
               ["deny", True])
+def test_a_term_the_message_writes_out_is_never_one_it_is_held_back_over():
+    """Why a finding cannot name the explanation that failed, out of the expansions it already has.
+
+    A pull request body was held twice: first for one unknown term, then for that term and the second
+    one the rewrite reached for to explain it. Naming the chain — "this is still unexplained because
+    the word you explained it with is unknown too" — would make that one hop, and `said` looks like it
+    already carries the relationship. It cannot carry it: `examine` drops a term from `unexplained`
+    exactly when it is a key of `written`, so the two sets are disjoint and no flagged term has a
+    written-out form to look inside. The chain runs the other way round here, from the term that WAS
+    explained to the one still missing, which is not a chain a writer can act on.
+
+    Measured before deciding, on 5,113 real documents: zero. Every looser reading of "explained with"
+    is co-occurrence, and the numbers are in docs/design-notes.md.
+    """
+    import jargon
+    from checks import terms
+    text = "The ANTLR toolchain (ATC) broke the build again this morning." + PAD
+    bad, _, said = jargon.examine(text, lambda term: False)
+    # Both sides named, so neither assertion below can pass by being empty.
+    check("the message writes one term out", sorted(said), ["ATC"])
+    check("and is held back over the other", bad, ["ANTLR"])
+    check("the expansion does contain the flagged term", "ANTLR" in said["ATC"], True)
+    check("but no term written out here is ever complained about", sorted(set(bad) & set(said)), [])
+
+    with tempfile.TemporaryDirectory() as home:
+        write_audience(home, "team", matches={"paths": ["*"]},
+                       vocabulary={f"T{i}": 9 for i in range(20)})
+        A, _ = fresh(home)
+        got = terms.run(text, Ctx(A.resolve({"path": "x.md"})))
+        check("so the finding lists the unexplained term alone", "ANTLR" in got.message, True)
+        check("and says nothing about the one it was written inside",
+              "ATC" in got.message, False)
 
 
 def main():

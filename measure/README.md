@@ -6,22 +6,25 @@ plugin and nothing at runtime imports them.
 | | |
 |---|---|
 | `measure_check.py` | does a check catch planted defects **and** pass ordinary prose, and how often does it disagree with itself |
-| `measure_cost.py` | what a level costs the person using it, against a control in the same run |
+| `measure_cost.py` | what an effort level — how many checks run before a message goes out — costs the person using it, against a control in the same run |
 | `measure_rule.py` | does a change to `rule/` change what the agent writes |
 | `measure_thresholds.py` | re-derive the author cut and the share threshold on your own audiences |
 | `measure_advice.py` | is advisory feedback ever acted on, and would an agent act if it arrived in time |
 | `held_drafts.py` | build a corpus out of the messages this machine has actually held back |
 | `measure_gate.py` | could the one cheap question stand in for the six expensive ones — it cannot, 4/8 recall |
 | `measure_silence.py` | of the calls each destination claims, how many does it ever find the words in |
+| `measure_explanation_chain.py` | is one unexplained term ever the writer's attempt to explain another — it is not |
 | `fixtures/well-built/` | ordinary messages every check must pass |
 | `fixtures/one-reader/` | messages whose correctness depends on having a single addressee |
 
-Standard library only, like everything else here. Most spend real tokens, which is the point: a cost
-measurement that costs nothing is measuring nothing. `measure_thresholds.py`, `held_drafts.py`,
-`measure_silence.py` and `measure_advice.py --transcripts` are the exceptions — they read what is
-already on the machine.
+Standard library only, like everything else here.
 
-The three that read past conversations:
+Most spend real tokens, which is the point: a cost measurement that costs nothing is measuring nothing.
+These read what is already on the machine instead, and ask no model at all:
+`measure_thresholds.py`, `held_drafts.py`, `measure_silence.py`, `measure_explanation_chain.py` and
+`measure_advice.py --transcripts`.
+
+The four that read past conversations:
 
 ```
 python3 measure/held_drafts.py --out /tmp/held.json     # the messages this machine held back
@@ -53,6 +56,11 @@ test suites. The fixtures they need are in this directory.
 **Reproducible only with your own data.** The author cut and the share threshold. `measure_thresholds.py`
 is here; the two corpora it was calibrated on are not, and one of them is a private chat channel. Point
 it at your own audiences and you will get your own numbers, not a check of ours.
+
+The same goes for the explanation chain. `measure_explanation_chain.py` is here and costs nothing to
+run; the four private repositories it was run against are not, so what you can reproduce is the
+question and not the answer. Its answer, and what would overturn it, are in
+[docs/design-notes.md](../docs/design-notes.md).
 
 **Not reproducible at all.** The deadlock finding, the freezing finding, and the 50–70% figure for how
 often a judgement check agrees with a provenance label. Those harnesses were never contributed. The

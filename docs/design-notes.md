@@ -625,6 +625,13 @@ how the cases are known to be load-bearing:
 - a call started past the deadline, a call past it passing in silence, and one call allowed a timeout
   longer than what is left of the whole allowance
 
+- `examine` no longer dropping a term from `unexplained` when the message writes it out, which is the
+  clause that makes the flagged terms and the expanded terms disjoint. Three cases of
+  `test_a_term_the_message_writes_out_is_never_one_it_is_held_back_over` go red, and one of
+  `test_detection`. The first fixture written for it survived, because its expansion was ALSO found by
+  `expanded_in_prose` and that route still excluded the term — a mutation the test could not see needed
+  a fixture where only one of the two routes fires
+
 One survivor, recorded rather than claimed equivalent: marking not-mine findings from `found` instead
 of from what `one_message` actually showed. The two differ only when the turn's budget drops a finding,
 and the budget cannot bind at `low`, where mechanics and terms each return one short finding. Binding it
@@ -850,6 +857,53 @@ web2 omits because it lists headwords.
 
 The `english-words` package was measured rather than assumed: it ships this same list, at 17MB
 installed, and would add a `pip` step to a plugin whose install is one command.
+
+## Naming the explanation that failed costs a round trip nobody is making
+
+A pull request body was held by `terms` for one unknown term, rewritten to explain it in terms of a
+second, and held again for both. Two hops where one would do, and the shape of the fix looks obvious:
+say *"the first term is still unexplained because the word you explained it with is unknown too"*, out
+of the expansions the check already has in `said`. So the frequency was measured before the sentence
+was written.
+
+```
+python3 measure/measure_explanation_chain.py --repo ~/src/one-repo --repo ~/src/another
+```
+
+Free and deterministic — it reads git history and runs `terms`, which makes no model call. The run
+behind the numbers below was four private product repositories: 8,370 documents, of which 8,328 are
+commit messages scored against a vocabulary held out from the oldest fifth of the same history at four
+authors, the rest this repository's own markdown and fixtures. `terms` finds something in 400 of them
+and lists two or more unknown terms in 55. Within those 55, three readings of "one term was the attempt
+to explain another", loosest last:
+
+| the relationship | documents | true positives |
+|---|---|---|
+| the term appears inside `said[other]` | 0 | 0 |
+| inside a bracket whose preceding word is the other term | 1 | 0 |
+| within 120 characters of the other term's first mention, same sentence | 42 | 0 |
+
+The first row is zero for a reason no larger corpus will change. `examine` drops a term from
+`unexplained` exactly when it is a key of `written`, so the flagged terms and the terms with a
+written-out form are disjoint sets — a flagged term has no expansion to look inside, and the one case
+that reads like a chain runs backwards, from the term that WAS explained to the one still missing.
+That is not a chain a writer can act on. `test_a_term_the_message_writes_out_is_never_one_it_is_held_back_over`
+pins it so the next person does not build on `said` before finding out.
+
+The other two rows are the "quiet is necessary and not sufficient" case again, beside the
+unfinished-text markers. Every hit was read. The single bracket hit puts a two-letter tag in brackets
+after a name, which is not an explanation of it. All 42 of the loose hits are co-occurrence, and they
+fall into four kinds: two client or standards-body abbreviations in one configuration change, two
+version numbers in one upgrade, two infrastructure abbreviations in one deployment change, and a run of
+work-in-progress markers numbered in sequence. Not one is a writer explaining a term with a term.
+
+The corpus is not publishable, so this belongs with the thresholds under "reproducible only with your
+own data" in [measure/README.md](../measure/README.md) — the harness is here, its input is yours. What
+it would take to overturn the second and third rows is a corpus where the same command finds hits that
+survive being read one by one.
+
+Shipping the sentence anyway would spend words on the one message in eight thousand that has the shape,
+and be wrong on it. The two hops in the story stay two hops.
 
 ## Thresholds
 
