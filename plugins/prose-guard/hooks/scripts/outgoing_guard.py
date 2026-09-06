@@ -41,7 +41,8 @@ import discover  # noqa: E402
 import telling  # noqa: E402
 import checks as checks_module  # noqa: E402
 from checks import (BLOCK, EFFORT, IN_ORDER as CHECKS, Context, ceiling_for,  # noqa: E402
-                    costs_a_call, pooled, what_changed, written_here, wrote_which)
+                    costs_a_call, just_these, pooled, stop_asking_after, what_changed,
+                    written_here, wrote_which)
 
 if TYPE_CHECKING:
     from audiences import Resolved
@@ -64,8 +65,9 @@ MAX_PER_CHECK = 2
 # distinguishable from a count of denials, and the measurement says the pathology does not occur while
 # the cost of guarding against it does. So every message gets the same treatment, and an agent that
 # genuinely loops is the calling session's problem rather than something to fix by turning the guard off.
-# Calls one message may cost, across every check and every run of one. Scaled by length, because a flat
-# number is not a budget for a document — it is a budget for a chat message, silently applied to both.
+# Calls one message may cost, across every check and every run of one. Scaled by the length of what
+# this call is answerable for, because a flat number is not a budget for a document — it is a budget for
+# a chat message, silently applied to both.
 #
 # Flat at 20 it bound in every case: 20 divided among six model-backed checks is three runs each, for a
 # 200-word message and a 10,000-word document alike, while `ceiling_for` was asking for between six and
@@ -463,7 +465,7 @@ def only_advises(check: Check) -> bool:
 
 
 def all_at_once(checks: list[Check], text: str, ctx: Context | None,
-                budget: int) -> dict[str, tuple]:
+                budget: int, ceiling: int) -> dict[str, tuple]:
     """Ask every check that costs a model call at the same time, and return what each said.
 
     They were asked one after another, and each answer is a `claude -p` subprocess taking about eight
@@ -478,6 +480,11 @@ def all_at_once(checks: list[Check], text: str, ctx: Context | None,
 
     The budget is divided up front instead of as they run. A share each is what the sequential version
     was already aiming at, and it is the only division available when nobody goes first.
+
+    `ceiling` is handed in rather than derived from `text`, because `text` is the whole document and
+    what a run is worth is decided by what this call is answerable for. Deriving it here as well would
+    be the same decision made twice from two different texts, and `min` below would take whichever came
+    out smaller without anything saying they had disagreed. See `main`.
     """
     if not checks or budget <= 0:
         # Nothing left to spend, so nothing is asked. `max(1, 0 // n)` floors at one and asked anyway,
@@ -486,10 +493,10 @@ def all_at_once(checks: list[Check], text: str, ctx: Context | None,
         # returning nothing here is what makes both agree.
         return {}
     share = max(1, budget // len(checks))
-    ceiling = min(ceiling_for(text), share)
+    each = min(ceiling, share)
     out: dict[str, tuple] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(checks), MOST_AT_ONCE)) as pool:
-        asking = {pool.submit(pooled, check, text, ctx, ceiling): check for check in checks}
+        asking = {pool.submit(pooled, check, text, ctx, each): check for check in checks}
         for done in concurrent.futures.as_completed(asking):
             check = asking[done]
             try:
@@ -525,13 +532,19 @@ def other_concerns(running: list[Check], answers: dict[str, tuple], blocking: st
     return out
 
 
-def budget_for(text: str, paying: int) -> int:
-    """Model calls this message may cost, scaled the way the per-check ceiling is scaled.
+def budget_for(ceiling: int, paying: int) -> int:
+    """Model calls this message may cost, from what one check's runs are worth.
 
-    `ceiling_for` is what one check would spend on this text if it kept finding things; times the
-    checks that cost anything, that is what the message would spend unbounded. MOST_CALLS is the stop.
+    `ceiling` is what one check would spend if it kept finding things — `checks.ceiling_for` of the
+    text this call is answerable for, which is not necessarily the whole document; see `main`. Times
+    the checks that cost anything, that is what the message would spend unbounded, and MOST_CALLS is
+    the stop.
+
+    A number rather than a text, because `all_at_once` needs the same ceiling and two `ceiling_for`
+    calls are two chances to be given two different texts — the budget following the change while the
+    per-check ceiling follows the file, with nothing to say they had disagreed.
     """
-    return min(MOST_CALLS, max(1, paying) * ceiling_for(text))
+    return min(MOST_CALLS, max(1, paying) * ceiling)
 
 
 
@@ -747,8 +760,37 @@ def main() -> None:
     # acronym is one turn wasted, and a held turn is the most expensive thing this tool does.
     free_findings: list[Finding] = []
     free_checks: list[Check] = []
-    # What this message may spend, from its own length. See budget_for.
-    budget = budget_for(text, sum(1 for c in running if costs_a_call(c)))
+    # Checks the budget stopped, so the person can be told. A check that did not run answers exactly
+    # what a check with nothing to say answers, and that is the failure this tool most has to avoid.
+    unasked: list[str] = []
+    # What this call is answerable for, and what that is worth in calls. `ctx.mine` is the sentences
+    # this call wrote — None when it wrote all of them, which is a message, a commit or a whole-file
+    # write — and it is already what decides which findings may hold the call back. Pricing the same
+    # span is what makes editing one line of a long document cost like one line. Sized on the file, a
+    # one-word edit to a 2,000-word document is budgeted 90 calls and 18 runs a check — what writing
+    # all 2,000 words is budgeted — and the runs of one check are sequential, so that is where the wall
+    # clock goes.
+    #
+    # The checks are still asked about the WHOLE document, and that is not an oversight. Every check
+    # except `mechanics` is comparative: asked about a piece of text it reports the worst instance of
+    # its concern in that piece, so a smaller window lowers the bar for what counts as worst instead of
+    # sharpening it, and `docs/design-notes.md` records paragraph-at-a-time finding no more at nine
+    # times the calls. Only the budget follows the change.
+    #
+    # `just_these` returns the whole text when `mine` is None, and `wrote_which` answers None when it
+    # cannot locate the hunk at all, so every case that is not a locatable edit prices the document and
+    # nothing has to ask which case it is in.
+    answerable = just_these(text, ctx.mine)
+    # `ceiling_for` has a base of six that no length can go below, and that base is the floor for an
+    # edit as much as for a short message: an edit of a sentence or two lands on it, so every paying
+    # check still gets the six runs it takes to be observed running dry. A check allowed one run cannot
+    # be, which is the whole reason the base is on the ceiling rather than on the runs.
+    ceiling = ceiling_for(answerable)
+    budget = budget_for(ceiling, sum(1 for c in running if costs_a_call(c)))
+    # And a bound in seconds, because the one in calls does not imply one: MOST_CALLS at MOST_AT_ONCE,
+    # each allowed the per-call timeout, is three quarters of an hour in a hook that shows nothing
+    # while it runs. Set here and nowhere else — see checks/ask.py for both clocks and the numbers.
+    stop_asking_after()
     unpaid = [c for c in running if costs_a_call(c)
               and (state["verdicts"].get(c.NAME) or {}).get("digest") != digest]
     # Asked together, before the walk, so the walk spends no time waiting. The walk itself is unchanged:
@@ -768,7 +810,7 @@ def main() -> None:
     # rest.
     waiting = [c for c in unpaid if only_advises(c)]
     unpaid = [c for c in unpaid if not only_advises(c)]
-    answers = all_at_once(unpaid, text, ctx, max(0, budget - state["calls"]))
+    answers = all_at_once(unpaid, text, ctx, max(0, budget - state["calls"]), ceiling)
 
     def mine(f: Finding) -> bool:
         """Whether this finding is about text this call wrote."""
@@ -799,7 +841,8 @@ def main() -> None:
         `medium` never asking at all, because what blocks at `medium` is a free check.
         """
         if waiting:
-            answers.update(all_at_once(waiting, text, ctx, max(0, budget - state["calls"])))
+            answers.update(all_at_once(waiting, text, ctx, max(0, budget - state["calls"]),
+                                       ceiling))
             for asked in waiting:
                 state["calls"] += answers.get(asked.NAME, ([], [], 0))[2]
             waiting.clear()
@@ -820,6 +863,11 @@ def main() -> None:
                 return
             continue
         if costs_a_call(check) and state["calls"] >= budget:
+            # A check the budget stopped is a check that did not run, and the verdict recorded on the
+            # next line is a pass — which is what a check with nothing to say records too. Collected
+            # here and said once below, because a spent budget is one fact about the message rather
+            # than one fact per check.
+            unasked.append(check.NAME)
             state["verdicts"][check.NAME] = {"digest": digest}
             continue
         if check in waiting:
@@ -837,8 +885,11 @@ def main() -> None:
         else:
             try:
                 # Costs nothing, so there is nothing to gain by asking it early: the free checks are
-                # arithmetic and answer immediately.
-                found, firm, spent = pooled(check, text, ctx, ceiling_for(text))
+                # arithmetic and answer immediately. This is the only branch they take, and `pooled`
+                # returns an exact check's one answer without consulting a ceiling at all — the ceiling
+                # is passed for the same reason the argument exists, so that a check arriving here with
+                # a different mode is priced like every other.
+                found, firm, spent = pooled(check, text, ctx, ceiling)
                 state["calls"] += spent
             except Exception:
                 found, firm = [], []         # a broken check is a silent check, never a blocker
@@ -920,6 +971,15 @@ def main() -> None:
     state["denials"] = {}
     state["calls"] = 0
     save_state(path, state)
+
+    # Said here rather than where the budget stopped them, because it is one fact about this message
+    # and repeating it per check spent six lines of somebody's terminal on one sentence. A run that
+    # ends in a denial says nothing to the person at all — a denial is a permission prompt — so a
+    # message being argued about hears this on the round that lets it out, and `telling`'s ledger is
+    # what keeps that to once.
+    if unasked:
+        telling.could_not_run(f"not asked, because this message has spent the {budget} model calls "
+                              f"it is allowed: " + ", ".join(unasked))
 
     # A check that could not run reads exactly like a check that passed. Said to the person, once a
     # session, because it is their install that is not doing what they set it to do — the same bargain

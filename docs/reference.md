@@ -44,11 +44,20 @@ percentile of the share seen when a message *is* scored against the audience it 
 measured both directions on 3,170 real messages: [thresholds.md](thresholds.md), including
 what the measurement fails to show.
 
-Three limits keep that bounded. Each check gets two attempts, and a session gets six holds in total.
-Model calls are capped per message rather than per session, and the cap is scaled by the length of the
-text rather than flat: what one check would spend if it kept finding things, times the checks that cost
-anything, up to ninety. A check that cannot be paid for is skipped for that message. So two checks that
-genuinely disagree make one message expensive and then let it through, rather than hanging your turn.
+Three limits keep that bounded. Each check gets two attempts at one message. Model calls are capped per
+message, scaled by the length of **what the call changes** rather than by the length of the file: what
+one check would spend on that text if it kept finding things, times the checks that cost anything, up to
+ninety. And the whole hook has five minutes for all its calls together, because a cap in calls is not a
+cap in time. A check that cannot be paid for is skipped and **said**, in the line that follows every
+checked message — a check that did not run answers what a check with nothing to say answers, so the two
+have to be told apart. Two checks that genuinely disagree make one message expensive and then let it
+through, rather than hanging your turn.
+
+Scaling on the change is what makes editing one line of a long document cost like one line. Sized on the
+file instead, a one-word edit to a 2,000-word document gets everything writing all 2,000 words gets — and
+the runs of one check are sequential, so that is where the waiting goes. The checks are still asked about
+the whole document either way, because a smaller window lowers a comparative check's bar instead of
+sharpening it: [design-notes.md](design-notes.md).
 
 A flat cap was tried first, and it was a cap for a chat message quietly applied to documents as well —
 twenty divided among six checks is three runs each, for two hundred words and for ten thousand alike. A
@@ -395,6 +404,10 @@ up.
 The ceiling is linear in length above a base of six, because a longer document has more places to be
 wrong: 6 runs up to 600 words, 9 at 800, 21 at 2,000, and 25 as a hard bound so one pathological file
 cannot spend a session.
+
+The length it reads is the length of what the call changes, so an edit of a sentence or two into any
+document sits on the base of six and only a bigger change buys more. A new file, a chat message and a
+commit message are all wholly new, so for those it is the length of the whole thing.
 
 The hook and a deliberate run call the same function on the same text, so they cannot drift apart: one bar
 per effort level, whichever way the text is going out. What differs is what they do with the runs, because

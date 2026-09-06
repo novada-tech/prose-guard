@@ -444,6 +444,101 @@ findings, handed over a second and a third time about sentences the writer has s
 about. Nothing in that list is holding the message back, so leaving it out loses nothing — a concern
 that still matters is said again in the round its own check is the one blocking. That is the only use
 `Context.resent` has, and it buys transcript tokens rather than model calls.
+## An edit is priced on what it changes, and read in the whole document
+
+Two different questions, and answering them the same way is what made a one-word edit to a long
+document cost what writing the document costs.
+
+**What it costs follows the change.** `ceiling_for` is linear in words above a base of six, and the
+whole document is what it reads unless the caller narrows it. At `high`, where five checks can block
+and six pay, a document written whole:
+
+| words written | budget | runs a check |
+|---|---|---|
+| 400 | 36 | 6 |
+| 1,000 | 66 | 11 |
+| 2,000 | 90 | 18 |
+| 5,000 | 90 | 18 |
+
+A one-word edit into the 2,000-word document sat in that same row. It now sits in the first one: 36 and
+6, because the sentence it changed is what it is priced on. **Runs a check is where the waiting is** —
+the checks are asked at the same time and the runs of one check are sequential — so that is a third of
+the wall clock on the case where the ceiling binds.
+
+On a one-sentence edit to each of this repository's own markdown files of 200 words or more, 31 of them:
+
+```
+python3 - <<'EOF'
+import glob, sys
+sys.path[:0] = ["plugins/prose-guard/lib", "plugins/prose-guard/hooks/scripts"]
+from checks import ceiling_for, just_these, placing, wrote_which
+from outgoing_guard import budget_for
+def runs(c): return min(c, max(1, budget_for(c, 6) // 5))
+for path in sorted(glob.glob("**/*.md", recursive=True)):
+    text = open(path, errors="replace").read()
+    ends = placing.SENTENCE_END.split(" ".join(text.split()))
+    if len(text.split()) < 200 or len(ends) < 3: continue
+    span = just_these(text, wrote_which(text, ends[len(ends) // 2]))
+    print(f"{len(text.split()):>5}w  budget {budget_for(ceiling_for(text), 6):>2} ->"
+          f" {budget_for(ceiling_for(span), 6):>2}   runs a check"
+          f" {runs(ceiling_for(text)):>2} -> {runs(ceiling_for(span)):>2}   {path}")
+EOF
+```
+
+The budget summed over the 31 falls to 65% of what the file-sized version allows, and the runs one
+check may make fall to 6 from as many as 18 — on every file above 600 words, which is 13 of the 31.
+Below that the file already sat on the base and nothing changes.
+
+The widest of those 31 spans is 37 words, so every one of them lands on the base of six. The scaling
+only starts to grade at a changed span of about 500 words, and a change that big has earned it. The
+base is the floor for the same reason it is the base: a check allowed fewer runs than it takes to be
+observed running dry can never be observed at all, so the smallest possible edit still gets six runs of
+every paying check.
+
+Writing a document whole is untouched, because then the change is the document.
+
+**What it is judged against does not follow the change.** Asking the checks about the span was the other
+half of the same proposal and it is refuted twice over: paragraph-at-a-time finds no more at nine times
+the calls (above), and every check except `mechanics` is comparative, so a smaller window lowers the bar
+for what counts as the worst instance rather than sharpening it.
+
+The budget only ever binds on a document whose checks keep yielding — pooling stops when a run adds
+nothing, so a clean document costs one call a check at any length. That is the case the issue reported:
+the document being edited is the one the guard is objecting to, so its runs keep paying out, and the
+ceiling bound hardest on the edits made to satisfy the guard's own previous advisory.
+
+Sized on the span, the whole-message budget can be reached in fewer rounds of one argument, so a check
+the budget stops now says so in the line that follows every checked message. Before, it recorded a pass
+and said nothing — and a check that did not run answers exactly what a check with nothing to say
+answers.
+
+A **resend** is the other thing a span can be computed from, and it is a different regime:
+[Scoping a resend to what it changed saves no model call](#scoping-a-resend-to-what-it-changed-saves-no-model-call)
+measured a short message sent again three times, where the ceiling never bound at all and narrowing it
+would have saved nothing. Both spans are `wrote_which` of a fragment, which is why there is one
+arithmetic and not two — but a resend of a short message has no ceiling to lower, and a one-line edit
+to a long document has one that is 18 runs a check too high. The budget follows the change where there
+is a document for it to be a fraction of.
+
+## One hook cannot run for three quarters of an hour
+
+`checks/ask.py` allows a model call 180 seconds and `MOST_AT_ONCE` runs six at a time, so a budget of
+`MOST_CALLS` calls is `MOST_CALLS // MOST_AT_ONCE` rounds — 45 minutes inside one `PreToolUse` hook,
+which shows nothing while it runs and cannot be interrupted on its own. Nothing bounded that, and one
+reported run produced no output and timed out the tool call.
+
+The allowance is five minutes for every call one hook makes, and a call is never given more time than
+is left of it, so the bound is the allowance rather than the allowance plus one call. Five minutes is
+above anything measured here — the slowest guarded message on record is 217.7s for a 925-word comment,
+from before the checks were asked together, and one denial on a badly written 1,475-word document cost
+147s — and it is a bound rather than a target, so it can only bind where a call is hanging.
+
+Not derived from the hang, which is an observation and not a reproduction. It is derived from the three
+constants above, and it is worth having whether or not the hang was ever real.
+
+A check the deadline stops reports itself through `telling.could_not_run`, the same way a timed-out
+call already did. Unbounded time and a silent drop are two different defects and the fix for one must
+not be the other.
 
 ## The tests were checked by breaking things
 
@@ -513,6 +608,22 @@ how the cases are known to be load-bearing:
 - a local name in `discover.main()` shadowing the module function that reads the per-destination tally,
   which raises `UnboundLocalError` for the whole report. That one was found by writing the case, not by
   breaking the code: nothing had ever run `discover.py` end to end
+- the per-check ceiling sized on the file again, and `all_at_once` deriving it from the file itself
+  rather than being handed it. Each of these was hidden by the other while `budget_for` took a text and
+  called `ceiling_for` a second time: the budget is the ceiling times the checks that pay, so a share
+  and a ceiling both sized on the change are equal by construction and `min` took whichever came out
+  smaller. `budget_for` now takes the ceiling, which is what makes each of the two catchable
+- the whole-message budget sized on the file again. Invisible in a single round, and provably so: the
+  share a check gets is at least the ceiling, so `min(ceiling, share)` is the ceiling whatever the
+  budget. What it changes is how long an argument over one message may go on, and what pins it is the
+  notice naming the allowance — the one place the allowance is readable from outside
+- `just_these` ignoring the sentence numbers it was given, and keeping the sentences the call did NOT
+  write
+- no floor on the runs a check gets, so a one-word edit stops being checked at all
+- a check the budget stopped saying nothing, and saying it once per check rather than once per message
+- the hook never arming the deadline, so the allowance is correct and nothing switches it on
+- a call started past the deadline, a call past it passing in silence, and one call allowed a timeout
+  longer than what is left of the whole allowance
 
 One survivor, recorded rather than claimed equivalent: marking not-mine findings from `found` instead
 of from what `one_message` actually showed. The two differ only when the turn's budget drops a finding,

@@ -13,6 +13,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any, TYPE_CHECKING
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -41,6 +42,42 @@ VERDICT = re.compile(r"(?:^|(?<=[.!?])[ \t]+)(PASS|FAIL)\b:?[ \t]*", re.M)
 # and pasted into an agent's context; an escape sequence in it moves the cursor and rewrites what the
 # user already read.
 UNPRINTABLE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]|[\x00-\x08\x0b-\x1f\x7f]")
+
+# The two clocks, together, because the second exists to bound the first. One call may take
+# LONGEST_CALL; a hook may spend MOST_SECONDS on all of its calls put together.
+#
+# `outgoing_guard.py` budgets MOST_CALLS calls and runs MOST_AT_ONCE of them at a time, so the
+# sequence is MOST_CALLS // MOST_AT_ONCE rounds of LONGEST_CALL — three quarters of an hour inside one
+# PreToolUse hook, which shows nothing while it runs and cannot be interrupted on its own. Nothing
+# bounded that, and one reported run produced no output and timed out the tool call.
+#
+# MOST_SECONDS is above anything measured here: the slowest guarded message on record is a 925-word
+# comment at 217.7s, from when the checks were asked one after another rather than together, and one
+# denial on a badly written 1,475-word document cost 147s. Both are in docs/design-notes.md. It is a
+# bound and not a target — a message that finds nothing costs one call a check — so it can only bind
+# on a document whose checks keep yielding, and when it binds it says so.
+LONGEST_CALL = 180
+MOST_SECONDS = 300
+_UNTIL: float | None = None
+
+
+def stop_asking_after(seconds: float | None = MOST_SECONDS) -> None:
+    """Give every call from here on one shared wall-clock allowance. None removes it.
+
+    Set by the hook and left unset everywhere else. A deliberate run of `check_prose.py` is somebody
+    watching a command they typed, who can read how far it has got and stop it; a hook is neither, and
+    the hook is the caller whose calls are bounded in number and so can be bounded in time.
+
+    Process-wide rather than passed down, for the reason `telling.could_not_run` is: the code that has
+    to notice is a check, and a check is told nothing about the session or the hook that runs it.
+    """
+    global _UNTIL
+    _UNTIL = None if seconds is None else time.monotonic() + seconds
+
+
+def seconds_left() -> float | None:
+    """What is left of the allowance, or None when there is no allowance."""
+    return None if _UNTIL is None else _UNTIL - time.monotonic()
 
 
 def context_text(ctx: Context | None) -> str:
@@ -121,9 +158,16 @@ def fenced(prompt: str, text: str, ctx: Context | None = None) -> str:
 
 def ask(name: str, prompt: str, text: str, ctx: Context | None = None) -> tuple[bool, str]:
     """(ok, message). Any failure to reach the checker is a pass: it must not block work."""
-    import time
     if not prompt:
         return True, ""
+    left = seconds_left()
+    if left is not None and left <= 0:
+        # A pass, like every other failure here, and said rather than swallowed: a deadline that
+        # quietly dropped the rest of the checks would be a check answering "fine" without looking.
+        telling.could_not_run(f"the {name} check ran out of the {MOST_SECONDS}s one hook is allowed")
+        return True, ""
+    # Never past the deadline, so the whole hook is bounded rather than the deadline plus one call.
+    allowed = LONGEST_CALL if left is None else min(LONGEST_CALL, left)
     t0 = time.time()
     try:
         # No project settings, and a directory of its own to run in. The checker used to inherit the
@@ -136,12 +180,12 @@ def ask(name: str, prompt: str, text: str, ctx: Context | None = None) -> tuple[
                  "--model", MODEL, "--effort", EFFORT,
                  "--system-prompt", SYSTEM,
                  "--output-format", "json"],
-                capture_output=True, text=True, timeout=180, cwd=elsewhere)
+                capture_output=True, text=True, timeout=allowed, cwd=elsewhere)
         blob = json.loads(r.stdout)
         out = (blob.get("result") or "").strip()
     except subprocess.TimeoutExpired:
-        telling.could_not_run(f"the {name} check timed out waiting for `{host.CLI}`, so it passed "
-                              f"without an answer")
+        telling.could_not_run(f"the {name} check timed out after {int(allowed)}s waiting for "
+                              f"`{host.CLI}`, so it passed without an answer")
         return True, ""
     except Exception as exc:
         # A pass, because a writing check that cannot reach a model must never hold up work — and a
