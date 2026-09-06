@@ -12,12 +12,14 @@ plugin and nothing at runtime imports them.
 | `measure_advice.py` | is advisory feedback ever acted on, and would an agent act if it arrived in time |
 | `held_drafts.py` | build a corpus out of the messages this machine has actually held back |
 | `measure_gate.py` | could the one cheap question stand in for the six expensive ones — it cannot, 4/8 recall |
+| `measure_repo_vocabulary.py` | would a repository's own documents release the terms wrongly held for its readers, and what else would they silence — per scope of the repository, no model. With `--ask`, does a model tell a term the documents use from one they only mention |
 | `fixtures/well-built/` | ordinary messages every check must pass |
 | `fixtures/one-reader/` | messages whose correctness depends on having a single addressee |
 
 Standard library only, like everything else here. Most spend real tokens, which is the point: a cost
-measurement that costs nothing is measuring nothing. `measure_thresholds.py`, `held_drafts.py` and
-`measure_advice.py --transcripts` are the exceptions — they read what is already on the machine.
+measurement that costs nothing is measuring nothing. `measure_thresholds.py`, `held_drafts.py`,
+`measure_advice.py --transcripts` and `measure_repo_vocabulary.py` without `--ask` are the exceptions —
+they read what is already on the machine.
 
 The two that read past conversations:
 
@@ -28,7 +30,36 @@ python3 measure/measure_advice.py --probe /tmp/held.json # would an agent act if
 ```
 
 `held_drafts.py` keeps message text, unlike everything else here — that is what makes it a corpus.
-Write it somewhere temporary and do not commit what comes out.
+Write it somewhere temporary and do not commit what comes out. On a machine that has run
+`measure_cost.py` or `measure_rule.py`, it also returns the drafts those harnesses had an agent write
+and the guard hold: on one machine 46 of 52 holds by `terms` were that one fixture. Count the distinct
+arguments before treating the file as a rate.
+
+The one that reads a repository:
+
+```
+python3 measure/measure_repo_vocabulary.py --repo ~/code/some-repo --term ANTLR --term MWE2
+python3 measure/measure_repo_vocabulary.py --repo ~/code/some-repo --corpus bodies.jsonl
+```
+
+Deterministic. Both directions per scope of the repository — README-level, docs, all prose, the commit
+log, build files, everything — with the repository's own commit messages as the default corpus, held out
+from every scope but the log. The result on six repositories, and why no scope shipped, is in
+[docs/design-notes.md](../docs/design-notes.md).
+
+Its one question for a model — does the documentation USE a term or only MENTION it — spends tokens, and
+only when asked:
+
+```
+python3 measure/measure_repo_vocabulary.py --repo ~/code/some-repo --reps 3 --ask shared:ANTLR --ask mention:SPDX --ask unsure:CLA
+```
+
+Label each term yourself before you see an answer: `shared` if the documents establish it and releasing
+it would be right, `mention` if holding it would be right, `unsure` to see the answer without scoring it.
+`--reps 3` asks each three times so that a changed answer shows; `--workers` is how many calls are in
+flight. It prints what the run cost, and it refuses to print a table when no call was answered — the
+plugin's checker passes silently when the CLI is rate-limited, and a table of passes from a run like that
+is not a measurement.
 
 `measure_gate.py` wants positives — real messages that were held — as JSON holding `{"body": ...}`:
 

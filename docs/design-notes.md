@@ -63,6 +63,184 @@ something to ship on the strength of an idea.
 and visible in a file somebody edited. `measure/measure_check.py` with a bigger labelled set is what would
 settle whether this can be made to work, and `measure/held_drafts.py` builds the corpus.
 
+## A repository's own words as shared context: measured in both directions, and not shipped
+
+A pull request body to a public repository was held twice by `terms`: for ANTLR, the generator that turns
+the project's grammar into its parser, and then — after the rewrite explained ANTLR by way of MWE2, the
+build workflow that runs it — for ANTLR and MWE2. What went out says
+"the parser generated from `Rosetta.xtext`" (finos/rune-dsl#1381): longer, vaguer, and missing the name
+the reader meets in their own build log. The audience that held it is routed to that repository by
+`matches.repos` and its vocabulary was learned from chat. **The repository routes to the audience; it
+never teaches it.**
+
+**Breadth cannot learn it, so pointing `learn.py scan` at the repository is not the fix.** A term needs
+the author cut in [thresholds.md](thresholds.md), and `from_text` yields one author per file. `--git`
+does not reach it either: ANTLR appears in 0 of the repository's 1,111 commit messages and MWE2 in one.
+One person writes the README a hundred people read. Author breadth is the right model for a channel and
+the wrong one for documentation.
+
+So the question measured is the other one: if every acronym in a repository's own documents were taken
+as known for a message going to that repository — no count at all — what would be released, and what
+would go quiet? `measure/measure_repo_vocabulary.py` asks it per scope of the repository, with no model
+call, and scores a corpus written for that repository's readers against the shipped baseline alone and
+then against the baseline plus each scope:
+
+```
+python3 measure/measure_repo_vocabulary.py --repo ~/code/rune-dsl --term ANTLR --term MWE2
+```
+
+On rune-dsl, 1,080 tracked files, its 1,111 commit messages as the corpus — held out from every scope but
+`log`, which is the same data:
+
+| scope | reads | terms beyond the baseline | ANTLR | MWE2 | commit messages held |
+|---|---|---|---|---|---|
+| baseline alone | — | 0 | held | held | 94 (8.5%) |
+| `newcomer` | README, CLAUDE.md, CONTRIBUTING.md | 9 | held | released | 64 (5.8%) |
+| `docs` | those, plus `website/docs` | 17 | released | released | 40 (3.6%) |
+| `prose` | every tracked .md/.mdx/.rst/.txt, 40 files | 23 | released | released | 40 (3.6%) |
+| `build` | pom.xml, *.mwe2, .github, 38 files | 14 | held | held | 61 (5.5%) |
+| `all` | every tracked text file | 418 | released | released | 16 (1.4%) |
+
+Cost does not decide this: `docs` is 9 ms warm on this repository plus 12 ms to list the tracked files,
+and the 20 ms word-list load in the first row is one `terms` pays anyway. `all` is 0.2 s here and 0.78 s
+on a 3,140-file sibling. Everything below is about what the scopes get wrong.
+
+**`all` is refuted.** 387 of its 418 extra terms appear in no sentence anywhere in the repository — hex
+colours, fixture strings, currency codes, test placeholders. A message can use any of them unexplained.
+That is "knows everything, holds nothing" with a number on it.
+
+**Build files, tokenised case-insensitively** — where `org.antlr` actually lives, since the acronym is
+never capitalised in a build file — release both terms and silence the same terms in the corpus as
+`docs` does, plus the vulnerability scoring scheme from `CVE-suppressions.xml`. 152 of the 161 tokens it
+adds never appear as an acronym in any prose file: an author's surname, `AFOO`, `BARBAZ`. It works on this
+corpus by accident of what the corpus happens to mention.
+
+**The change under discussion** — the pull request's own diff and its commit messages — carries 0
+mentions of either term. Shared context "by construction" from the diff does not reach the reported case.
+
+**What `docs` silences**, in the 1,111 commit messages, is 9 terms: the language's own name, the model
+built with it, the schema format it imports, the editor protocol its IDE module implements, the
+foundation that owns the repository, the standards body behind the model, the framework it is built on,
+and MWE2. What it leaves held is 16 terms: three client shorthands, the vulnerability database and its
+scoring scheme, and one-off codes. Read as one person, every release is the repository's own subject
+matter and every hold is right. The harness prints both lists so the next reader can disagree.
+
+**The counter-example that stops `docs` shipping.** The same harness on this repository: `docs` silences
+GKE, ADC, SFTR, CDM and DRR in its commit messages — the terms the dictionary entry below lists as ones
+that must go on being flagged. They are in this repository's documentation *as examples of the unknown*.
+Mention is not use, and no count separates the two: ANTLR is one occurrence in one document of rune-dsl's
+docs, and GKE is one occurrence in one document here. Of rune-dsl's 17 docs terms beyond the baseline, 11
+appear in exactly one file and 9 exactly once; here it is 15 of 16. A frequency floor high enough to
+drop the mentions drops the reported case with them.
+
+**`newcomer` is the one scope with nothing measurably wrong anywhere it was run** — README, CLAUDE.md,
+AGENTS.md and CONTRIBUTING.md are what a repository tells a newcomer to read, and no repository's set
+quotes jargon as an example. Six local checkouts of one product family, each scored on its own commit
+messages against the shipped baseline (a private audience cannot be used here; an installed audience that
+already knows the product's name would show a smaller effect):
+
+| repository | commit messages | held by the baseline | held with `newcomer` | what `newcomer` releases |
+|---|---|---|---|---|
+| rune-dsl | 1,111 | 8.5% | 5.8% | DSL, LSP, FINOS, EMF, MWE2 |
+| rune-common | 740 | 35.1% | 1.8% | DSL |
+| rune-testing | 431 | 41.1% | 2.1% | DSL, FINOS |
+| rosetta-code-generators | 640 | 42.2% | 3.6% | DSL, DAML |
+| rune-fpml | 267 | 8.6% | 0.4% | DSL, XSD |
+| a private model repository | 8,128 | 7.1% | 6.7% | the product's own name |
+
+One term is most of it: the product's own name, `DSL`, is 170 of 181 flags in one repository's history and
+254 of 267 in another, and the README is where every one of them says what it is. Everything `newcomer`
+releases is a name the repository exists to serve — its language, its foundation, a standards body, a
+schema format — and in all six it keeps holding the client shorthands and one-off codes that `log` and
+`all` let through (the private repository's `all` scope releases 45 terms, most of them exactly that).
+`all` is 74–99% noise in every one: of the terms it adds, the share appearing in no sentence anywhere is
+387 of 418, 26 of 35, 1,531 of 1,554, 36 of 40, 595 of 599 and 1,215 of 1,356.
+
+What `newcomer` does not do is fix the reported case. It releases MWE2 and not ANTLR, and the half it
+misses sits in one sentence of the published developer docs. Six repositories from one family is also not
+the corpus to ship on: the bar is repositories somebody else maintains, their pull request and issue
+bodies rather than commit messages, and each release list read by that maintainer.
+
+**What the held drafts on this machine add.** `measure/held_drafts.py` finds 52 holds by `terms`. 46 of
+them are one fixture — the announcement `measure_cost.py` and `measure_rule.py` have an agent write, held
+for ADC — so a machine that has run those harnesses carries their drafts as if they were real. That
+leaves four real arguments and seven distinct terms, which is not a corpus. It shows two things. The
+fixture's ADC appears in that repository's commit log and code and not in its documentation, so `log` and
+`all` would have silenced the one term the gold pair in `measure/fixtures/gold/` was written to require
+explaining, and `newcomer` and `docs` would not. And the agent, held 46 times for ADC, kept the term and
+explained it 40 times.
+
+**The longer-substitute signal cannot be given a rate here.** The proposal: when the honest substitute for
+a flagged term is longer and less specific than the term, the flag is probably wrong. It is free — the
+check sees the rewrite it forced — and on the two distinct real cases it points the predicted way. The
+ANTLR flag, which the person who wrote the message judged wrong: term dropped, sentence 25 → 35 words,
+less specific. The ADC flag, which the gold pair judges right: term kept and explained in 40 of 44
+drafts. Two cases in the right direction is the pattern a corpus would have to confirm, not a result.
+`lib/rounds.py` keeps every real argument; once it holds a few dozen, `held_drafts.py` extended to pair
+each hold with what went out is the instrument, and it has to skip the harness sessions.
+
+**Should `terms` become a model call?** No. A model version was measured, and it is not the scores that
+rule it out. The prompt — flag abbreviations a working software engineer who does not know this
+project's or industry's shorthand would meet unexplained — was run through the plugin's own `checks.ask`
+on three planted defects (the SFTR fixture from `measure_check.py`, a sentence using MWE2 and ANTLR, one
+using GKE and ADC) and the five `well-built` negatives, three repetitions each, `claude-sonnet-5` at
+medium effort: **9/9 caught, 15/15 passed, 0 of 8 texts with a changed answer**, the same row the
+deterministic check holds in [CONTRIBUTING.md](../CONTRIBUTING.md). What it costs is the number that
+decides: 24 calls, 12,200 cache-creation and 11,600 cache-read tokens per call, 55 output tokens, and
+**10.6 seconds of model time per message** against 0.186 seconds for the check it would replace — on a
+check that runs at every level, including the one defined as no model call. The rest is structure:
+
+- `terms` is Schwartz & Hearst, an algorithm. A number from it cannot be a brevity detector in disguise,
+  which is the bias every other check here carries. Its self-disagreement is 0% because it is arithmetic;
+  a model version's 0% above is three repetitions on eight texts.
+- `lib/checks/__init__.py` runs the free, exact checks at every level so a message with a plainly wrong
+  term never reaches a model call. `low` is defined as no model call; the shipped commit-message
+  destination caps at `low`; and `medium` costs nothing on a clean message because what can block there
+  is free. A paid `terms` gives every commit message a model call, gives `medium` one on every clean
+  message, and removes the free gate that lets advice ride along on a denial without a wait.
+- `budget_for` divides the message's calls among the paying checks, so at `high` it would take a share
+  from the five concerns. And `pooled` returns an `EXACT` check's first answer at no cost and never asks
+  twice; a model version is `VERDICT`, one call with no confirmation, or `POOLED`, several.
+- The deadlock at the top of this file is between an instruction to explain every term and the check
+  that removes what the reader will not act on. The entry does not record whether that term check was a
+  model; the quoted instruction reads as a prompt, and that is an inference.
+
+**The middle path — a model between the documents and the check — was measured and is dead.** What the
+scope table says a model is *for* is narrower than the check: telling a use of a term in a repository's
+documentation from a mention of it, given the sentences. That question has a candidate the deterministic
+check already found, a repository the destination already named, and one to a few sentences of evidence;
+it would arise only when `terms` fires on a term the docs contain, on a message being held anyway. The
+bar was set before the run: it survives at fifteen of sixteen labelled terms answered the same way on
+every repetition, and at twelve or fewer it is no better than the static `docs` scope. The run:
+
+```
+python3 measure/measure_repo_vocabulary.py --repo ~/code/rune-dsl --reps 3 --ask shared:ANTLR --ask shared:MWE2 --ask shared:DSL --ask shared:EMF --ask shared:FINOS --ask shared:LSP --ask shared:CDM --ask shared:DRR --ask mention:SPDX --ask mention:CCLA --ask mention:ICLA --ask unsure:CFTC --ask unsure:GAV --ask unsure:ISDA --ask unsure:CLA --ask unsure:DAML
+```
+
+and the same on the five other public repositories and on this one, 34 terms labelled before any answer
+was seen — 15 `shared` (the docs establish the term; releasing it is right), 12 `mention` (they name it
+as an example, boilerplate or a term to explain; holding it is right), 7 `unsure` — `claude-sonnet-5` at
+medium effort, three repetitions, 102 calls, about 24,000 cached and 60 output tokens and 10 seconds of
+model time each. **Mentions kept, stably: 12 of 12. Shared terms released, stably: 5 of 15.** Five of
+the 34 got a different answer on a repetition. The model errs one way — asked about one sentence, it says
+"mention" — and one sentence is what the reported case has: of the eight `shared` terms with a single
+docs sentence, one was released (ANTLR, in rune-dsl), six were held and one drifted, and **MWE2 was held
+on all three repetitions**, so the message that started this would still be held after the call. ANTLR
+itself was released on rune-dsl's sentence and held on rosetta-code-generators' near-identical one. The
+five stable releases had six, five, two, two and one sentences of evidence. The 12 of 12 on mentions is
+real and is not enough: a gate that is right whenever it says no and wrong two times in three when it
+should say yes releases nothing worth paying ten seconds for, and the reported case is left to
+`/prose-guard:audiences accept`, which exists for exactly one wrong term.
+
+Two facts about the instrument. The harness prints what a run cost and refuses to print a table when no
+call was answered, because the plugin's own path has no such guard: `checks/ask.py` reads the CLI's JSON
+and looks at neither its exit code nor the reply's `is_error`, so a refusal that arrives as well-formed
+JSON — a rate limit, in the first attempt at this measurement — carries no stated verdict and is passed,
+silently, on every call. The first run of the judgement `terms` above printed 15 of 15 passes and 0 of 9
+catches on 24 refused calls, and looked like a result. That is the silence-shaped failure `CLAUDE.md`
+names, in shipped code, and it is outside what #31 closes, which counts a pooled run that *raises*; a
+refused call raises nothing. It is not fixed here because nothing under `plugins/` is.
+
 ## Advisory findings are never acted on
 
 `medium`'s judgement question only advises, and `high` demotes a blocking finding to advice once a check
