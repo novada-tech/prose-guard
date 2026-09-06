@@ -157,7 +157,12 @@ def fenced(prompt: str, text: str, ctx: Context | None = None) -> str:
 
 
 def ask(name: str, prompt: str, text: str, ctx: Context | None = None) -> tuple[bool, str]:
-    """(ok, message). Any failure to reach the checker is a pass: it must not block work."""
+    """(ok, message). Any failure to reach the checker is a pass: it must not block work.
+
+    A failure includes one that arrives looking like an answer. `host.answered` is what tells a refusal
+    from a verdict, because a refused call comes back as well-formed JSON from a process that ran, with
+    the refusal in the field the verdict is read from.
+    """
     if not prompt:
         return True, ""
     left = seconds_left()
@@ -181,22 +186,32 @@ def ask(name: str, prompt: str, text: str, ctx: Context | None = None) -> tuple[
                  "--system-prompt", SYSTEM,
                  "--output-format", "json"],
                 capture_output=True, text=True, timeout=allowed, cwd=elsewhere)
-        blob = json.loads(r.stdout)
-        out = (blob.get("result") or "").strip()
+        # Whether the invocation reached a model at all, before a word of it is read as a verdict. This
+        # is the one module that spends money and decides whether a message goes out, and it was the one
+        # that believed a process it never asked about. See host.answered for the shape and for how it
+        # was established.
+        out, why_not, blob = host.answered(r.returncode, r.stdout)
+        if out is None:
+            # Not per check. Every paying check in a round meets the same refusal, and a notice each
+            # spends a line of somebody's terminal on one fact about their install — the same reason
+            # the budget says once which checks it stopped. The verdict is still a pass: a refused
+            # checker must no more hold up work than an absent one.
+            telling.could_not_run(f"{why_not}, so the checks that asked it passed without looking")
+            return True, ""
     except subprocess.TimeoutExpired:
         telling.could_not_run(f"the {name} check timed out after {int(allowed)}s waiting for "
                               f"`{host.CLI}`, so it passed without an answer")
         return True, ""
     except Exception as exc:
         # A pass, because a writing check that cannot reach a model must never hold up work — and a
-        # notice, because until now this was the one failure here that was invisible. Five flags and two
-        # response keys below belong to a tool that ships weekly; when one of them stops working, every
+        # notice, because a failure here is otherwise invisible. The flags above and the reply keys
+        # `host.answered` reads belong to a tool that ships weekly; when one of them stops working, every
         # model-backed check silently answers "fine" and a level nobody changed quietly becomes `low`.
         # Considered and rejected: adopting the official SDK so that tracking those flags is somebody
         # else's job. It is 294MB and thirty packages for ten lines, on a plugin whose install story is
         # one command. Saying so once is the cheaper half of the same protection.
-        telling.could_not_run(f"`{host.CLI}` could not be asked ({type(exc).__name__}), so the "
-                              f"{name} check passed without looking — the command or its flags may "
+        telling.could_not_run(f"`{host.CLI}` could not be asked ({type(exc).__name__}), so the checks "
+                              f"that asked it passed without looking — the command or its flags may "
                               f"have changed")
         return True, ""
     _log_usage(name, blob.get("usage") or {}, time.time() - t0)

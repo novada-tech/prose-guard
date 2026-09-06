@@ -668,6 +668,21 @@ how the cases are known to be load-bearing:
   against losing the other
 - every letter of a cluster given the following word, so `git commit -m "real" && find . -maxdepth 2`
   reads `2` as a second `-m`
+- each of the signals `host.answered` reads dropped in turn — the exit status, `is_error`, an error
+  `subtype`, an HTTP status, an unparseable stdout, an empty `result`. The first four survived the
+  first sweep and are recorded as gaps that were closed: every refusal shape the test had trips several
+  signals at once, so each one is covered by its neighbours. What kills them is a shape per signal that
+  sets that signal alone and says `PASS` in `result`, which is the defect exactly — drop the signal and
+  the refusal reads as a clean verdict
+- a refusal reported without a notice, a refusal held against the message rather than passed, and an
+  answer with no verdict in it treated as a refusal, which is the failure this must not be confused with
+- the refusal notice naming the check that asked. Caught by the round at `high` producing a line per
+  paying check for one fact about the install
+- the refusal named from the words of the message rather than from its HTTP status. Caught by a stub
+  whose refusal is worded differently on every call: the ledger dedupes on the sentence, so a reset time
+  inside it turns one refused round back into a line per check
+- `learn._ran` no longer reading the exit status, and reading it without saying anything, which is what
+  makes `gh` not being logged in look like a repository nobody has written in
 
 A note on how those were run, because a pass reported catches it had not earned: a restored source file
 can land with a modification time and size that the bytecode compiled from the mutated one still
