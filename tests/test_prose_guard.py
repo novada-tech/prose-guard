@@ -1480,6 +1480,142 @@ def test_routing():
         check("and 24 is not", sent(24), None)
 
 
+def test_gh_api_is_a_destination():
+    """`gh api` is how everything outside `gh pr|issue|release` is posted: review replies, review
+    threads, releases, issue transfers. An agent reaches for it as soon as the `gh pr` surface runs
+    out, which for a review with inline comments is immediately — one real session sent a review body,
+    four inline comments and five replies to a PUBLIC repository with none of it checked.
+
+    Measured over 25,368 unique Bash commands from local transcripts: 772 `gh api` calls against 392
+    of the shapes `github cli` claims, and 182 of those carry a body. Passive discovery had already
+    noticed on its own and was one use short of mentioning it.
+
+    Reads are the reason the pattern names a body flag rather than `gh api` alone. `gh api
+    repos/X/pulls/1/comments --jq …` is most of that 772, and a destination that claims a call it can
+    never find prose in looks exactly like a check that passed.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        home = os.path.join(tmp, "home")
+        os.makedirs(home)
+        # The shipped destinations rather than a fixture: the shipped entry is what this pins.
+        _, D = fresh(home)
+        second = ("The payload has to be rebuilt before the endpoint can serve it over HTTP again, "
+                  "which is why continuous integration has been red since yesterday afternoon and "
+                  "nobody could merge anything at all today.")
+        review = os.path.join(tmp, "review.json")
+        with open(review, "w") as fh:
+            json.dump({"event": "COMMENT", "body": PROSE,
+                       "comments": [{"path": "a.py", "line": 3, "body": second}]}, fh)
+        reply = os.path.join(tmp, "reply.md")
+        with open(reply, "w") as fh:
+            fh.write(second)
+        url = "/repos/OWNER/REPO/pulls/1381"
+        for label, cmd, claimed in (
+                ("a review from a JSON file", f"gh api -X POST {url}/reviews --input {review}", True),
+                ("a reply on the command line",
+                 f'gh api -X POST repos/OWNER/REPO/pulls/1381/comments/9/replies -f body="{PROSE}"',
+                 True),
+                ("a reply from a file",
+                 f"gh api -X POST {url}/comments/9/replies -F body=@{reply}", True),
+                ("a body on stdin", f"gh api -X POST {url}/reviews --input - <<'EOF'\n"
+                 + json.dumps({"body": PROSE}) + "\nEOF", True),
+                # Found by measuring, not by reading the pattern: a pattern that stopped at the
+                # first `;` lost the body of a real `-X PATCH` whose title held one. The text a
+                # command sends is exactly where chain operators turn up.
+                ("a title holding a semicolon",
+                 f'gh api {url} -X PATCH -f title="Fix a thing; and another" -f body="{PROSE}"',
+                 True),
+                ("a read", f"gh api {url}/comments --jq '.[0].id'", False),
+                ("a read with parameters", f"gh api -X GET {url}/comments -f per_page=100", False)):
+            dest = D.match("Bash", {"command": cmd})
+            check(f"gh api/{label}", (dest or {}).get("name"), "github api" if claimed else None)
+            if claimed:
+                got = D.extract(dest, "Bash", {"command": cmd}, tmp) or ""
+                check(f"gh api/{label} is read", "rollout" in got or "payload" in got, True)
+
+        # A review is one body plus its inline comments, in one call. Reading the first and stopping
+        # is what sent four inline comments out unread.
+        cmd = f"gh api -X POST {url}/reviews --input {review}"
+        got = D.extract(D.match("Bash", {"command": cmd}), "Bash", {"command": cmd}, tmp) or ""
+        check("the review body and every inline comment are read",
+              ("rollout" in got, "payload" in got), (True, True))
+        # And nothing else from the payload. A review arrives as JSON, and handing its braces and
+        # field names to a writing check earns a complaint about JSON — or a rewrite OF the JSON,
+        # which is the tool being satisfied rather than the message improved.
+        check("and the scaffolding around them is not",
+              ("event" in got, "{" in got, "COMMENT" in got), (False, False, False))
+
+        # A payload with no prose in it yields nothing, which is the honest answer: the destination
+        # claims the call because it carries a body, and branch protection has none.
+        protection = {"enforce_admins": True, "required_status_checks": {
+            "strict": True, "contexts": [f"continuous integration / build and test {n}"
+                                         for n in range(12)]}}
+        cmd = (f"gh api -X PUT /repos/OWNER/REPO/branches/main/protection --input - <<'EOF'\n"
+               + json.dumps(protection) + "\nEOF")
+        dest = D.match("Bash", {"command": cmd})
+        check("a JSON payload carrying no body is claimed", (dest or {}).get("name"), "github api")
+        check("and nothing is judged", D.extract(dest, "Bash", {"command": cmd}, tmp), None)
+
+        # Malformed JSON must not raise out of the hook — a PreToolUse hook that exits non-zero lets
+        # the call through — and the prose in it is still prose.
+        half = os.path.join(tmp, "half.json")
+        with open(half, "w") as fh:
+            fh.write('{"body": ' + json.dumps(PROSE))
+        cmd = f"gh api -X POST {url}/reviews --input {half}"
+        got = D.extract(D.match("Bash", {"command": cmd}), "Bash", {"command": cmd}, tmp)
+        check("a file that will not parse as JSON is read as prose", "rollout" in (got or ""), True)
+
+        # The repository is named in the URL, and the checkout the command runs in may be another one.
+        # audiences.json routes on this, so reading the wrong one resolves the wrong reader.
+        checkout = os.path.join(tmp, "checkout")
+        os.makedirs(checkout)
+        subprocess.run(["git", "-C", checkout, "init", "-q"], capture_output=True, timeout=60)
+        subprocess.run(["git", "-C", checkout, "remote", "add", "origin",
+                        "https://github.com/somewhere/else.git"], capture_output=True, timeout=60)
+        cmd = f'gh api -X POST {url}/comments/9/replies -f body="{PROSE}"'
+        ids = D.identifiers(D.match("Bash", {"command": cmd}), "Bash", {"command": cmd}, checkout)
+        check("the repository comes from the URL the call names", ids.get("repo"), "OWNER/REPO")
+        check("and not from the checkout the command happens to run in",
+              [v for v in ids.values() if "somewhere/else" in v], [])
+
+
+def test_every_body_a_command_carries_is_read():
+    """A command carrying two messages was read to the first one and stopped.
+
+    `gh api --input review.json` is that shape — a review body and four inline comments in one call —
+    and so is a chain of replies, `cmd -F body=@a.md && cmd -F body=@b.md`. Measured over 25,368
+    unique local Bash commands: 19 `gh` and 23 `git commit` calls carry more than one body, about 3%
+    of the commands the shipped destinations claim. It costs the caller too: five short review
+    replies took five Write calls and five separate commands, because one command carrying several
+    readable file arguments was not accepted.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        home = os.path.join(tmp, "home")
+        os.makedirs(home)
+        _, D = fresh(home)
+        second = ("The payload has to be rebuilt before the endpoint can serve it over HTTP again, "
+                  "which is why continuous integration has been red since yesterday afternoon and "
+                  "nobody could merge anything at all today.")
+        first_file, second_file = os.path.join(tmp, "a.md"), os.path.join(tmp, "b.md")
+        for path, text in ((first_file, PROSE), (second_file, second)):
+            with open(path, "w") as fh:
+                fh.write(text)
+        url = "repos/OWNER/REPO/pulls/1381/comments"
+        for label, cmd in (
+                ("two replies in one chain",
+                 f"gh api -X POST {url}/1/replies -F body=@{first_file} && "
+                 f"gh api -X POST {url}/2/replies -F body=@{second_file}"),
+                ("two comments in one chain",
+                 f'gh pr comment 5 --body "{PROSE}" && gh pr comment 6 --body "{second}"'),
+                ("a subject and a body as two -m flags",
+                 f'git commit -m "{PROSE}" -m "{second}"'),
+                ("a file and a flag in one command",
+                 f'gh pr create --title T --body-file {first_file} --body "{second}"')):
+            dest = D.match("Bash", {"command": cmd})
+            got = D.extract(dest, "Bash", {"command": cmd}, tmp) or ""
+            check(f"both bodies/{label}", ("rollout" in got, "payload" in got), (True, True))
+
+
 def test_prose_files_must_be_tracked():
     """The line between a document colleagues will read and a scratch file is whether it gets
     committed. Extension alone would check the agent's own notes."""

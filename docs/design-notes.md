@@ -449,12 +449,38 @@ how the cases are known to be load-bearing:
   red: the predicate inverted (8 cases), one fixed shell sentence for every kind of call, which is the
   defect itself (7 cases), and the way out named on every denial rather than only the last (1 case,
   the one that pins the timing)
+- the `gh api` pattern stopped at a chain operator, which a title holding a semicolon then hides behind
+- `_from_bash` reading the first body a command carries instead of every one
+- a named field never naming a file, so `-F body=@reply.md` is read as the literal text `@reply.md`
+- a JSON payload handed to the checks as it stands, braces and field names included. The first version
+  of its test did not catch this: it asserted that both bodies were present, and both bodies are
+  present in the raw JSON too. What pins it is asserting what is ABSENT, and a bodyless payload long
+  enough to clear the word floor — the short one it replaced was silent either way
+- the repository read from the directory the command runs in rather than from the URL it names
+- a `name=value` argument no longer yielded under `flag name`, so every `gh api -f body=…` goes unread
 
 One survivor, recorded rather than claimed equivalent: marking not-mine findings from `found` instead
 of from what `one_message` actually showed. The two differ only when the turn's budget drops a finding,
 and the budget cannot bind at `low`, where mechanics and terms each return one short finding. Binding it
 needs model calls, so this is pinned by `one_message`'s own contract — it reports the findings it
 carried — and not end to end.
+
+## A destination pattern cannot stay inside one command of a chain
+
+Claiming `gh api` needs a pattern that reaches from the binary to the flag carrying the body, and the
+careful-looking version forbids a chain operator in between: `\bgh\s+api\b[^;&|]*?…`, so that a read
+piped into `jq` cannot borrow a body flag from a command further down the line.
+
+Measured over 25,878 unique Bash commands from local transcripts, that character class lost a real
+`-X PATCH` whose title was `Fix a thing; and another`. The text a command sends is exactly where `;`,
+`&&` and `|` turn up — `command.carrying` says the same thing about splitting a chain, and it is
+quote-aware for that reason. A destination pattern is a plain regex over the command string and cannot
+be.
+
+So the span between the two is `[\s\S]*?` and the narrowing is done by what it has to reach: a body
+field or `--input`. What that gives up is a tool call holding both a `gh api` read and, further along,
+some other command passing a literal `-f body=` — which is a call that carries prose either way, and
+the extractor reads the whole call regardless.
 
 ## The level is not a plugin setting
 

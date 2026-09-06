@@ -183,7 +183,8 @@ IN_PROSE = re.compile(r"`(--[a-z][a-z-]+)`")
 NOT_OURS = ("--body", "--body-file", "--title", "--amend", "--format", "--pretty", "--output",
             "--message", "--no-verify", "--ext-diff", "--textconv", "--upload-pack", "--header",
             "--setting-sources", "--output-format", "--system-prompt", "--model", "--help",
-            "--no-pager", "--max-count", "--notes", "--notes-file", "--description", "--file")
+            "--no-pager", "--max-count", "--notes", "--notes-file", "--description", "--file",
+            "--input")
 
 
 def ours():
