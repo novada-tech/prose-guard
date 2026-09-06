@@ -458,6 +458,17 @@ how the cases are known to be load-bearing:
   enough to clear the word floor — the short one it replaced was silent either way
 - the repository read from the directory the command runs in rather than from the URL it names
 - a `name=value` argument no longer yielded under `flag name`, so every `gh api -f body=…` goes unread
+- the outcome of a claimed call not counted at all, which is the state that made a destination matching
+  and finding no words indistinguishable from a clean pass
+- a destination that HAS recovered text before still reported for its silent calls, which turns the one
+  interruption this adds into a nag about every `git commit --amend --no-edit`
+- `under the floor` collapsed into `no text found`, so a `text_arg` recovering a fragment of the real
+  message reads as a commit that carried none
+- the never-recovered note sent to the model and not to the person, which leaves it reaching nobody who
+  can change a destination
+- a local name in `discover.main()` shadowing the module function that reads the per-destination tally,
+  which raises `UnboundLocalError` for the whole report. That one was found by writing the case, not by
+  breaking the code: nothing had ever run `discover.py` end to end
 
 One survivor, recorded rather than claimed equivalent: marking not-mine findings from `found` instead
 of from what `one_message` actually showed. The two differ only when the turn's budget drops a finding,

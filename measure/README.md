@@ -12,19 +12,22 @@ plugin and nothing at runtime imports them.
 | `measure_advice.py` | is advisory feedback ever acted on, and would an agent act if it arrived in time |
 | `held_drafts.py` | build a corpus out of the messages this machine has actually held back |
 | `measure_gate.py` | could the one cheap question stand in for the six expensive ones — it cannot, 4/8 recall |
+| `measure_silence.py` | of the calls each destination claims, how many does it ever find the words in |
 | `fixtures/well-built/` | ordinary messages every check must pass |
 | `fixtures/one-reader/` | messages whose correctness depends on having a single addressee |
 
 Standard library only, like everything else here. Most spend real tokens, which is the point: a cost
-measurement that costs nothing is measuring nothing. `measure_thresholds.py`, `held_drafts.py` and
-`measure_advice.py --transcripts` are the exceptions — they read what is already on the machine.
+measurement that costs nothing is measuring nothing. `measure_thresholds.py`, `held_drafts.py`,
+`measure_silence.py` and `measure_advice.py --transcripts` are the exceptions — they read what is
+already on the machine.
 
-The two that read past conversations:
+The three that read past conversations:
 
 ```
 python3 measure/held_drafts.py --out /tmp/held.json     # the messages this machine held back
 python3 measure/measure_advice.py --transcripts          # was advice ever acted on: 41 given, 0 acted on
 python3 measure/measure_advice.py --probe /tmp/held.json # would an agent act if it could. Spends tokens
+python3 measure/measure_silence.py --unique   # per destination: claimed, checked, never a word found
 ```
 
 `held_drafts.py` keeps message text, unlike everything else here — that is what makes it a corpus.

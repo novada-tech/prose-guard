@@ -78,6 +78,12 @@ and anything that has already carried long prose past the guard unclaimed.
 The last list is the one to trust: those already happened. The guard also mentions such a tool by
 itself, once, on about its third use — and only once ever, so nothing here is urgent.
 
+Read the covered list too. Each destination there carries what came of the calls it claimed, and one
+with no `checked` beside it matched something and then could not read it — give that destination the
+flag or field that really carries the prose, `text_arg` for a command and `text_fields` for a tool.
+Worth doing before adding anything new: a destination that recovers no text looks, from outside,
+exactly like a message that passed.
+
 **Then ask whether you may read their past conversations**, because it answers this far better than
 anything above:
 

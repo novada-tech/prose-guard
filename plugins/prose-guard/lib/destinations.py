@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import Any, NamedTuple
 
 import command
 import paths
@@ -303,21 +303,76 @@ def resulting(dest: Dest, tool: str, tool_input: dict[str, Any],
     return None, ""
 
 
+def _raw(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None = None) -> str | None:
+    """Everything the call carries as prose, before the length floor.
+
+    Split out of `extract` so that "recovered a message and threw it away as too short" stays a
+    different answer from "found nothing at all". Both are None from `extract` and both are silence
+    from outside, and only one of them is the tool working — see `recovered`.
+
+    The longest thing found, so a short one is still reported rather than hidden by a later field that
+    is shorter still. `resulting` returns the whole document with the edit applied, which contains
+    `new_string`, so it wins whenever it exists.
+    """
+    if tool == "Bash":
+        return _from_bash(dest, str(tool_input.get("command") or ""), cwd)
+    whole, _ = resulting(dest, tool, tool_input, cwd)
+    if whole:
+        return whole
+    found = None
+    for field in dest.get("text_fields") or ():
+        v = tool_input.get(field)
+        if isinstance(v, str) and v.strip():
+            if len(v.split()) >= MIN_WORDS:
+                return v
+            found = found or v
+    return found
+
+
 def extract(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None = None) -> str | None:
     """The prose about to leave, or None if there is not enough of it to judge."""
-    if tool == "Bash":
-        text = _from_bash(dest, str(tool_input.get("command") or ""), cwd)
-    else:
-        whole, _ = resulting(dest, tool, tool_input, cwd)
-        if whole and len(whole.split()) >= MIN_WORDS:
-            return whole
-        text = None
-        for field in dest.get("text_fields") or ():
-            v = tool_input.get(field)
-            if isinstance(v, str) and len(v.split()) >= MIN_WORDS:
-                text = v
-                break
-    return text if text and len(text.split()) >= MIN_WORDS else None
+    return recovered(dest, tool, tool_input, cwd).text
+
+
+# What came of a call a destination claimed. Four answers, and they have to stay four: a destination
+# that keeps matching and never yields a word is a defect in what claims it, while a `git commit
+# --amend --no-edit` that yields nothing is that commit carrying no message and is nothing to report.
+# Measured by `measure/measure_silence.py --unique` over 6,170 local transcripts: the `commit message`
+# destination recovered nothing from 435 of the 978 calls it claimed — 269 carrying nothing it knows how
+# to read and 166 a message the floor dropped — and nothing anywhere could tell those two apart.
+# `discover.record_outcome` counts these.
+CHECKED = "checked"                # text was recovered and handed on
+SAID = "said something"            # no text, and `unreadable` had a sentence for the person
+UNDER_FLOOR = "under the floor"    # text was recovered and dropped as too short to judge
+NO_TEXT = "no text found"          # nothing in the call the destination knows how to read
+OUTCOMES = (CHECKED, SAID, UNDER_FLOOR, NO_TEXT)
+
+
+class Recovered(NamedTuple):
+    """What one claimed call yielded: the prose, which of the OUTCOMES it was, and what to say."""
+    text: str | None
+    outcome: str
+    why: str | None
+
+
+def recovered(dest: Dest, tool: str, tool_input: dict[str, Any],
+              cwd: str | None = None) -> Recovered:
+    """The prose about to leave and what happened when it was looked for.
+
+    One call rather than `extract` then `unreadable`, because the pair leaves the third and fourth
+    answers unrepresented: whether a message was recovered and dropped under `MIN_WORDS` is knowable
+    only inside this module, and it is exactly the shape a hole in a `text_arg` hides behind.
+
+    `unreadable` is asked after the extraction rather than instead of it, so `command.resolve` answers
+    from the cache the extraction filled and no substitution is run twice.
+    """
+    raw = _raw(dest, tool, tool_input, cwd)
+    if raw and len(raw.split()) >= MIN_WORDS:
+        return Recovered(raw, CHECKED, None)
+    why = unreadable(dest, tool, tool_input, cwd)
+    if why:
+        return Recovered(None, SAID, why)
+    return Recovered(None, UNDER_FLOOR if raw and raw.strip() else NO_TEXT, None)
 
 
 # Identifiers a destination declares with `true` because they come from the call itself rather than

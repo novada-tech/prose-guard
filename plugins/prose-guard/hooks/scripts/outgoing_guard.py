@@ -629,11 +629,17 @@ def main() -> None:
             emit("advise", note, for_user=note)
             return
         allow()
-    text = destinations.extract(dest, tool, tool_input, cwd)
+    got = destinations.recovered(dest, tool, tool_input, cwd)
+    # Every claimed call is counted, whatever came of it. An UNCLAIMED shape is counted above and
+    # eventually mentioned; a claimed destination that matches and finds no words was counted nowhere,
+    # so it emitted exactly what a clean pass emits — silence and no state — and a hole in a `text_arg`
+    # could sit there for as long as anybody used it. See discover.record_outcome.
+    discover.record_outcome(dest.get("name", ""), got.outcome)
+    text = got.text
     if not text:
         # Matched, but the prose is not in the call. Say so once a session: silence here reads exactly
         # like a check that passed, which is how the pull request for this change went out unchecked.
-        why = destinations.unreadable(dest, tool, tool_input, cwd)
+        why = got.why
         if why:
             # Held back rather than mentioned. Advice here is a request the agent is free to skip, and
             # the pull request for this very change went out unchecked while the note said so
@@ -652,6 +658,13 @@ def main() -> None:
                 emit("advise", why + " Letting it through: this has come up "
                                      f"{held + 1} times and the check is not worth blocking on.")
                 return
+        # Nothing to say about this one call. But a destination that has claimed enough calls and never
+        # once found the text is a bug report writing itself, and it is asked for only here, on the one
+        # path that can print it — a note marked said and then dropped is suppressed unread.
+        note = discover.never_recovered(dest.get("name", ""))
+        if note:
+            emit("advise", note, for_user=note)
+            return
         allow()
 
     # A destination can be worth less than the level you asked for. The gating checks ask whether the
