@@ -14,6 +14,7 @@ import ast
 import importlib
 import json
 import os
+import shlex
 import stat
 import subprocess
 import sys
@@ -696,21 +697,149 @@ def test_a_spend_survives_the_walk_that_crashed_after_it():
     check("and what they cost is on disk for the next round to read", charged, len(running))
 
 
-def stub_checker(tmp, reply):
+def stub_checker(tmp, reply=None, stdout=None, status=0):
     """A PATH whose `claude` answers `reply` to every question and records that it was asked.
 
     The shipped checks, the real pooling, the real budget — and no model and no tokens. Counting the
     calls from the checker's own side is what makes "charged what it spent" an equality rather than a
     number this file has decided in advance.
+
+    `reply` is what a working checker puts in `result`. `stdout` and `status` write the whole reply and
+    the exit status instead, which is the only way to reproduce a refused call: a refusal is well-formed
+    JSON on stdout from a process that ran, so nothing short of the real bytes stands in for it.
     """
     where = path_without_the_checker(tmp)
     script = os.path.join(where, "claude")
+    said = json.dumps({"result": reply}) if stdout is None else stdout
     with open(script, "w") as fh:
         fh.write("#!/bin/sh\n"
-                 'echo call >> "$CHECKER_CALLS"\n'
-                 f"printf '%s' '{json.dumps({'result': reply})}'\n")
+                 '[ -n "$CHECKER_CALLS" ] && echo call >> "$CHECKER_CALLS"\n'
+                 f"printf '%s' {shlex.quote(said)}\n"
+                 f"exit {int(status)}\n")
     os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
     return where
+
+
+# Every shape a `claude -p --output-format json` invocation arrives in when it never reached a model.
+# The first is what the shipped CLI really emits, established without spending a token by pointing
+# ANTHROPIC_BASE_URL at a local server that answers every request with an error: exit 1, `subtype`
+# still "success", `is_error` set, the HTTP status in `api_error_status`, and the refusal itself in
+# `result` — the one field a reply is read from, which is why nothing downstream could tell a refusal
+# from a verdict-less pass.
+#
+# The last four set ONE of those signals each and put `PASS` in `result`, so the reply reads as a
+# clean verdict to anything that stops consulting that signal. Every signal is then load-bearing on its
+# own: dropping any of them is a silent pass again, which is the defect, and a mutation that drops one
+# fails here rather than surviving on the strength of its neighbours.
+REFUSED = {
+    "an API error, which is the shape a 429 arrives in": (1, {
+        "type": "result", "subtype": "success", "is_error": True, "api_error_status": 429,
+        "terminal_reason": "api_error", "num_turns": 1,
+        "result": "API Error: 429 This request would exceed your organization's rate limit."}),
+    "a run that ended before any turn, which carries no `result` at all": (1, {
+        "type": "result", "subtype": "error_during_execution", "is_error": True,
+        "errors": ["the session crashed before the model was asked"]}),
+    "a reply with nothing in it": (0, {
+        "type": "result", "subtype": "success", "is_error": False, "result": ""}),
+    "stdout that is not JSON": (1, None),
+    # A process that failed after saying it succeeded. The exit status is the only thing left to read.
+    "a verdict from a process that exited non-zero": (1, {
+        "type": "result", "subtype": "success", "is_error": False, "result": "PASS"}),
+    # The exit status is the CLI's choice and can move in a release without anything else changing, so
+    # the flag has to be enough on its own.
+    "a verdict flagged as an error by a run that exits 0": (0, {
+        "type": "result", "subtype": "success", "is_error": True, "result": "PASS"}),
+    "a verdict from a turn that ran out": (0, {
+        "type": "result", "subtype": "error_max_turns", "is_error": False, "result": "PASS"}),
+    "a verdict carrying the HTTP status of an API error": (0, {
+        "type": "result", "subtype": "success", "is_error": False, "api_error_status": 429,
+        "result": "PASS"}),
+}
+
+
+def _refusal_stdout(blob):
+    return "claude: unable to start" if blob is None else json.dumps(blob)
+
+
+def test_a_refused_call_says_so_instead_of_passing_quietly():
+    """A refusal reaches `ask` as well-formed JSON from a process that ran, so neither notice fired.
+
+    `read_verdict` reads a reply that states no verdict as a pass and drops it rather than quoting it,
+    which is right for a checker that answered something unhelpful and wrong for one that never
+    answered: the refusal text matches no verdict, so `ask` returned a pass with nothing said. Observed
+    on a real run — 24 model calls refused with a 429, 24 passes, and a transparency line reporting a
+    clean check.
+
+    So both halves are pinned here: the message still goes out, and the person is told the checks that
+    asked passed without looking. The control at the end is the failure this must NOT be confused with
+    — a checker that reached the model and answered something with no verdict in it, which stays a
+    quiet pass.
+    """
+    text = ("The rollout finished last night and the dashboard has been quiet since then, so "
+            "there is nothing else to do before the review meeting tomorrow morning.")
+
+    def sent(tmp, stub, calls=None):
+        """One message through the whole hook at `high`, where the paying checks are asked."""
+        home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
+        os.makedirs(home)
+        write_destinations(home, chat_destination())
+        return hook_reply({"tool_name": "mcp__ourchat__chat_send", "session_id": "one", "cwd": home,
+                           "tool_input": {"channel_id": "C1", "message": text}},
+                          {**env(home, state, "high"), "PATH": stub(tmp),
+                           **({"CHECKER_CALLS": calls} if calls else {})}) or {}
+
+    for label, (status, blob) in REFUSED.items():
+        with tempfile.TemporaryDirectory() as tmp:
+            out = sent(tmp, lambda d: stub_checker(d, stdout=_refusal_stdout(blob), status=status))
+        said = out.get("systemMessage", "")
+        check(f"still goes out: {label}", out.get("permissionDecision"), None)
+        check(f"and the person is told: {label}", "passed without looking" in said, True)
+        # One fact about the run, not one per check. Every paying check at `high` meets the same
+        # refusal, and a notice each spent six lines of somebody's terminal on one sentence.
+        check(f"once, however many checks asked: {label}", said.count("passed without looking"), 1)
+
+    # The status is the actionable half — 429 means the quota is gone, 401 means nobody is logged in —
+    # so it survives into the sentence somebody reads.
+    with tempfile.TemporaryDirectory() as tmp:
+        status, blob = REFUSED["an API error, which is the shape a 429 arrives in"]
+        calls = os.path.join(tmp, "calls.log")
+        out = sent(tmp, lambda d: stub_checker(d, stdout=json.dumps(blob), status=status), calls)
+        spent = sum(1 for line in open(calls) if line.strip())
+    check("naming what the API said, not which check asked", "429" in out.get("systemMessage", ""),
+          True)
+    # A refused call is a call that was made, and `pooling` charges what a run costs from the mode
+    # rather than from what came back — so a session with no quota left spends its allowance once and
+    # goes quiet, instead of asking again on every round of every message.
+    check("and a refused call is charged like any other",
+          (spent > 0, f"{spent} calls" in out.get("systemMessage", "")), (True, True))
+
+    # A refusal can carry a reset time, so the message is a different string on every call, and the
+    # ledger that says a thing once has nothing to recognise. What the person is told keys on the
+    # status instead — the same string every time — so one refused round stays one line.
+    def message_that_moves(where):
+        where = path_without_the_checker(where)
+        script = os.path.join(where, "claude")
+        with open(script, "w") as fh:
+            fh.write("#!/bin/sh\n"
+                     'printf \'{"subtype":"success","is_error":true,"api_error_status":429,'
+                     '"result":"API Error: 429 rate limit reached, retry after %s"}\' "$$"\n'
+                     "exit 1\n")
+        os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
+        return where
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = sent(tmp, message_that_moves)
+    check("a refusal worded differently on every call is still one line",
+          out.get("systemMessage", "").count("passed without looking"), 1)
+
+    # The one reply that is NOT this defect. It reached the model, the model answered, and the answer
+    # states no verdict. Turning that into a notice would mean one every time a checker showed its
+    # working, which is what `read_verdict`'s contract exists to prevent.
+    with tempfile.TemporaryDirectory() as tmp:
+        out = sent(tmp, lambda d: stub_checker(d, "I would rather not say either way about this."))
+    check("an answer with no verdict in it is still a quiet pass",
+          ("passed without looking" in out.get("systemMessage", ""),
+           out.get("permissionDecision")), (False, None))
 
 
 def test_what_a_denial_costs_is_what_a_denial_is_charged():
@@ -4643,6 +4772,41 @@ def test_a_credential_written_into_a_command_is_not_printed_back():
         check(f"redacted: {written[:9]!r}", token[:12] in learn.short("x " + written), False)
 
 
+def test_a_source_that_could_not_be_read_is_not_a_source_with_nothing_in_it():
+    """The same silence as a refused model call, one directory over: a command that failed was believed.
+
+    `gh` missing, `gh` not logged in and a repository `gh` cannot see all print an error and exit
+    non-zero, and reading only stdout turned each of them into an empty list — which is exactly what a
+    repository nobody has written in gives. The scan then reports a number, and the number is a
+    measurement of nothing. `--gh` is documented as the richest source, so it is the one where an
+    unnoticed zero costs the most.
+
+    The corpus a piped source produces was already checked this way; these two shell out directly.
+    """
+    import contextlib
+    import io
+
+    import learn
+    with tempfile.TemporaryDirectory() as tmp:
+        bin_dir = os.path.join(tmp, "bin")
+        _stub(bin_dir, "gh", 'echo "gh: not logged in" >&2\nexit 4\n')
+        _stub(bin_dir, "git", 'echo "fatal: not a git repository" >&2\nexit 128\n')
+        was = os.environ["PATH"]
+        os.environ["PATH"] = bin_dir + os.pathsep + was
+        try:
+            for what, rows in (("gh", lambda: list(learn.from_gh("acme/infra"))),
+                               ("git", lambda: list(learn.from_git(tmp)))):
+                buf = io.StringIO()
+                with contextlib.redirect_stderr(buf):
+                    got = rows()
+                said = buf.getvalue()
+                check(f"{what}: no rows, which is what it looked like before", got, [])
+                check(f"{what}: and the exit status is reported", "exited" in said, True)
+                check(f"{what}: with what the command said about it", "not " in said, True)
+        finally:
+            os.environ["PATH"] = was
+
+
 def test_a_scan_leaves_no_names_in_the_working_tree():
     """`--out` defaulted to a relative `candidates.json`, and that file lists every person measured.
 
@@ -6276,12 +6440,15 @@ def test_a_term_can_be_taken_out_of_a_vocabulary_as_well_as_put_in():
 
 
 def test_a_checker_that_cannot_be_asked_says_so_rather_than_passing_quietly():
-    """`ask` returns a pass on any exception, which is right and was the last silent failure here.
+    """`ask` returns a pass on any exception, which is right, and says so rather than passing quietly.
 
-    Five command flags and two response keys belong to a tool that ships weekly. When one stops
-    working, every model-backed check answers "fine" and the level somebody chose quietly becomes
-    `low`. It still passes — a writing check that cannot reach a model must never hold up work — but it
-    now says it could not look, through the same ledger that reports an unreadable phases directory.
+    The command flags and the reply keys `host.answered` reads belong to a tool that ships weekly. When
+    one stops working, every model-backed check answers "fine" and the level somebody chose quietly
+    becomes `low`. It still passes — a writing check that cannot reach a model must never hold up work —
+    but it says it could not look, through the same ledger that reports an unreadable phases directory.
+
+    One line for the run rather than one per check: a binary that is not there is one fact about
+    somebody's install, and every paying check in the round meets it.
 
     This is the cheaper half of adopting the official SDK, which was measured and rejected: 294MB and
     thirty packages to have somebody else track those flags, for ten lines of subprocess.
@@ -6293,13 +6460,16 @@ def test_a_checker_that_cannot_be_asked_says_so_rather_than_passing_quietly():
     was = os.environ["PATH"]
     os.environ["PATH"] = "/nonexistent-so-the-checker-cannot-be-found"
     try:
-        verdict = ask.ask("relevance", "a prompt", "some text")
+        verdicts = [ask.ask(n, "a prompt", "some text") for n in ("relevance", "structure")]
     finally:
         os.environ["PATH"] = was
-    check("it still passes, because a broken check must not block work", verdict, (True, ""))
+    check("it still passes, because a broken check must not block work", verdicts,
+          [(True, ""), (True, "")])
     said = telling.never_ran()
-    check("but it says the check did not look", any("relevance" in n for n in said), True)
+    check("but it says the checks did not look",
+          [n for n in said if "passed without looking" in n] != [], True)
     check("and names what could not be reached", any("claude" in n for n in said), True)
+    check("once, however many checks asked it", len(said), 1)
     telling.ran_everything()
 
 

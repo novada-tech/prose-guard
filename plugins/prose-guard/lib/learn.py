@@ -82,14 +82,34 @@ def under_home(path: str) -> str:
     return path if os.path.isabs(path) else paths.at(path)
 
 
+def _ran(args: list[str], timeout: int) -> str | None:
+    """What a command printed, or None and a warning saying why there is nothing.
+
+    A source that could not be read yields no rows, and no rows is exactly what a repository nobody has
+    written in yields — so the corpus is measured empty and the zero looks like an answer. `gh` not
+    installed, `gh` not logged in and a repository `gh` cannot see are all that shape.
+
+    `from_command` says this for a piped source and reads the exit status to do it; this says it for the
+    two sources that shell out directly, in the same words and on the same channel.
+    """
+    what = short(" ".join(args[:3]))
+    try:
+        got = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except Exception as exc:
+        print(f"  warning: `{what}` could not be run: {exc}", file=sys.stderr)
+        return None
+    if got.returncode != 0:
+        print(f"  warning: `{what}` exited {got.returncode}: {(got.stderr or '').strip()[:160]}",
+              file=sys.stderr)
+        return None
+    return got.stdout
+
+
 def from_git(repo: str = ".") -> Iterator[Row]:
     """Commit messages with their authors. Free, local, in every repository — but thin: few people
     put acronyms in a commit subject, so this alone under-measures."""
-    try:
-        out = subprocess.run(["git", "-C", repo, "log", "--no-merges",
-                              "--format=%an%x00%s%n%b%x01"],
-                             capture_output=True, text=True, timeout=600).stdout
-    except Exception:
+    out = _ran(["git", "-C", repo, "log", "--no-merges", "--format=%an%x00%s%n%b%x01"], 600)
+    if out is None:
         return
     for entry in out.split("\x01"):
         if "\x00" in entry:
@@ -102,10 +122,12 @@ def from_gh(slug: str, limit: int = 400) -> Iterator[Row]:
     """Issues, pull requests and their comments. The richest source: a review comment is written to
     a colleague, so it uses exactly the vocabulary they share."""
     def run(args: list[str]) -> Any:
+        out = _ran(args, 1800)
         try:
-            return json.loads(subprocess.run(args, capture_output=True, text=True,
-                                             timeout=1800).stdout or "[]")
+            return json.loads(out or "[]")
         except Exception:
+            print(f"  warning: `{short(' '.join(args[:3]))}` printed no JSON to read rows from",
+                  file=sys.stderr)
             return []
 
     for kind in ("issue", "pr"):
