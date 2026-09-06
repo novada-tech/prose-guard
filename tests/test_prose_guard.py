@@ -14,6 +14,7 @@ import ast
 import importlib
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -428,12 +429,19 @@ def test_the_shipped_manifests_are_valid_and_agree():
     check("the version is three numbers", len(parts) == 3 and all(p.isdigit() for p in parts), True)
 
 
-def _drive_hook(running, message, session, tmp):
-    """Run the hook against these checks and return its parsed output. Shares the harness above."""
+def _drive_hook(running, message, session, tmp, wreck=None):
+    """Run the hook against these checks and return its parsed output. Shares the harness above.
+
+    `wreck` is handed the hook's module before it runs, for a caller that needs the walk to fail part
+    way through — a hook that raises exits non-zero and Claude Code lets the call through, so what
+    survives that is the only record of what the round spent.
+    """
     import checks as checks_module
     import contextlib
     import io
     guard = load_guard("outgoing_guard_for_concurrency")
+    if wreck:
+        wreck(guard)
     was = {k: os.environ.get(k) for k in ("PROSE_GUARD_HOME", "PROSE_GUARD_STATE")}
     os.environ["PROSE_GUARD_STATE"] = os.path.join(tmp, "state")
     home = os.path.join(tmp, "home")
@@ -542,6 +550,202 @@ def test_only_one_check_holds_a_message_back_however_many_object():
     check("and the others are named in the same interruption",
           "resolver beta" in reason and "resolver gamma" in reason, True)
     check("as context rather than as demands", "none of it is holding this back" in reason, True)
+
+
+def _charged(tmp, session):
+    """What the state file says this session has spent. The state file is what carries a spend from one
+    round of an argument to the next, so a number that never reaches it binds nothing."""
+    with open(os.path.join(tmp, "state", "sessions", session + ".json")) as fh:
+        return json.load(fh).get("calls", 0)
+
+
+def test_every_call_the_hook_makes_is_charged_to_the_message():
+    """Asked together, charged together. The two have to agree or the budget bounds nothing.
+
+    The checks are asked concurrently, so every call is spent before the walk over them starts. The walk
+    then returns at the first finding worth holding the message back for, which is the outcome the tool
+    exists for — and what the checks after it spent is gone either way. Charged where the walk happens to
+    read an answer, that money is charged nowhere: the budget binds later than it claims, the state file
+    carries a smaller number than the round spent, and so does the line the person reads.
+
+    Stub checks so the arithmetic is exact and no model is involved: each returns the same finding every
+    time it is asked, so each pools to a known number of runs, and the first one in editorial order holds
+    the message.
+    """
+    import checks as checks_module
+
+    class Insists:
+        """Says the same thing however often it is asked, so it costs a known number of runs and is
+        `firm` — a POOLED finding only one run raised becomes advice and would not hold anything."""
+
+        MODE = checks_module.POOLED
+
+        def __init__(self, name):
+            self.NAME, self.asked = name, 0
+
+        def run(self, text, ctx):
+            self.asked += 1
+            return checks_module.Finding(checks_module.BLOCK,
+                                         f'"resolver {self.NAME}" is unclear to this reader')
+
+    running = [Insists(f"insist{n}") for n in range(3)]
+    text = " ".join(f"Sentence {n} about the resolver and what it actually does today."
+                    for n in range(12))
+    with tempfile.TemporaryDirectory() as tmp:
+        said = _drive_hook(running, text, "charged", tmp)
+        charged = _charged(tmp, "charged")
+
+    spent = sum(c.asked for c in running)
+    check("the message is held", said.get("permissionDecision"), "deny")
+    check("by the first check, so the walk returns before reading the rest",
+          "resolver insist0" in said.get("permissionDecisionReason", ""), True)
+    # The point of the test. Every check ran, every run was a call, and the session is charged all of
+    # them — not only the ones the walk got as far as reading.
+    check("every check was asked", [c.asked > 1 for c in running], [True, True, True])
+    check("and the session is charged every call it made", charged, spent)
+
+
+def test_an_answer_already_in_hand_is_never_reported_as_a_check_the_budget_stopped():
+    """What was asked is what `all_at_once` answered, and the running total is not a second opinion on it.
+
+    Charged where the money leaves, a round that spends its whole allowance has spent it before the walk
+    reads anything — so a walk that decides what was asked by comparing the total against the budget
+    decides it about checks whose answers are sitting in front of it. It throws them away, records a pass
+    for each, and tells the person they were not asked — so the message goes out over findings the round
+    has already paid for.
+
+    Stubs that keep yielding, so the allowance is reached exactly: `all_at_once` divides the budget a
+    share each, and a check that never runs dry spends its whole share.
+    """
+    import checks as checks_module
+
+    class Yields:
+        """A repeat first, so one item is `firm` and can hold the message, then something new every run
+        so the well never dries and the check spends its whole share."""
+
+        MODE = checks_module.POOLED
+
+        def __init__(self, name):
+            self.NAME, self.asked = name, 0
+
+        def run(self, text, ctx):
+            self.asked += 1
+            nth = 1 if self.asked <= 2 else self.asked - 1
+            return checks_module.Finding(checks_module.BLOCK,
+                                         f'"Sentence {nth}" is unclear to this reader')
+
+    running = [Yields(f"yield{n}") for n in range(3)]
+    text = " ".join(f"Sentence {n} about the resolver and what it actually does today."
+                    for n in range(12))
+    guard = load_guard("outgoing_guard_for_the_allowance")
+    budget = guard.budget_for(checks_module.ceiling_for(text), len(running))
+    with tempfile.TemporaryDirectory() as tmp:
+        said = _drive_hook(running, text, "allowance", tmp)
+        charged = _charged(tmp, "allowance")
+
+    spent = sum(c.asked for c in running)
+    check("the round spends the whole allowance", spent, budget)
+    check("and is charged all of it", charged, spent)
+    # The point of the test: the allowance being reached is not evidence that a check went unasked.
+    check("and the findings it paid for still hold the message", said.get("permissionDecision"), "deny")
+
+
+def test_a_spend_survives_the_walk_that_crashed_after_it():
+    """A crash in the walk allows the call, and the calls it already made are still spent.
+
+    The hook's own header promises that every failure path allows the call, and a `PreToolUse` hook that
+    exits non-zero does exactly that. So a round can end in a traceback after every paying check has been
+    asked and paid for; the comment above `mine` in `outgoing_guard.main` is about one way the walk gets
+    there. Kept only in memory, that round's spend goes with the traceback, and the next round is handed
+    the whole allowance again to spend on the same message.
+
+    Which is why the charge is written where it is made rather than at whichever exit the walk reaches.
+    """
+    import checks as checks_module
+
+    class Objects:
+        MODE = checks_module.VERDICT          # one call each, so the arithmetic needs no pooling
+
+        def __init__(self, name):
+            self.NAME, self.asked = name, 0
+
+        def run(self, text, ctx):
+            self.asked += 1
+            return checks_module.Finding(checks_module.BLOCK,
+                                         f'"resolver {self.NAME}" is unclear to this reader')
+
+    running = [Objects(f"crash{n}") for n in range(3)]
+    text = " ".join(f"Sentence {n} about the resolver and what it actually does today."
+                    for n in range(12))
+
+    def wreck(guard):
+        def raise_instead(*a, **k):
+            raise RuntimeError("cannot tell which sentences this call wrote")
+        guard.one_message = raise_instead
+
+    with tempfile.TemporaryDirectory() as tmp:
+        crashed = False
+        try:
+            _drive_hook(running, text, "crashed", tmp, wreck=wreck)
+        except RuntimeError:
+            crashed = True
+        charged = _charged(tmp, "crashed")
+
+    check("the walk crashed, which lets the call through", crashed, True)
+    check("every check was asked before it did", [c.asked for c in running], [1, 1, 1])
+    check("and what they cost is on disk for the next round to read", charged, len(running))
+
+
+def stub_checker(tmp, reply):
+    """A PATH whose `claude` answers `reply` to every question and records that it was asked.
+
+    The shipped checks, the real pooling, the real budget — and no model and no tokens. Counting the
+    calls from the checker's own side is what makes "charged what it spent" an equality rather than a
+    number this file has decided in advance.
+    """
+    where = path_without_the_checker(tmp)
+    script = os.path.join(where, "claude")
+    with open(script, "w") as fh:
+        fh.write("#!/bin/sh\n"
+                 'echo call >> "$CHECKER_CALLS"\n'
+                 f"printf '%s' '{json.dumps({'result': reply})}'\n")
+    os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
+    return where
+
+
+def test_what_a_denial_costs_is_what_a_denial_is_charged():
+    """The same arithmetic at `high`, through the shipped checks, with the calls counted by the callee.
+
+    `high` asks its blocking paying checks together and holds the advice-only one back until something is
+    already blocking. A checker that objects to everything makes each of them pool three runs — a run
+    that repeats itself is a dry run, and two dry runs stop it — and the first check in editorial order
+    is the one that denies, so the walk returns with every check after it already paid for and never
+    read. This is the case the number in the commit was measured on: **18 model calls spent on one
+    denial, 6 of them charged**.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
+        os.makedirs(home)
+        write_destinations(home, chat_destination())
+        log = os.path.join(tmp, "calls.log")
+        text = ("The rollout finished last night and the dashboard has been quiet since then, so "
+                "there is nothing else to do before the review meeting tomorrow morning.")
+        payload = {"tool_name": "mcp__ourchat__chat_send", "session_id": "paid", "cwd": tmp,
+                   "tool_input": {"channel_id": "C1", "message": text}}
+        out = hook_reply(payload, {**env(home, state, "high"),
+                                   "PATH": stub_checker(tmp, "FAIL: the reader cannot tell which "
+                                                             "build to pass"),
+                                   "CHECKER_CALLS": log})
+        with open(log) as fh:
+            spent = sum(1 for line in fh if line.strip())
+        with open(os.path.join(state, "sessions", "paid.json")) as fh:
+            charged = json.load(fh).get("calls", 0)
+
+    check("the message is held by the first paying check in editorial order",
+          (out or {}).get("permissionDecision"), "deny")
+    check("every check after it was asked too, and said so in the same interruption",
+          "(address)" in (out or {}).get("permissionDecisionReason", ""), True)
+    check("and the session is charged what the checker was actually asked", charged, spent)
 
 
 def test_advice_says_which_kind_of_advice_it_is():
@@ -3569,6 +3773,44 @@ def test_how_hard_a_check_works_follows_the_text():
     check("and neither is one that passes", checks.pooled(Cheap([None]), text, None)[2], 0)
     check("while a check that costs a call pays for its one run even when it passes",
           checks.pooled(Stub([None]), text, None)[2], 1)
+
+    # A run that raised is a run that was paid for. Counted nowhere, a check that breaks part way
+    # through is free — and free means asked again on the next round and on every round after it, with
+    # nothing said, because a check that could not answer answers exactly what a check with nothing to
+    # say answers. Same bargain `ask.ask` makes for a checker it cannot reach: nothing is held up, and
+    # something is said.
+    import telling
+    telling.ran_everything()
+
+    class Breaks(Stub):
+        NAME = "breaks"
+
+        def run(self, text, ctx):
+            if self.asked >= 2:
+                self.asked += 1
+                raise RuntimeError("the flag it passes was renamed")
+            return super().run(text, ctx)
+
+    breaks = Breaks([about(1), about(2)])
+    found, _, spent = checks.pooled(breaks, text, None)
+    check("a check that breaks part way through is charged the runs it made", spent, breaks.asked)
+    check("and it is not asked again, because the next run breaks the same way", breaks.asked, 3)
+    check("what it found before it broke is still reported", len(found), 2)
+    check("and it says out loud that it could not look",
+          [n for n in telling.never_ran() if "breaks" in n] != [], True)
+
+    class BreaksAtOnce(Stub):
+        NAME = "at once"
+
+        def run(self, text, ctx):
+            self.asked += 1
+            raise RuntimeError("the phases directory could not be read")
+
+    # Same rule as the line above about a check that passes on its first run: what a run costs is
+    # decided by the mode before anything runs, and not by what came back from it.
+    check("and one that breaks on its first run is charged for that run as well",
+          checks.pooled(BreaksAtOnce([]), text, None)[2], 1)
+    telling.ran_everything()
 
 
 def test_an_edit_is_judged_inside_its_document():

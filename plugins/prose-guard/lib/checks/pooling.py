@@ -4,14 +4,19 @@ The two callers keep a budget in model calls, so what a check costs has to be kn
 `mode_of` reads the mode a check declares, `costs_a_call` turns that into money, and `ceiling_for` says
 how many times the same check may be asked about this text.
 
-Imports `finding` for the modes and `placing` for what makes two findings the same item, and nothing
-else — in particular not its own package, so a check can use any of it without the circular import that
-put `finding.py` where it is.
+Imports `finding` for the modes, `placing` for what makes two findings the same item, and `telling` for
+the one thing that happens here and has to be said out loud — a run that raised. Not its own package,
+so a check can use any of it without the circular import that put `finding.py` where it is.
 """
 from __future__ import annotations
 
+import os
+import sys
 import typing
 from typing import TYPE_CHECKING
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import telling  # noqa: E402
 
 from .finding import EXACT, MODES, VERDICT
 from .placing import identity
@@ -78,6 +83,27 @@ def ceiling_for(text: str) -> int:
     return max(BASE_CEILING, min(MOST_RUNS, 1 + len(text.split()) // WORDS_PER_RUN))
 
 
+def _asked(check: Check, text: str, ctx: Context | None) -> tuple[Finding | None, bool]:
+    """One run of a check: what it answered, and whether it raised instead of answering.
+
+    A run that raised is a run that was paid for, and this is the last place that can still say how
+    many there were — the exception carries no number, so a caller that lets it through is charged
+    nothing for the calls the check had already made. Charged nothing means asked again on the next
+    round and on every round after that, and none of it visible, because a check that cannot answer
+    answers exactly what a check with nothing to say answers.
+
+    So a raise gets the bargain `ask.ask` already makes for a checker it cannot reach: nothing is held
+    up, the runs are still counted, and it is said once through the ledger that also reports an
+    unreadable phases directory.
+    """
+    try:
+        return check.run(text, ctx), False
+    except Exception as exc:
+        telling.could_not_run(f"the {getattr(check, 'NAME', check)} check raised "
+                              f"{type(exc).__name__} instead of answering, so it stopped there")
+        return None, True
+
+
 def pooled(check: Check, text: str, ctx: Context | None, passes: int | None = None,
            dry_runs: int = DRY_RUNS) -> Pooled:
     """Run a check until its runs stop surfacing anything new, and pool what they found.
@@ -102,7 +128,9 @@ def pooled(check: Check, text: str, ctx: Context | None, passes: int | None = No
     # What one run costs, decided before anything runs. This used to be counted after the pass test, so a
     # check that spends no model call was billed one when it passed and none when it fired.
     cost = 0 if mode == EXACT else 1
-    first = check.run(text, ctx)
+    # A run that raised is charged what a run that passed is charged, and for the same reason: what one
+    # run costs is decided by the mode and not by what came back. See `_asked`.
+    first, _ = _asked(check, text, ctx)
     if first is None:
         return Pooled([], [], cost)
     if mode == EXACT:
@@ -116,8 +144,13 @@ def pooled(check: Check, text: str, ctx: Context | None, passes: int | None = No
     order = list(seen)
     runs, dry = 1, 0
     while runs < ceiling and dry <= dry_runs:
-        again = check.run(text, ctx)
+        again, broke = _asked(check, text, ctx)
         runs += 1
+        if broke:
+            # It raised, so the next run raises the same way and every run costs. Stopping here keeps
+            # a broken check to one wasted call rather than to `dry_runs` of them, and what the runs
+            # before it found still stands: those answers are the check's, not the exception's.
+            break
         if again is None:
             dry += 1
             continue
