@@ -39,7 +39,7 @@ sys.path.insert(0, LIB)
 import audiences  # noqa: E402
 from audiences import Resolved  # noqa: E402
 from checks import ask as _ask  # noqa: E402
-from checks import Check, Context, for_effort  # noqa: E402
+from checks import MIN_WORDS_FOR_A_CALL, Check, Context, for_effort  # noqa: E402
 
 PAD = (" This has been in place since the start of the month and nobody has reported anything else "
        "unusual on the affected hosts.")
@@ -200,7 +200,9 @@ def main() -> None:
     negatives = []
     for path in sorted(glob.glob(a.negatives)):
         text = open(path, errors="replace").read()
-        if len(text.split()) >= 25:
+        # The same floor the checks use, rather than a copy of the number: what this measures is the
+        # model-backed checks, and a fixture below it is one they are never asked about.
+        if len(text.split()) >= MIN_WORDS_FOR_A_CALL:
             negatives.append((os.path.basename(path), text))
     if not negatives:
         print(f"no negatives matched {a.negatives!r} — a check cannot be validated in one direction "

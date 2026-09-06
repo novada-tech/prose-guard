@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 class Context:
     def __init__(self, audience: Resolved, situation: dict[str, Any] | None = None,
                  previous: str = "", mine: set[int] | None = None,
-                 resent: set[int] | None = None) -> None:
+                 resent: set[int] | None = None, subject_line: bool = False) -> None:
         # Whose vocabulary applies, and whether it was measured or guessed.
         self.audience = audience
         # Facts about the moment rather than the reader — a thread reply, an edit, a public repo. Read
@@ -43,3 +43,22 @@ class Context:
         # chosen to leave, which is what makes a note about one of them not worth repeating. The two
         # coincide on a file edit, where the hunk is both what the call wrote and what it changed.
         self.resent = resent
+        # Whether the first line is a subject: a title, on its own line, with the body after it. The
+        # destination says so — see `subject_line` in data/destinations.json.
+        self.subject_line = subject_line
+
+    def where_an_explanation_fits(self, text: str) -> str:
+        """The part of `text` in which a term could be explained where it first appears.
+
+        All of it, unless the first line is a subject. A subject is one line and has no room for a
+        gloss, so asking for one there is a demand nobody can satisfy — the same shape as `previous`
+        above, and the same answer: take it out of what is scored rather than reporting something the
+        writer cannot act on.
+
+        Measured on 3,425 held-out commit messages from four repositories: 95 of 193 terms findings
+        were carried by the subject alone. See docs/thresholds.md.
+
+        Only the check that asks for an explanation uses this. `mechanics` reads the whole message,
+        because a doubled word in a subject is fixable exactly where it stands.
+        """
+        return text.partition("\n")[2] if self.subject_line else text

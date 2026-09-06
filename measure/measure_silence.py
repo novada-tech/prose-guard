@@ -16,15 +16,14 @@ Same contract as `discover.py --from-transcripts`, and the same reason for it: w
 destination name and a count. Never a value, never a line of anybody's message. It reads conversations
 to count outcomes, not to build a corpus, and they are private — ask before running it.
 
-Two numbers need reading with care and the output labels both:
+One number needs reading with care and the output labels it: `no text found` counts a `--body-file`
+whose file has since been deleted. At runtime the file was there and the text WAS checked, so those are
+an artifact of scanning afterwards rather than a gap. The `gone from disk` line is how many of them
+look like that.
 
-  `no text found` counts a `--body-file` whose file has since been deleted. At runtime the file was
-  there and the text WAS checked, so those are an artifact of scanning afterwards rather than a gap.
-  The `gone from disk` line is how many of them look like that.
-
-  `under the floor` is a message shorter than `destinations.MIN_WORDS`. That is a deliberate decision,
-  not a hole — but it is also where a hole hides, because a `text_arg` that recovers a fragment of the
-  real message looks the same from here.
+Length is not one of the reasons a call lands there. Whatever a destination recovers is checked, at the
+level `checks.worth_paying_for` allows — so every count here is about whether the text could be READ,
+which is the only question this harness is calibrated for.
 """
 from __future__ import annotations
 

@@ -1220,11 +1220,10 @@ def fresh(home):
 def write_destinations(home, *entries):
     """Put destinations in a temporary home, so a test declares what it needs.
 
-    The shipped set is three entries — the ones on every machine whose mapping a tool schema does not
-    show. Everything else is found at setup. Tests used to borrow Slack, Notion, Linear and `glab` from
-    that file as vehicles for testing something else, which meant they were testing the data as much as
-    the mechanism, and they broke the moment the data was trimmed. A test that needs two bash
-    destinations to prove they behave alike should say so.
+    The shipped set is only the destinations on every machine whose mapping a tool schema does not
+    show; everything else is found at setup. Borrowing an entry from that file as a vehicle for
+    testing something else tests the data as much as the mechanism, and breaks the moment the data is
+    trimmed. A test that needs two bash destinations to prove they behave alike should say so.
     """
     with open(os.path.join(home, "destinations.json"), "w") as fh:
         json.dump({"destinations": list(entries)}, fh)
@@ -1259,15 +1258,15 @@ def write_audience(home, name, **kw):
         json.dump(data, fh)
 
 
-def Ctx(audience, situation=None, previous="", mine=None, resent=None):
+def Ctx(audience, situation=None, previous="", mine=None, resent=None, subject_line=False):
     """The same Context both callers build, so a test cannot pass against a shape nothing ships.
 
-    This was a class of its own setting two of the five fields, which is exactly the duck-typing the
+    A stand-in class setting only the fields a test happened to need is exactly the duck-typing the
     real callers had — and a rule reading a field it did not set was inert here too, so no test could
-    have caught that.
+    have caught that. Every field the real `Context` has is passed through here.
     """
     from checks import Context
-    return Context(audience, situation, previous, mine, resent)
+    return Context(audience, situation, previous, mine, resent, subject_line)
 
 
 # --------------------------------------------------------------------- detection
@@ -1670,9 +1669,11 @@ def test_routing():
         got = D.extract(dest, "Bash", {"command": f'git commit -m "Subject line here" -m "{long}"'})
         check("both -m parts are joined", got.startswith("Subject line here"), True)
 
-        # Where the floor sits, from both sides. Every fixture above is far longer than 25 words, so the
-        # number said nothing about them: 25 to 10 puts a model call behind every one-line message, and
-        # tightening the comparison to `>` moves the boundary by one with nothing to notice.
+        # Extraction says what the call carries, and nothing about whether it is worth checking. A
+        # length test here made a twelve-word commit message — 80.8% of 4,282 real ones are that short
+        # — indistinguishable from a call carrying no prose at all: no block, no note, nothing
+        # recorded. What length decides is how much may be SPENT, which is
+        # `test_a_short_message_gets_the_checks_that_cost_nothing`.
         words = ("The exporter line went because nothing on a laptop reads that variable, and plans "
                  "had started failing in any shell older than an hour today, so access uses the "
                  "credential.").split()
@@ -1680,8 +1681,139 @@ def test_routing():
         def sent(n):
             return D.extract(chat, "mcp__ourchat__chat_send",
                              {"channel_id": "C1", "message": " ".join(words[:n])})
-        check("25 words is enough to be worth judging", bool(sent(25)), True)
-        check("and 24 is not", sent(24), None)
+        check("a message of any length is recovered", sent(12), " ".join(words[:12]))
+        check("but a field holding nothing is not a message", sent(0), None)
+
+
+def test_a_short_message_gets_the_checks_that_cost_nothing():
+    """A commit message shorter than the word floor produced no block, no note and no record.
+
+    Five real commits in one session went out in silence — and silence here is the one outcome
+    indistinguishable from a check that passed. The floor exists to protect model calls, and `terms`
+    and `mechanics` spend none, so length may decide what is PAID for and not what is read.
+
+    Measured on 4,282 commit messages from four repositories: 80.8% are under the floor, median 8
+    words. On the 2,719 short ones held out for scoring, the free checks say something about 0.55% —
+    3 mechanics findings and 12 terms findings — against about 2% for the two shipped mechanical
+    rules. See docs/thresholds.md.
+    """
+    import checks
+    from checks import costs_a_call
+
+    short, long = "Fix the CVE scan", PROSE
+    check("a short message is worth no more than the level that spends nothing",
+          [c.NAME for c in checks.for_effort(checks.capped("high", checks.worth_paying_for(short)))],
+          ["terms", "mechanics"])
+    check("and a long one caps nothing at all", checks.worth_paying_for(long), None)
+    # From both sides, because a floor pinned on one side moves by a word with nothing to notice.
+    words = ["word"] * checks.MIN_WORDS_FOR_A_CALL
+    check("the floor itself is worth paying for", checks.worth_paying_for(" ".join(words)), None)
+    check("and one word short of it is not",
+          checks.worth_paying_for(" ".join(words[:-1])), checks.free_level())
+    check("so the level asked for is what a long one runs",
+          [c.NAME for c in checks.for_effort("high") if costs_a_call(c)] != [], True)
+    # Named rather than filtered: `[c for c in ... if costs_a_call(c)] == []` is also true of a level
+    # that runs nothing at all, which is what `disabled` is.
+    check("nothing at the free level costs a call",
+          [c.NAME for c in checks.for_effort(checks.free_level()) if costs_a_call(c)], [])
+    check("and the free level is not an empty one",
+          [c.NAME for c in checks.for_effort(checks.free_level())], ["terms", "mechanics"])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
+        os.makedirs(home)
+        # The shipped commit destination, because that is the one this was reported on and the one
+        # whose messages are short by construction.
+        decision, said = run_guard({"tool_name": "Bash", "session_id": "short", "cwd": tmp,
+                                    "tool_input": {"command": 'git commit -m "Fix the the exporter"'}},
+                                   home, state)
+        check("a doubled word in a short commit message holds it back", decision, "deny")
+        check("and says which word", '"the the"' in said, True)
+
+        told = hook_reply({"tool_name": "Bash", "session_id": "clean", "cwd": tmp,
+                           "tool_input": {"command": 'git commit -m "Rename the exporter line"'}},
+                          env(home, state))
+        # The line to the person is the whole point: without it a checked message and an unchecked one
+        # look identical, which is what five silent commits looked like.
+        check("a clean short message still says it was checked",
+              (told or {}).get("systemMessage", "").startswith("prose-guard · low"), True)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
+        write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"])
+        write_destinations(home, chat_destination())
+        # `high` on a destination that caps nothing, with no checker on PATH: a model-backed check that
+        # is asked reports that it could not run, so whether one was ASKED is visible from outside.
+        def asked_a_model(message):
+            out = hook_reply({"tool_name": "mcp__ourchat__chat_send", "session_id": "m" + str(len(message)),
+                              "cwd": tmp, "tool_input": {"channel_id": "C1", "message": message}},
+                             {**env(home, state, "high"), "PATH": path_without_the_checker(tmp)})
+            return "not on PATH" in ((out or {}).get("systemMessage") or "")
+        check("a short message is never worth a model call", asked_a_model("Ship the exporter fix"),
+              False)
+        check("and a long one still is", asked_a_model(PROSE), True)
+
+
+def test_terms_reads_a_commit_body_and_mechanics_reads_all_of_it():
+    """A commit subject has nowhere to put an explanation, so a term found there is a demand nobody
+    can satisfy — the shape `previous` already exists for.
+
+    Measured on 3,425 held-out commit messages from four repositories: 95 of 193 terms findings were
+    carried by the subject alone, and scoring the body instead removes exactly those. On the messages
+    long enough to be checked before this, terms drops from 14.87% to 11.47%.
+
+    A doubled word in a subject is fixable where an unexplained term is not, so `mechanics` keeps
+    reading the whole message. Its rate on the same corpus is 0.18%.
+    """
+    import audiences
+    import destinations as D
+    from checks import mechanics, terms
+
+    known = audiences.Resolved([audiences.ALL["engineers"]])
+    dest = D.match("Bash", {"command": 'git commit -m "x"'})
+    check("the commit destination says its first line is a subject", dest.get("subject_line"), True)
+
+    def said(check_module, cmd):
+        text = D.extract(dest, "Bash", {"command": cmd}, os.getcwd())
+        ctx = Ctx(known, subject_line=bool(dest.get("subject_line")))
+        found = check_module.run(text, ctx)
+        return found.message if found else None
+
+    subject_only = 'git commit -m "Fix the ZZQ scan"'
+    with_body = ('git commit -m "Fix the scan" '
+                 '-m "The ZZQ scan had been failing since Tuesday, so the schedule now runs it once."')
+    check("a term in the subject alone is not asked about", said(terms, subject_only), None)
+    check("the same term in the body is", "ZZQ" in (said(terms, with_body) or ""), True)
+    check("and a doubled word in the subject still is",
+          said(mechanics, 'git commit -m "Fix the the scan"'), '"the the" — a word typed twice')
+    # Every other destination reads all of its text, so the subject rule cannot leak out of this one.
+    check("a destination that says nothing about a subject has its whole text read",
+          "ZZQ" in (terms.run("Fix the ZZQ scan", Ctx(known)) or "").message, True)
+
+
+def test_a_bundled_short_flag_still_carries_the_message():
+    """`git commit -am "…"` bundles the message flag into a cluster, so no word in the command equals
+    `-m` and a `text_arg` list naming `-m` finds nothing in it.
+
+    Measured over 25,866 distinct local commands: 53 pass a commit message this way, 14 of them long
+    enough to be worth a model call. Reading it belongs in the one place that reads a command as
+    flags, not in a longer `text_arg` list on every destination that has a short flag.
+    """
+    import command as C
+    import destinations as D
+
+    check("the last flag of a cluster is the one that takes the value",
+          [v for f, v in C.flag_values('git commit -am "Rename the exporter"') if f == "-m"],
+          ["Rename the exporter"])
+    # Only the last, because only the last can: `-a` takes no argument, and pairing the value with
+    # every letter would make `git commit -m "real" && find . -maxdepth 2` read "2" as part of the
+    # message.
+    check("and the ones in front of it are not given it",
+          [v for f, v in C.flag_values('git commit -am "Rename the exporter"') if f == "-a"], [])
+    dest = D.match("Bash", {"command": 'git commit -am "x"'})
+    check("so a bundled commit message is the message",
+          D.extract(dest, "Bash", {"command": 'git commit -am "Rename the exporter"'}, os.getcwd()),
+          "Rename the exporter")
 
 
 def test_gh_api_is_a_destination():
@@ -1818,6 +1950,39 @@ def test_every_body_a_command_carries_is_read():
             dest = D.match("Bash", {"command": cmd})
             got = D.extract(dest, "Bash", {"command": cmd}, tmp) or ""
             check(f"both bodies/{label}", ("rollout" in got, "payload" in got), (True, True))
+
+        # A value that is nothing but a substitution contributes nothing — checking the placeholder
+        # word would report the message as read when not a syllable of it was — and "nothing" has to
+        # mean nothing from THAT value, not the end of the extraction. Here `--body` is unresolvable
+        # and `--notes` carries the prose, and `--body` is the earlier of the two in `text_arg`.
+        cmd = f'gh pr create --body "${{SUMMARY}}" --notes "{second}"'
+        dest = D.match("Bash", {"command": cmd})
+        check("an unreadable value does not end the extraction",
+              "payload" in (D.extract(dest, "Bash", {"command": cmd}, tmp) or ""), True)
+
+
+def test_every_field_a_call_carries_is_read():
+    """The `text_fields` half of extraction answers the same question as the `text_arg` half, and has
+    to answer it the same way: every piece of prose the call carries, not one of them.
+
+    No shipped destination lists two fields a single call can both carry — `content` is a `Write` and
+    `new_string` is an `Edit` — so nothing here is observed in the wild. What it rules out is a
+    configured destination having half its prose read and the other half silently dropped, which from
+    outside is a message that passed.
+    """
+    with tempfile.TemporaryDirectory() as home:
+        write_destinations(home, {"name": "our tracker", "tool": ["issue_create"],
+                                  "text_fields": ["summary", "description"]})
+        _, D = fresh(home)
+        dest = D.find("our tracker")
+        both = {"summary": "The rollout is paused", "description": "The payload has to be rebuilt."}
+        got = D.extract(dest, "issue_create", both) or ""
+        check("both fields reach the checks", ("rollout" in got, "payload" in got), (True, True))
+        check("a call carrying only the later field is still read",
+              "payload" in (D.extract(dest, "issue_create",
+                                      {"description": both["description"]}) or ""), True)
+        check("and a call carrying neither is no message at all",
+              D.extract(dest, "issue_create", {"summary": "   "}), None)
 
 
 def test_prose_files_must_be_tracked():
@@ -2240,13 +2405,17 @@ def test_a_substitution_is_worked_out_where_that_is_safe():
             check("a git command that failed yields nothing rather than its empty output",
                   C.resolve("$(git log -1 --format=%B)", empty), None)
 
-        # Resolved and then too short to judge is not the same as unreadable, and saying "substitution"
-        # about it would send someone to fix a command that is working. Both leave no text to check.
+        # Resolved is resolved, however short the answer is. What comes back is the prose that is about
+        # to be published, and the free checks read it; only a model call is worth a length test, and
+        # that is decided by the level rather than here. Saying "substitution" about a command that
+        # worked would send someone to fix something that is not broken.
         dest = D.match("Bash", {"command": 'gh pr create --body "x"'})
         short = 'gh pr create --title "T" --body "$(git log -1 --format=%s)"'
         check("a short subject does resolve",
               (C.resolve("$(git log -1 --format=%s)", repo) or "").startswith("Rebuild"), True)
-        check("but is too short to judge", D.extract(dest, "Bash", {"command": short}, repo), None)
+        check("and it is what gets checked",
+              (D.extract(dest, "Bash", {"command": short}, repo) or "").strip(),
+              "Rebuild the SFTR payload")
         check("and that is not called a substitution",
               D.unreadable(dest, "Bash", {"command": short}, repo), None)
 
@@ -2260,8 +2429,10 @@ def test_prose_behind_a_substitution_still_reaches_the_checks():
             subprocess.run(["git", "-C", repo, *argv], capture_output=True, timeout=60)
         open(os.path.join(repo, "f"), "w").write("x")
         subprocess.run(["git", "-C", repo, "add", "f"], capture_output=True, timeout=60)
+        # A subject and a body, because a commit message is judged on its body: a subject line has
+        # nowhere to put an explanation. See test_terms_reads_a_commit_body_and_mechanics_reads_all_of_it.
         subprocess.run(["git", "-C", repo, "commit", "-q", "-m",
-                        "Rebuild the SFTR reconciliation payload\n\nThe JSON payload has to be rebuilt "
+                        "Rebuild the reconciliation payload\n\nThe SFTR JSON payload has to be rebuilt "
                         "before the API can serve it over HTTP again, which is why continuous "
                         "integration has been red since yesterday afternoon."],
                        capture_output=True, timeout=60)
@@ -2377,32 +2548,39 @@ def test_the_hook_surfaces_a_candidate_once():
 
 
 
-def test_what_a_claimed_call_yielded_is_four_answers_not_two():
-    """`extract` returns None both for a commit with no message and for one whose message it threw
-    away, and those are not the same fact about the tool.
+def test_what_a_claimed_call_yielded_is_three_answers_not_one():
+    """`extract` returns None both for a commit that carries no message and for a command this tool
+    cannot read, and those are not the same fact about the tool.
 
-    `measure/measure_silence.py --unique`, over 6,170 local transcripts: the `commit message`
-    destination claimed 978 calls and recovered nothing from 435 of them. 269 carried nothing it knows
-    how to read, which for `git commit --amend --no-edit` is correct; 166 had a message the MIN_WORDS
-    floor dropped. One of those numbers is the tool working and the other is the tool hiding a hole,
-    and from outside both were silence.
+    `measure/measure_silence.py --unique`, over 6,787 local transcripts: the `commit message`
+    destination claimed 995 calls and recovered nothing from 256 of them — 229 carrying nothing it
+    knows how to read, which for `git commit --amend --no-edit` is correct, and 27 where `unreadable`
+    had a sentence for the person. A destination that keeps landing in the first of those and never in
+    `checked` is a hole in what claims it, and from outside every one of them is silence.
     """
     with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as repo:
         _, D = fresh(home)
         for argv in (["init", "-q"], ["config", "user.email", "a@b.c"], ["config", "user.name", "t"]):
             subprocess.run(["git", "-C", repo, *argv], capture_output=True, timeout=60)
 
+        produced = []
+
         def outcome(cmd):
             dest = D.match("Bash", {"command": cmd})
-            return D.recovered(dest, "Bash", {"command": cmd}, repo)
+            got = D.recovered(dest, "Bash", {"command": cmd}, repo)
+            produced.append(got.outcome)
+            return got
 
         got = outcome(f'git commit -m "{PROSE}"')
         check("a message long enough to judge is checked", got.outcome, D.CHECKED)
         check("and the text comes back with it", got.text, PROSE)
 
+        # A short message is `checked` and not a fourth answer of its own. Length decides what is
+        # PAID for, which is `checks.worth_paying_for`, so there is nothing for an outcome to record:
+        # the message is read, the free checks run, and the person is told the level that ran.
         got = outcome('git commit -m "wip"')
-        check("a message the floor threw away says so", got.outcome, D.UNDER_FLOOR)
-        check("and there is no text to check", got.text, None)
+        check("a message too short for a model call is still checked", got.outcome, D.CHECKED)
+        check("and its text comes back to be read", got.text, "wip")
 
         got = outcome("git commit --amend --no-edit")
         check("an amend with no message found none", got.outcome, D.NO_TEXT)
@@ -2412,18 +2590,26 @@ def test_what_a_claimed_call_yielded_is_four_answers_not_two():
         check("and the sentence for the person comes back with it",
               "substitution" in (got.why or ""), True)
 
-        # Every outcome is one of the four the report knows how to print. Named, not filtered: a
+        # Every outcome is one of the three the report knows how to print. Named, not filtered: a
         # comprehension over the outcomes a loop happened to produce is true when it produced none.
         check("and those are all of them", sorted(D.OUTCOMES),
-              sorted([D.CHECKED, D.SAID, D.UNDER_FLOOR, D.NO_TEXT]))
+              sorted([D.CHECKED, D.SAID, D.NO_TEXT]))
+        # And every one of them is REACHABLE, from the cases above rather than from a list restating
+        # them. A declared outcome nothing can produce is a tally row that never fills, which reads
+        # from outside exactly like a destination with nothing to report — the failure this whole
+        # tally exists to make visible. Adding a fourth outcome with no call that reaches it makes
+        # this go red.
+        check("and each one is something a real call produces", sorted(set(produced)),
+              sorted(D.OUTCOMES))
 
 
 def test_a_destination_that_never_finds_the_text_reports_itself():
     """A claimed destination that matches and recovers nothing emits exactly what a clean pass emits.
 
-    An unclaimed shape is counted and eventually mentioned; a claimed one that never yields text was
-    counted nowhere, so `git commit -am "…"` — a form no shipped `text_arg` lists — went out unchecked
-    and unmentioned for as long as anybody used it, and the only way to notice was to go looking.
+    An unclaimed shape is counted and eventually mentioned; a claimed one that never yields text is
+    counted nowhere unless this counts it. A `text_arg` list that misses the flag somebody actually
+    passes is that shape — every call claimed, none read, nothing said about either — and the only way
+    to notice one is to go looking.
     """
     import destinations as D
     import discover as V
@@ -2449,8 +2635,8 @@ def test_a_destination_that_never_finds_the_text_reports_itself():
         check("systemMessage is a sibling of hookSpecificOutput, never a field inside it",
               "systemMessage" in (raw.get("hookSpecificOutput") or {}), False)
 
-        # The tally stays four separate numbers, because "no message on the command line" is the tool
-        # working and "a message the floor threw away" is not.
+        # The tally stays separate numbers, because "no message on the command line" is the tool
+        # working and "matched every call and read none" is not.
         was = os.environ["PROSE_GUARD_HOME"]
         os.environ["PROSE_GUARD_HOME"] = home    # the ledger the hook subprocess actually wrote
         try:
@@ -3416,9 +3602,11 @@ def test_words_already_there_are_not_words_you_wrote():
         with open(os.path.join(home, "config.json"), "w") as fh:
             json.dump({"effort": "low"}, fh)
 
-        body = ("Resolve the J1-vs-J4 disagreement raised in review, keeping the original wording "
-                "intact apart from the client name, so the published history stays comparable with "
-                "what everybody already read on the pull request last year.")
+        # A subject line and a body under it: terms are asked about the body, because a subject
+        # has nowhere to put an explanation.
+        body = ("Republish the review history\n\nResolve the J1-vs-J4 disagreement raised in "
+                "review, keeping the original wording intact apart from the client name, so the "
+                "published history stays comparable with what everybody read last year.")
         # Built rather than written out: a literal `git commit -m "...J1..."` in this file is a command
         # the guard reads, and it blocks its own test suite.
         commit = "git" + " commit"
@@ -3460,9 +3648,11 @@ def test_one_command_can_be_excused_but_not_a_session():
                        members=["a", "b", "c", "d"])
         with open(os.path.join(home, "config.json"), "w") as fh:
             json.dump({"effort": "low"}, fh)
-        body = ("Resolve the J1-vs-J4 disagreement raised in review, keeping the original wording "
-                "intact apart from the client name, so the published history stays comparable with "
-                "what everybody already read on the pull request last year.")
+        # A subject line and a body under it: terms are asked about the body, because a subject
+        # has nowhere to put an explanation.
+        body = ("Republish the review history\n\nResolve the J1-vs-J4 disagreement raised in "
+                "review, keeping the original wording intact apart from the client name, so the "
+                "published history stays comparable with what everybody read last year.")
         commit = "git" + " commit"
 
         def ask(command, session="skip"):
@@ -5450,12 +5640,16 @@ def test_you_are_told_when_a_message_was_checked_and_what_it_cost():
                        "inherits": ["engineers"], "members": ["a", "b", "c", "d"],
                        "vocabulary": {"PAYLOAD": 5}, "expansions": {}}, fh)
         env = {**os.environ, "PROSE_GUARD_HOME": home, "PROSE_GUARD_EFFORT": "low"}
+        # A subject and a body, the way git takes them: terms are asked about the body, because a
+        # subject line has nowhere to put an explanation.
+        subject = "Rebuild the reporting index"
         pad = (" so anyone rebuilding it later can tell which figures were used and why the whole "
                "index had to be rewritten before it could be signed off at all")
 
         def send(text):
             out = hook_reply({"session_id": "s", "tool_name": "Bash", "cwd": repo,
-                              "tool_input": {"command": f'git commit -m "{text}"'}}, env, 120) or {}
+                              "tool_input": {"command": f'git commit -m "{subject}" -m "{text}"'}},
+                             env, 120) or {}
             return out.get("permissionDecision", "allow"), out.get("systemMessage", "")
 
         first = send("Rebuild the SFTR index after the ADC migration" + pad)
@@ -5502,12 +5696,14 @@ def test_the_argument_before_a_message_goes_out_can_be_read_back():
                        "inherits": ["engineers"], "members": ["a", "b", "c", "d"],
                        "vocabulary": {"PAYLOAD": 5}, "expansions": {}}, fh)
         env = {**os.environ, "PROSE_GUARD_HOME": home, "PROSE_GUARD_EFFORT": "low"}
+        subject = "Rebuild the reporting index"
         pad = (" so anyone rebuilding it later can tell which figures were used and why the whole "
                "index had to be rewritten before it could be signed off at all")
 
         def send(text, session="s"):
             return hook_reply({"session_id": session, "tool_name": "Bash", "cwd": repo,
-                               "tool_input": {"command": f'git commit -m "{text}"'}}, env, 120) or {}
+                               "tool_input": {"command": f'git commit -m "{subject}" -m "{text}"'}},
+                              env, 120) or {}
 
         send("Rebuild the SFTR index after the ADC migration" + pad)
         send("Rebuild the SFTR index after the credential migration" + pad)
@@ -5606,10 +5802,14 @@ def test_the_free_checks_object_together_rather_than_one_turn_each():
                        "inherits": ["engineers"], "members": ["a", "b", "c", "d"],
                        "vocabulary": {"PAYLOAD": 5}, "expansions": {}}, fh)
         env = {**os.environ, "PROSE_GUARD_HOME": home, "PROSE_GUARD_EFFORT": "low"}
-        both = ("Rebuild the the SFTR index after the ADC migration so anyone rebuilding it later can "
+        # The doubled word in the subject and the terms in the body, which is where each of them is
+        # read: mechanics reads the whole message, terms reads the body.
+        subject = "Rebuild the the reporting index"
+        both = ("The SFTR index is rebuilt after the ADC migration so anyone rebuilding it later can "
                 "tell which figures were used and why the whole index had to be rewritten before sign off")
         out = hook_reply({"session_id": "b", "tool_name": "Bash", "cwd": repo,
-                          "tool_input": {"command": f'git commit -m "{both}"'}}, env, 120) or {}
+                          "tool_input": {"command": f'git commit -m "{subject}" -m "{both}"'}},
+                         env, 120) or {}
         said = out.get("permissionDecisionReason", "")
         check("it is held back once", out.get("permissionDecision"), "deny")
         check("and told about the terms", "SFTR" in said and "ADC" in said, True)

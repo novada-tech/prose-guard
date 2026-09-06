@@ -27,8 +27,6 @@ import subprocess
 # declaration, plus the `_origin` this module adds to say which layer it came from.
 Dest = dict[str, Any]
 
-# A short message is not the failure this catches, and is not worth a model call.
-MIN_WORDS = 25
 FILE_TOOLS = ("Write", "Edit", "NotebookEdit")
 
 # The fields whose value is a regular expression run against a command or a path.
@@ -269,7 +267,15 @@ def _from_bash(dest: Dest, cmd: str, cwd: str | None = None) -> str | None:
         # 64%. Refusing all of it threw away most of a message to avoid guessing at a fraction, and held
         # the call back for a defect nobody had looked for.
         seen, unseen = command.visible(joined)
-        found.append(seen if unseen and len(seen.split()) >= MIN_WORDS else joined)
+        if not unseen:
+            found.append(joined)
+            continue
+        # Nothing but substitution is nothing recovered, and saying so is what `unreadable` is for: a
+        # value that is only `$(...)` reduces to the one placeholder word, and checking that word would
+        # report the message as read when not a syllable of it was. So this value contributes nothing
+        # and the next `text_arg` still gets its turn.
+        if any(w != command.UNSEEN for w in seen.split()):
+            found.append(seen)
     return "\n\n".join(t for t in found if t.strip()) or None
 
 
@@ -303,49 +309,44 @@ def resulting(dest: Dest, tool: str, tool_input: dict[str, Any],
     return None, ""
 
 
-def _raw(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None = None) -> str | None:
-    """Everything the call carries as prose, before the length floor.
+def extract(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None = None) -> str | None:
+    """The prose about to leave, or None when the call carries none.
 
-    Split out of `extract` so that "recovered a message and threw it away as too short" stays a
-    different answer from "found nothing at all". Both are None from `extract` and both are silence
-    from outside, and only one of them is the tool working — see `recovered`.
+    Length is not asked about here. Whether a message is long enough to be worth a MODEL CALL is a
+    question about spending, and `checks.worth_paying_for` answers it as a level; asking it here
+    instead made a short message identical to a call carrying no prose at all — no block, no note,
+    nothing recorded, and 80.8% of 4,282 real commit messages are that short.
 
-    The longest thing found, so a short one is still reported rather than hidden by a later field that
-    is shorter still. `resulting` returns the whole document with the edit applied, which contains
-    `new_string`, so it wins whenever it exists.
+    `resulting` returns the whole document with the edit applied, which contains `new_string`, so it
+    wins whenever it exists. Otherwise every `text_fields` entry the call carries, joined — the same
+    rule `_from_bash` applies to every `text_arg`, so that both halves of this answer "which piece of
+    prose is the one to read" the same way, which is: all of them. No shipped destination lists two
+    fields a single call can both carry, so this is symmetry rather than a fix for anything observed;
+    what it rules out is a configured one quietly having half its prose read.
     """
     if tool == "Bash":
-        return _from_bash(dest, str(tool_input.get("command") or ""), cwd)
-    whole, _ = resulting(dest, tool, tool_input, cwd)
-    if whole:
-        return whole
-    found = None
-    for field in dest.get("text_fields") or ():
-        v = tool_input.get(field)
-        if isinstance(v, str) and v.strip():
-            if len(v.split()) >= MIN_WORDS:
-                return v
-            found = found or v
-    return found
+        text = _from_bash(dest, str(tool_input.get("command") or ""), cwd)
+    else:
+        whole, _ = resulting(dest, tool, tool_input, cwd)
+        if whole:
+            return whole
+        carried = []
+        for field in dest.get("text_fields") or ():
+            v = tool_input.get(field)
+            if isinstance(v, str) and v.strip():
+                carried.append(v)
+        text = "\n\n".join(carried)
+    return text if text and text.strip() else None
 
 
-def extract(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None = None) -> str | None:
-    """The prose about to leave, or None if there is not enough of it to judge."""
-    return recovered(dest, tool, tool_input, cwd).text
-
-
-# What came of a call a destination claimed. Four answers, and they have to stay four: a destination
-# that keeps matching and never yields a word is a defect in what claims it, while a `git commit
-# --amend --no-edit` that yields nothing is that commit carrying no message and is nothing to report.
-# Measured by `measure/measure_silence.py --unique` over 6,170 local transcripts: the `commit message`
-# destination recovered nothing from 435 of the 978 calls it claimed — 269 carrying nothing it knows how
-# to read and 166 a message the floor dropped — and nothing anywhere could tell those two apart.
-# `discover.record_outcome` counts these.
+# What came of a call a destination claimed. Three answers, and the split between the last two is the
+# whole point: a destination that keeps matching and never yields a word is a defect in what claims
+# it, while a `git commit --amend --no-edit` that yields nothing is that commit carrying no message
+# and is nothing to report. `discover.record_outcome` counts these.
 CHECKED = "checked"                # text was recovered and handed on
 SAID = "said something"            # no text, and `unreadable` had a sentence for the person
-UNDER_FLOOR = "under the floor"    # text was recovered and dropped as too short to judge
 NO_TEXT = "no text found"          # nothing in the call the destination knows how to read
-OUTCOMES = (CHECKED, SAID, UNDER_FLOOR, NO_TEXT)
+OUTCOMES = (CHECKED, SAID, NO_TEXT)
 
 
 class Recovered(NamedTuple):
@@ -359,20 +360,21 @@ def recovered(dest: Dest, tool: str, tool_input: dict[str, Any],
               cwd: str | None = None) -> Recovered:
     """The prose about to leave and what happened when it was looked for.
 
-    One call rather than `extract` then `unreadable`, because the pair leaves the third and fourth
-    answers unrepresented: whether a message was recovered and dropped under `MIN_WORDS` is knowable
-    only inside this module, and it is exactly the shape a hole in a `text_arg` hides behind.
+    One call rather than `extract` then `unreadable`, because a caller that asks the two separately
+    has to remember to ask the second one, and the answer it carries — a `text_arg` naming a file
+    that is not there, a command that cannot be read as words — is the answer a hole in a destination
+    hides behind.
 
     `unreadable` is asked after the extraction rather than instead of it, so `command.resolve` answers
     from the cache the extraction filled and no substitution is run twice.
     """
-    raw = _raw(dest, tool, tool_input, cwd)
-    if raw and len(raw.split()) >= MIN_WORDS:
-        return Recovered(raw, CHECKED, None)
+    text = extract(dest, tool, tool_input, cwd)
+    if text:
+        return Recovered(text, CHECKED, None)
     why = unreadable(dest, tool, tool_input, cwd)
     if why:
         return Recovered(None, SAID, why)
-    return Recovered(None, UNDER_FLOOR if raw and raw.strip() else NO_TEXT, None)
+    return Recovered(None, NO_TEXT, None)
 
 
 # Identifiers a destination declares with `true` because they come from the call itself rather than

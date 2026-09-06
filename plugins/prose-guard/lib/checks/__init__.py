@@ -11,7 +11,8 @@ moment; the Finding type and the two severities are in checks/finding.py, which 
 `for_effort(level)` gives the checks that level runs, in order: cheapest and most exact first, so a
 message with a plainly wrong term never reaches a model call. A destination may cap its own level:
 what the judgement checks ask — does this reader care, is the ask clear — presupposes a reader and an
-ask, and a commit message has neither.
+ask, and a commit message has neither. So may the text itself: `worth_paying_for` returns the level a
+message too short to be worth a model call is capped to, which is `free_level()`.
 
     low     terms and mechanics only. No model call.
     medium  those, then one advisory call over the remaining concerns.
@@ -47,8 +48,9 @@ from .placing import just_these, what_changed, written_here, wrote_which
 from .pooling import ceiling_for, costs_a_call, mode_of, pooled
 
 __all__ = ["ADVISE", "BLOCK", "EXACT", "POOLED", "VERDICT", "Check", "Context", "Finding", "capped",
-           "ceiling_for", "costs_a_call", "for_effort", "just_these", "mode_of", "pooled",
-           "stop_asking_after", "what_changed", "written_here", "wrote_which"]
+           "ceiling_for", "costs_a_call", "for_effort", "free_level", "just_these", "mode_of",
+           "pooled", "stop_asking_after", "what_changed", "worth_paying_for", "written_here",
+           "wrote_which"]
 
 
 # Each level is the one below it plus what it adds, so a level cannot lose a check the level below it
@@ -63,6 +65,31 @@ def _ladder(level: str) -> tuple[Check, ...]:
 
 def for_effort(level: str | None = None) -> tuple[Check, ...]:
     return _ladder(level or config.effort())
+
+
+# Below this many words, a model call is not worth making. It is a floor on SPENDING and not on
+# checking: `terms` and `mechanics` cost nothing, and they are what a short message needs. The number
+# and what it was measured against are in docs/thresholds.md.
+MIN_WORDS_FOR_A_CALL = 25
+
+
+def free_level() -> str:
+    """The most that can be run without spending a model call.
+
+    Derived from the modes the checks declare rather than named, so a paying check added to a level
+    moves this instead of quietly making a short message expensive.
+    """
+    return [lvl for lvl in config.LEVELS if not any(costs_a_call(c) for c in _ladder(lvl))][-1]
+
+
+def worth_paying_for(text: str) -> str | None:
+    """A ceiling this text puts on the effort, or None when its length puts none.
+
+    A ceiling rather than a filter, so that everything downstream — the line the person sees, the
+    envelope a held draft is recorded with — says the level that actually ran. `capped` is what
+    applies it, the same function a destination's own `max_effort` goes through.
+    """
+    return None if len(text.split()) >= MIN_WORDS_FOR_A_CALL else free_level()
 
 
 EFFORT = config.effort()

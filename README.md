@@ -82,8 +82,11 @@ The sixth, the one about the opening, advises at every level and says so in its 
 closing by tuning against the handful of fixtures long enough to measure it on. The scores and what
 would settle it are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-**Under 25 words nothing is checked at all.** A short message is not the failure this catches, and it is
-not worth a model call — so a one-line commit message is the wrong thing to test it with.
+**A short message is checked, but not paid for.** Below the word floor in
+[docs/thresholds.md](docs/thresholds.md) no model call is made, and the two deterministic checks still
+read every word — which is what a one-line commit message needs, since two thirds of commit messages are
+one line. So a short message is the wrong thing to test the model-based checks with, and the right thing
+to expect an unexplained acronym or a doubled word to be caught in.
 
 ## How it knows who is reading
 

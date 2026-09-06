@@ -116,8 +116,8 @@ arguments and git rejects them.
 What is held back is held back rather than mentioned, because advice was tried first and was not enough:
 the pull request that introduced the note went out unchecked while the note explained, afterwards, that
 it had. Bounded at two like every other denial, then said as advice, so a caller that cannot comply is
-not stuck. "Resolved but too short to judge" is silent — that is not a gap, and sending someone to
-fix a working command would be noise.
+not stuck. What resolves is checked, however short the answer turns out to be, so nothing is said about
+a command that worked — sending someone to fix one would be noise.
 
 A command carrying several messages is read to the end of them: a review body and its inline comments in
 one `--input`, two replies chained with `&&`, a subject and a body as two `-m` flags. Stopping at the
@@ -167,8 +167,9 @@ The point of printing it when there is nothing to say is what silence then means
 model and not to you, so before this the only outcome you ever saw was a block — and a check that had
 quietly stopped covering something looked exactly like a check with nothing to object to. Now the
 absence of that line means one thing: nothing was checked. That is how a gap becomes visible without
-reading a transcript, and it is worth knowing which gaps are deliberate: under 25 words, a `git commit`
-with no `-m`, and text the guard could not read and said so about.
+reading a transcript, and it is worth knowing which gaps are deliberate: a `git commit` with no `-m`,
+whose text goes to an editor and never reaches the tool call, and text the guard could not read and said
+so about. Length is not one of them — a short message is checked by everything that costs nothing.
 
 It costs the agent nothing. `systemMessage` never enters the conversation the model is paying for.
 
