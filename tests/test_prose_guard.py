@@ -2128,13 +2128,18 @@ def test_every_message_a_session_sends_gets_the_same_treatment():
         check("one check gets two denials, then it has to let the message go",
               seq[:3], [True, True, False])
 
-        # The escape hatch is named on the last denial a check gets and not before. Naming it in every
+        # The way out is named on the last denial a check gets and not before. Naming it in every
         # denial teaches the cheaper move before the correct one, and the correct one is almost always
         # to edit the text; an agent that has already tried twice is a different situation.
+        #
+        # WHICH way out depends on the kind of call, and this destination is an MCP tool, so the way
+        # out is that there is none — see
+        # test_the_escape_hatch_is_named_only_where_a_caller_can_reach_it. Only the timing is pinned
+        # here.
         denials = [why for verdict, why in said if verdict == "deny"]
-        check("the first denial does not mention the escape hatch",
-              "PROSE_GUARD_SKIP" in denials[0], False)
-        check("and the second one does", "PROSE_GUARD_SKIP" in denials[1], True)
+        way_out = "Editing the text is the only thing that clears this"
+        check("the first denial does not carry the way out", way_out in denials[0], False)
+        check("and the second one does", way_out in denials[1], True)
 
         # A check that denied has to pass on the NEXT text, not this one. Left marked as passed, the
         # second attempt at the same draft is skipped entirely — so an edit made for a later check is
@@ -3039,6 +3044,76 @@ def test_one_command_can_be_excused_but_not_a_session():
         verdict, said = ask(f'PROSE_GUARD_SKIP="reason number three for skipping" {commit} '
                             f'-m "{body}"', "many")
         check("repeated use is counted and surfaced", "3 skips" in said, True)
+
+
+def test_the_escape_hatch_is_named_only_where_a_caller_can_reach_it():
+    """`PROSE_GUARD_SKIP` is a shell assignment, and two of the three kinds of destination have no shell.
+
+    One fixed sentence used to go to all of them, so a subagent received "in front of the command" in
+    answer to a `Write`, where there is no command to put anything in front of. `skipped` reads the
+    reason only out of `tool_input["command"]`, so for a file destination and for every MCP destination
+    there is no escape hatch at all rather than a badly worded one — and a sentence naming a mechanism
+    the caller cannot reach costs a round trip and teaches a move that does not exist.
+
+    Read out of what a real run printed, on the second denial, which is the only one that carries it.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo = os.path.join(tmp, "home"), os.path.join(tmp, "repo")
+        os.makedirs(home)
+        os.makedirs(repo)
+        subprocess.run(["git", "-C", repo, "init", "-q"], capture_output=True, timeout=60)
+        subprocess.run(["git", "-C", repo, "remote", "add", "origin",
+                        "git@github.com:acme/widgets.git"], capture_output=True, timeout=60)
+        # One audience, matched three ways, because all three destinations have to resolve one before a
+        # finding can hold anything back. An unresolved audience only ever advises, and advice carries no
+        # hint — so a test that let the audience miss would be reading the sentence off nothing.
+        write_audience(home, "team", matches={"repos": ["acme/widgets"], "channels": ["C1"],
+                                              "paths": ["*"]},
+                       inherits=["engineers"], members=["a", "b", "c", "d"],
+                       vocabulary={"KUBECTL": 9})
+        write_destinations(home,
+                           cli_destination(identifiers={"cwd_repo": True}),
+                           chat_destination(),
+                           {"name": "prose file", "file": r"\.md$",
+                            "text_fields": ["content", "new_string"],
+                            "identifiers": {"path": "file_path", "cwd_repo": True}})
+        draft = "Draft still talks about GKE." + PAD
+
+        def second_denial(label, payload):
+            """The reason a real run printed on the last denial this check gets."""
+            state = os.path.join(tmp, "state-" + label)
+            seen = [run_guard(dict(payload, session_id=label), home, state) for _ in range(2)]
+            # Named rather than filtered: a case that reads the hint off whichever rounds happened to
+            # deny passes trivially when none of them does.
+            check(f"{label}: both rounds are denials, so there is a hint to read",
+                  [verdict for verdict, _ in seen], ["deny", "deny"])
+            return seen[1][1]
+
+        shell = second_denial("bash", {"tool_name": "Bash", "cwd": repo,
+                                       "tool_input": {"command": f'ourcli post --message "{draft}"'}})
+        tool = second_denial("tool", {"tool_name": "mcp__ourchat__chat_send", "cwd": repo,
+                                      "tool_input": {"channel_id": "C1", "message": draft}})
+        wrote = second_denial("file", {"tool_name": "Write", "cwd": repo,
+                                       "tool_input": {"file_path": os.path.join(repo, "NOTES.md"),
+                                                      "content": draft}})
+
+        check("a command is told where to put the assignment",
+              'PROSE_GUARD_SKIP="<why>" in front of the command excuses' in shell, True)
+        for label, said in (("an MCP call", tool), ("a file write", wrote)):
+            # The exact instruction, not the variable's name. The name is deliberately still said to
+            # these two — an agent that has read the skill or the reference already has it, and the
+            # sentence that rules it out is the only thing that answers "can I use it here".
+            check(f"{label} is not told to put an assignment in front of a command",
+                  "in front of the command excuses" in said, False)
+            check(f"{label} is told what does clear it instead",
+                  "Editing the text is the only thing that clears this" in said, True)
+            # And the move that follows from believing the shell sentence — write the same text out
+            # through `bash` so there IS a command — is closed in the same breath.
+            check(f"{label} is told that routing it through a shell is not the way round",
+                  "looking checked" in said, True)
+        # The lasting fix is the half that applies to every kind, so it is said to all three.
+        check("and all three are pointed at the fix that lasts",
+              ["/prose-guard:audiences" in s for s in (shell, tool, wrote)], [True, True, True])
 
 
 def test_a_check_runs_more_than_once_and_the_runs_are_pooled():

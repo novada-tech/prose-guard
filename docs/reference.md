@@ -322,6 +322,14 @@ somebody reads later, which is a different act from flipping a switch. `PROSE_GU
 Each use is echoed back, counted, and after the third the tool points at `/prose-guard:audiences`, which
 is the fix that lasts when the check is wrong about a term in general.
 
+**A command is the only thing it can excuse.** It is read where the shell reads it — an assignment in
+front of the command — so a destination reached by a tool call rather than by a command has no escape
+hatch: a `Write`, an `Edit`, and every MCP destination. Those are told so on the denial that would
+otherwise offer it, because editing the text is what clears a finding there and
+`/prose-guard:audiences` is what settles the term for good. Writing the same text out through `bash`
+so that there is a command to put an assignment in front of is prose going out looking checked, which
+is the failure this tool exists to prevent.
+
 ## One message, two audiences
 
 Audiences overlap, and a channel can hold two of them. Combining is one operation per dimension:

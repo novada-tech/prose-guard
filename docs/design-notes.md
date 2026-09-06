@@ -445,6 +445,10 @@ how the cases are known to be load-bearing:
   inside the paragraph an edit rewrites is suppressed as already-said — a defect the edit owns, allowed
   in silence. The first version of its test did not catch this, because it only ever showed one
   complaint staying somebody else's; what pins it is the one that MOVES
+- the escape hatch decided from something other than the field `skipped` reads. Three mutations, all
+  red: the predicate inverted (8 cases), one fixed shell sentence for every kind of call, which is the
+  defect itself (7 cases), and the way out named on every denial rather than only the last (1 case,
+  the one that pins the timing)
 
 One survivor, recorded rather than claimed equivalent: marking not-mine findings from `found` instead
 of from what `one_message` actually showed. The two differ only when the turn's budget drops a finding,
