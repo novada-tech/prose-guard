@@ -2441,8 +2441,8 @@ def test_a_session_stops_paying_for_model_checks_once_its_budget_is_spent():
                                        "PATH": path_without_the_checker(tmp)})
             return "not on PATH" in ((out or {}).get("systemMessage") or "")
 
-        # The budget is `budget_for(text, paying)` — a share each, so at `high` on a short message it is
-        # about 36 rather than 20. The numbers here straddle it; hard-coding 20 was sized for `medium`,
+        # The budget is `budget_for(ceiling, paying)` — a share each, so at `high` on a short message it
+        # is about 36 rather than 20. The numbers here straddle it; hard-coding 20 was sized for `medium`,
         # where one paying check made the budget 6.
         check("part way into the budget, the next check is still asked", asked_after(5), True)
         check("and once it is spent it is not", asked_after(90), False)
@@ -5142,7 +5142,7 @@ def test_a_long_document_cannot_spend_the_whole_session_on_its_first_check():
                                                                       "outgoing_guard.py"))
     budgeting = _iu.module_from_spec(spec)
     spec.loader.exec_module(budgeting)
-    whole = budgeting.budget_for(text, 2)
+    whole = budgeting.budget_for(checks_module.ceiling_for(text), 2)
     check("the first check does not spend the whole budget", running[0].asked < whole, True)
     check("so the second concern is checked too", running[1].asked > 0, True)
     check("and neither is starved", min(running[0].asked, running[1].asked) > 1, True)
@@ -5472,7 +5472,8 @@ def test_a_long_document_gets_more_calls_than_a_short_message():
 
     def runs_each(words, paying=6):
         text = "word " * words
-        return min(ceiling_for(text), max(1, guard.budget_for(text, paying) // paying))
+        ceiling = ceiling_for(text)
+        return min(ceiling, max(1, guard.budget_for(ceiling, paying) // paying))
 
     short, medium, long_ = runs_each(200), runs_each(1200), runs_each(5000)
     check("a longer document gets more runs a check", short < medium < long_, True)
@@ -5480,7 +5481,303 @@ def test_a_long_document_gets_more_calls_than_a_short_message():
     check("nothing exceeds the per-check ceiling",
           [w for w in (200, 1200, 5000) if runs_each(w) > ceiling_for("word " * w)], [])
     check("and the whole thing is still bounded",
-          guard.budget_for("word " * 100000, 6) <= guard.MOST_CALLS, True)
+          guard.budget_for(ceiling_for("word " * 100000), 6) <= guard.MOST_CALLS, True)
+
+
+def _stub_run(guard, running, payload):
+    """Run the hook in this process against stub checks, and return what it printed.
+
+    No model and no subprocess. The question asked is the orchestration's — how much may one check
+    spend — rather than what a model makes of the prose.
+    """
+    import contextlib
+    import io
+
+    import checks as checks_module
+
+    stdin, for_effort = sys.stdin, checks_module.for_effort
+    out = io.StringIO()
+    sys.stdin = io.StringIO(json.dumps(payload))
+    try:
+        checks_module.for_effort = lambda level=None: running
+        guard.CHECKS = running
+        with contextlib.redirect_stdout(out):
+            guard.main()
+    except SystemExit:
+        pass
+    finally:
+        sys.stdin, checks_module.for_effort = stdin, for_effort
+    return out.getvalue()
+
+
+def _ever(checks_module, name):
+    """A check that never stops finding something new and never repeats itself.
+
+    The worst case for a budget, and the only shape whose ceiling can be observed at all: a check that
+    runs dry stops on its own, so a stub that ever passes measures the stop rule instead of the bound.
+    """
+    import itertools
+
+    class Ever:
+        MODE = checks_module.POOLED
+
+        def __init__(self, name):
+            self.NAME, self._n, self.asked = name, itertools.count(), 0
+
+        def run(self, text, ctx):
+            self.asked += 1
+            return checks_module.Finding(
+                checks_module.BLOCK, f'The "{self.NAME} complaint {next(self._n)}" is unclear')
+
+    return Ever(name)
+
+
+def test_editing_one_sentence_of_a_long_document_is_priced_as_one_sentence():
+    """The cost was proportional to the file and not to the change.
+
+    A one-word edit to a 2,000-word document was budgeted what writing all 2,000 words is budgeted, and
+    `all_at_once` handed each check the whole document's ceiling — runs that are sequential inside one
+    check, which is what the wall clock follows. `ctx.mine` already says which sentences this call wrote
+    and already decides which findings may hold it back, so the span was there and nothing priced it.
+
+    Driven through the hook with a real Edit payload. The arithmetic re-implemented in a test is what
+    left the real call site free before, and both bounds here cost a model call to reach, so neither is
+    visible from outside without one.
+
+    What does NOT change is what the checks are asked to read: the whole document, either way. Every
+    check except `mechanics` is comparative, so a smaller window lowers the bar for what counts as
+    worst rather than sharpening it — `docs/design-notes.md` records paragraph-at-a-time finding no more
+    at nine times the calls. Only the budget follows the change.
+    """
+    import checks as checks_module
+    from checks import ceiling_for
+
+    guard = load_guard("outgoing_guard_for_edit_budget")
+
+    body = " ".join(f"Sentence number {n} about the resolver and what it does." for n in range(200))
+    replaced = "The shared file store is mounted on every host in this cluster."
+    one_word = "The shared file store is mounted on every box in this cluster."
+    document = body + " " + replaced
+    after = body + " " + one_word
+
+    with tempfile.TemporaryDirectory() as tmp:
+        was = {k: os.environ.get(k) for k in ("PROSE_GUARD_HOME", "PROSE_GUARD_STATE")}
+        os.environ["PROSE_GUARD_STATE"] = os.path.join(tmp, "state")
+        home = os.path.join(tmp, "home")
+        os.makedirs(home)
+        # A file destination of its own rather than the shipped one, so this test does not also depend
+        # on `require_tracked` and a git working tree. `new_string` is what makes it an edit.
+        write_destinations(home, {"name": "a document", "file": r"\.md$",
+                                  "text_fields": ["content", "new_string"],
+                                  "identifiers": {"path": "file_path"}})
+        fresh(home)
+        path = os.path.join(tmp, "notes.md")
+        with open(path, "w") as fh:
+            fh.write(document + "\n")
+
+        def asked_for(session, tool, tool_input):
+            # Three paying checks and only two of them able to block, which is the shape `high` has:
+            # the advisory phase is not asked until something holds the message. It matters here
+            # because it makes the share each check gets in `all_at_once` LARGER than the ceiling, so
+            # the two are separately visible. With as many blockers as payers they are equal by
+            # construction, and either one following the file again is hidden by the other.
+            blocking = [_ever(checks_module, "first"), _ever(checks_module, "second")]
+            advisory = _ever(checks_module, "third")
+            advisory.ADVISES = True
+            _stub_run(guard, blocking + [advisory],
+                      {"tool_name": tool, "session_id": session, "cwd": tmp,
+                       "tool_input": tool_input})
+            return [c.asked for c in blocking]
+
+        try:
+            edited = asked_for("one-line-edit", "Edit",
+                               {"file_path": path, "old_string": replaced, "new_string": one_word})
+            written = asked_for("whole-write", "Write", {"file_path": path, "content": document})
+        finally:
+            for key, value in was.items():
+                os.environ.pop(key, None) if value is None else os.environ.update({key: value})
+
+    # Without this the case is vacuous: on a document short enough to sit on the base ceiling, both
+    # numbers below are the same and the test passes whatever the hook does with the span.
+    check("the document is long enough for its ceiling to be above the base",
+          ceiling_for(document) > ceiling_for(one_word), True)
+    check("an edit is asked what the sentence it changed is worth",
+          edited, [ceiling_for(one_word)] * 2)
+    # The floor, and the reason it is on the ceiling rather than on the runs: a check allowed one run
+    # can never be observed to run dry, so a one-word edit would stop being checked at all.
+    check("which is more than one run each, at the smallest edit there is", min(edited) > 1, True)
+    check("and writing the document whole still buys the whole document's care",
+          written, [ceiling_for(document)] * 2)
+
+
+def test_a_check_the_budget_stopped_says_so():
+    """A paying check dropped for want of budget recorded a pass and said nothing to anybody.
+
+    That is the shape this tool's own header warns about: every failure path allows the call, so a
+    check that did not run reads exactly like a check with nothing to say. It matters more now the
+    budget follows the change rather than the file, because a smaller budget is reached sooner.
+
+    Driven on an edit, because the notice names the allowance and that is the one place the allowance
+    itself is readable from outside. Within a single round it cannot be read any other way: the budget
+    is the per-check ceiling times the checks that pay, divided again by the checks being asked, so
+    every check gets its full ceiling whether the budget was sized on the sentence or on the file. What
+    the size decides is how long an argument over one message may go on.
+    """
+    import checks as checks_module
+    import telling
+    from checks import ceiling_for
+
+    guard = load_guard("outgoing_guard_for_budget_notice")
+
+    body = " ".join(f"Sentence number {n} about the resolver and what it does." for n in range(200))
+    replaced = "The shared file store is mounted on every host in this cluster."
+    one_word = "The shared file store is mounted on every box in this cluster."
+    document = body + " " + replaced
+    # Two that can block and one that only advises, so `paying` is three: the same shape `high` has.
+    blocking = ["first", "second"]
+    for_the_sentence = guard.budget_for(ceiling_for(one_word), 3)
+    for_the_file = guard.budget_for(ceiling_for(document), 3)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        was = {k: os.environ.get(k) for k in ("PROSE_GUARD_HOME", "PROSE_GUARD_STATE")}
+        os.environ["PROSE_GUARD_STATE"] = os.path.join(tmp, "state")
+        home = os.path.join(tmp, "home")
+        os.makedirs(home)
+        write_destinations(home, {"name": "a document", "file": r"\.md$",
+                                  "text_fields": ["content", "new_string"],
+                                  "identifiers": {"path": "file_path"}})
+        fresh(home)
+        path = os.path.join(tmp, "notes.md")
+        with open(path, "w") as fh:
+            fh.write(document + "\n")
+        # A message this session has already spent its whole allowance arguing about.
+        os.makedirs(os.path.join(tmp, "state", "sessions"))
+        with open(os.path.join(tmp, "state", "sessions", "spent.json"), "w") as fh:
+            json.dump({"verdicts": {}, "denials": {}, "calls": 10 ** 6, "advised": []}, fh)
+        running = [_ever(checks_module, name) for name in blocking]
+        advisory = _ever(checks_module, "third")
+        advisory.ADVISES = True
+        telling.ran_everything()
+        try:
+            printed = _stub_run(guard, running + [advisory], {
+                "tool_name": "Edit", "session_id": "spent", "cwd": tmp,
+                "tool_input": {"file_path": path, "old_string": replaced, "new_string": one_word}})
+        finally:
+            telling.ran_everything()
+            for key, value in was.items():
+                os.environ.pop(key, None) if value is None else os.environ.update({key: value})
+
+    check("a spent budget asks nothing", [c.asked for c in running], [0, 0])
+    said = _hook_fields(printed)
+    # Vacuity guard: on a document whose ceiling sits on the base these two are the same number.
+    check("the two allowances are different numbers at all", for_the_sentence < for_the_file, True)
+    check("and the one named is what the sentence this edit changed is worth",
+          [f"{for_the_sentence} model calls" in said["systemMessage"],
+           f"{for_the_file} model calls" in said["systemMessage"]], [True, False])
+    # Read from the top level and from nowhere else. `systemMessage` is a sibling of
+    # hookSpecificOutput, and nested it is well-formed JSON that Claude Code discards.
+    for name in ("first", "second"):
+        check(f"and the person is told the {name} check was not asked",
+              name in said["systemMessage"], True)
+    check("beside the word that says it did not run rather than that it passed",
+          "not asked" in said["systemMessage"], True)
+    # One sentence for the whole message, not one per check: said per check, six checks at `high` spent
+    # six lines of somebody's terminal restating the same fact.
+    check("and said once, not once per check",
+          said["systemMessage"].count("not asked"), 1)
+    check("and nowhere the model would read it instead",
+          "first" in str(said.get("additionalContext") or ""), False)
+
+
+def test_one_hook_cannot_run_for_three_quarters_of_an_hour():
+    """One model call was bounded and the sequence of them was not.
+
+    `MOST_CALLS` calls at `MOST_AT_ONCE` at a time, each allowed `LONGEST_CALL`, is
+    `MOST_CALLS // MOST_AT_ONCE` rounds — three quarters of an hour inside one PreToolUse hook, with
+    nothing shown while it runs and no way to interrupt the hook on its own.
+
+    The bound has to be said and not swallowed: a deadline that quietly dropped the remaining checks
+    would be a check answering "fine" without looking, which is the one failure this tool cannot have.
+    """
+    import telling
+    from checks import ask
+
+    guard = load_guard("outgoing_guard_for_deadline")
+
+    check("the bound bounds something",
+          ask.MOST_SECONDS < (guard.MOST_CALLS // guard.MOST_AT_ONCE) * ask.LONGEST_CALL, True)
+    check("and leaves room for a call to finish", ask.MOST_SECONDS >= ask.LONGEST_CALL, True)
+
+    class Reply:
+        stdout = '{"result": "PASS"}'
+
+    class Watching:
+        """Stands in for the subprocess module, so what timeout a call was given is readable and no
+        `claude` is ever started. It answers a pass, because a stub that raised would be recorded as a
+        check that could not run and the notice this test reads would say so for the wrong reason."""
+
+        TimeoutExpired = ask.subprocess.TimeoutExpired
+
+        def __init__(self):
+            self.timeouts = []
+
+        def run(self, *a, **kw):
+            self.timeouts.append(kw.get("timeout"))
+            return Reply()
+
+    watching = Watching()
+    real = ask.subprocess
+    telling.ran_everything()
+    try:
+        ask.subprocess = watching
+        ask.stop_asking_after(None)
+        ask.ask("relevance", "a prompt", "some text")
+        check("with no deadline a call gets the whole per-call timeout",
+              watching.timeouts, [ask.LONGEST_CALL])
+
+        ask.stop_asking_after(5)
+        ask.ask("structure", "a prompt", "some text")
+        check("under a deadline it gets whatever is left of it",
+              0 < watching.timeouts[-1] <= 5, True)
+
+        ask.stop_asking_after(0)
+        spent = ask.ask("sentence", "a prompt", "some text")
+        check("and past it nothing is started at all", len(watching.timeouts), 2)
+        check("the check passes, because a writing check must never hold up work", spent, (True, ""))
+        recorded = " ".join(telling.never_ran())
+        check("and says which check it was", "sentence" in recorded, True)
+        check("and that the hook ran out of its allowance rather than that the text was fine",
+              [f"{ask.MOST_SECONDS}s" in recorded, "ran out" in recorded], [True, True])
+        check("while the two that did run are not reported as missing",
+              ["relevance" in recorded, "structure" in recorded], [False, False])
+    finally:
+        ask.subprocess = real
+        ask.stop_asking_after(None)
+        telling.ran_everything()
+
+    # And the hook is what sets it. Everything above is true of a module nobody arms, which is the
+    # shape a bound like this fails in: the allowance is correct, nothing switches it on, and the
+    # 45 minutes are still there.
+    import checks as checks_module
+
+    with tempfile.TemporaryDirectory() as tmp:
+        was = {k: os.environ.get(k) for k in ("PROSE_GUARD_HOME", "PROSE_GUARD_STATE")}
+        os.environ["PROSE_GUARD_STATE"] = os.path.join(tmp, "state")
+        home = os.path.join(tmp, "home")
+        os.makedirs(home)
+        write_destinations(home, chat_destination())
+        fresh(home)
+        check("no allowance until something sets one", ask.seconds_left(), None)
+        try:
+            _stub_run(guard, [_ever(checks_module, "first")], {
+                "tool_name": "mcp__ourchat__chat_send", "session_id": "armed", "cwd": tmp,
+                "tool_input": {"channel_id": "C1", "message": PROSE + PAD}})
+            left = ask.seconds_left()
+        finally:
+            ask.stop_asking_after(None)
+            for key, value in was.items():
+                os.environ.pop(key, None) if value is None else os.environ.update({key: value})
+    check("and a hook run arms one", left is not None and 0 < left <= ask.MOST_SECONDS, True)
 
 
 def test_a_term_can_be_taken_out_of_a_vocabulary_as_well_as_put_in():

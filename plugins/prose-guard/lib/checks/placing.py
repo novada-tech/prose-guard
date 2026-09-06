@@ -158,3 +158,20 @@ def what_changed(before: str, after: str) -> str:
     start = after.rfind(" ", 0, head) + 1
     space = after.find(" ", len(after) - tail)
     return after[start:space if space >= 0 else len(after)]
+def just_these(text: str, which: set[int] | None) -> str:
+    """The sentences of `text` that `which` names, or the whole of it when `which` is None.
+
+    The other direction from `wrote_which`, and here because it is the same sentence numbering: a
+    caller that has been told which sentences a call wrote is the caller that then has to price them.
+    None means the whole text, exactly as it does everywhere else `mine` is read, so a message and a
+    whole-file write come back unchanged.
+
+    Sentences the call did not write are dropped rather than blanked, so what comes back is shorter
+    than the document by however much of it was already there. That is the whole point: it is a
+    length, for pricing, and never the text a check is asked to read — the checks read the document,
+    because a smaller window lowers a comparative check's bar instead of sharpening it.
+    """
+    whole = " ".join(text.split())
+    if which is None:
+        return whole
+    return " ".join(s for n, s in enumerate(SENTENCE_END.split(whole)) if n in which)

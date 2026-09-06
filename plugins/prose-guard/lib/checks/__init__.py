@@ -28,25 +28,27 @@ writes `from .pooling import pooled`, and both get the same function.
     finding.py    what a check returns, the three modes it can run in, and `Check` — the three
                   lines above, stated as a type so a caller can name what it is being passed
     context.py    what a check is told about the reader and the moment
-    placing.py    where in the text a finding points, whether this call wrote it, and what a
-                  resend of it changed
+    placing.py    where in the text a finding points, whether this call wrote it, what a resend of
+                  it changed, and the text of the sentences it did
     pooling.py    what one run costs, and running a check until it stops yielding
     config.py     how much checking was asked for, and comparing two levels
     model.py      the one way a model-backed check asks its question
+    ask.py        the model call itself, and the two clocks bounding it
     sequence.py   the separate concerns `high` runs, one per prompt file
 """
 from __future__ import annotations
 
 from . import config, judgement, mechanics, sequence, terms
+from .ask import stop_asking_after
 from .config import capped
 from .context import Context
 from .finding import ADVISE, BLOCK, EXACT, POOLED, VERDICT, Check, Finding
-from .placing import what_changed, written_here, wrote_which
+from .placing import just_these, what_changed, written_here, wrote_which
 from .pooling import ceiling_for, costs_a_call, mode_of, pooled
 
 __all__ = ["ADVISE", "BLOCK", "EXACT", "POOLED", "VERDICT", "Check", "Context", "Finding", "capped",
-           "ceiling_for", "costs_a_call", "for_effort", "mode_of", "pooled", "what_changed",
-           "written_here", "wrote_which"]
+           "ceiling_for", "costs_a_call", "for_effort", "just_these", "mode_of", "pooled",
+           "stop_asking_after", "what_changed", "written_here", "wrote_which"]
 
 
 # Each level is the one below it plus what it adds, so a level cannot lose a check the level below it
