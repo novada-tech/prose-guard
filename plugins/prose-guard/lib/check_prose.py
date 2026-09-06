@@ -58,6 +58,11 @@ if TYPE_CHECKING:
 
 
 def context_for(audience: Resolved, who: str | None = None) -> Context:
+    """What a deliberate run tells the checks. Everything else Context declares takes its default.
+
+    Nothing is being sent, so there is no version being replaced and no draft the guard has refused:
+    `previous`, `mine` and `resent` all mean "nothing known" here, which is what they default to.
+    """
     situation = {"destination": "a draft being checked before it is sent anywhere"}
     if who:
         situation["who the author says reads this"] = who

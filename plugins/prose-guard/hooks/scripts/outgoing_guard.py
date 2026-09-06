@@ -41,7 +41,7 @@ import discover  # noqa: E402
 import telling  # noqa: E402
 import checks as checks_module  # noqa: E402
 from checks import (BLOCK, EFFORT, IN_ORDER as CHECKS, Context, ceiling_for,  # noqa: E402
-                    costs_a_call, pooled, written_here, wrote_which)
+                    costs_a_call, pooled, what_changed, written_here, wrote_which)
 
 if TYPE_CHECKING:
     from audiences import Resolved
@@ -79,12 +79,19 @@ MOST_CALLS = 90        # the absolute ceiling, so a runaway cannot happen
 MAX_UNREADABLE = 2     # times a session is asked to make its text visible before it is let through
 
 
-def context_for(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None) -> Context:
+def context_for(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | None,
+                text: str = "", held: str = "") -> Context:
     """What the checks are told. Assembled once, read-only, and never inferred from the prose.
 
     The type is checks.Context, shared with check_prose.py. Two classes of the same name used to set
     different fields — five here and two there — so a rule reading one of them through `getattr` was
     silently inert in the deliberate path, and nothing said so.
+
+    `held` is the draft this session was last refused, from lib/rounds.py, and it goes nowhere near
+    `previous`. `terms` subtracts every term `previous` contains, so pointing that at the draft the
+    guard has just refused would make the guard forget the term it refused over and let the second
+    attempt through. `previous` is the file on disk or the commit being amended — a version somebody
+    else may have written — and the held draft is this writer's own last try.
     """
     ids = destinations.identifiers(dest, tool, tool_input, cwd)
     situation = destinations.situation(dest, tool, tool_input)
@@ -98,7 +105,12 @@ def context_for(dest: Dest, tool: str, tool_input: dict[str, Any], cwd: str | No
         # message introduces, and holding a message back over words somebody else wrote is a demand
         # nobody can satisfy.
         previous=destinations.previous(dest, tool, tool_input, cwd),
-        mine=wrote_which(whole, fresh) if whole else None)
+        mine=wrote_which(whole, fresh) if whole else None,
+        # Which sentences this send changed from the draft that was held. Every destination gets this,
+        # including the ones with no file behind them: a `gh pr create --body-file` sent again after a
+        # hold is the case it exists for, and it is where the whole document was being read out a
+        # second time.
+        resent=wrote_which(text, what_changed(held, text)) if text else None)
     # A destination can say the readers are better informed than the audience assumes, e.g. a direct
     # message inside a channel-wide audience. Never the other way round.
     override = ctx.situation.pop("_shared_context", None)
@@ -488,7 +500,7 @@ def all_at_once(checks: list[Check], text: str, ctx: Context | None,
 
 
 def other_concerns(running: list[Check], answers: dict[str, tuple], blocking: str,
-                   mine: Callable[[Finding], bool], room: int) -> list[str]:
+                   carry: Callable[[Finding], bool], room: int) -> list[str]:
     """What the checks that are NOT holding this message back found, for the same interruption.
 
     Available only because the checks are asked together: walking them one at a time and stopping at the
@@ -496,17 +508,18 @@ def other_concerns(running: list[Check], answers: dict[str, tuple], blocking: st
     and every round re-ran every check, because the text had changed and a pass belongs to the text that
     earned it. Handing all of it over at once is what collapses those rounds into one.
 
-    Bounded by `room`, and only about text this call wrote: a concern about a paragraph the edit never
-    touched is not something the writer of this edit can act on.
+    Bounded by `room`, and `carry` decides what is worth handing over at all. Nothing in here is holding
+    the message back, so nothing in here is lost by leaving it out: a concern that still matters is said
+    again in the round its own check is the one blocking.
     """
     out: list[str] = []
     for check in running:
         if check.NAME == blocking or check.NAME not in answers:
             continue
-        found = [f for f in answers[check.NAME][0] if mine(f)]
+        found = [f for f in answers[check.NAME][0] if carry(f)]
         if not found:
             continue
-        said, _ = one_message(found, mine, room - sum(len(o) for o in out))
+        said, _ = one_message(found, carry, room - sum(len(o) for o in out))
         if said:
             out.append(f"({check.NAME}) {said}")
     return out
@@ -681,7 +694,6 @@ def main() -> None:
         allow()
 
     digest = hashlib.sha1(text.encode()).hexdigest()[:16]
-    ctx = context_for(dest, tool, tool_input, cwd)
     # What a caller can do when editing is not available to it. One call, so one sentence: worked out
     # here rather than at each denial, and read from the call rather than from the destination.
     hatch = hatch_for(tool_input)
@@ -692,6 +704,9 @@ def main() -> None:
     # else here does, and the rule that makes that acceptable is that it only ever runs on the path
     # below, where a check has actually held something back. See lib/rounds.py.
     session = str(payload.get("session_id") or "no-session")
+    # The same record is what says which sentences this send changed, so a resend is not read out the
+    # whole of its own message a second time. Empty for a message nothing has objected to.
+    ctx = context_for(dest, tool, tool_input, cwd, text, rounds.last_draft(session))
 
     def envelope() -> dict[str, Any]:
         """Everything the checks were told before they read a word.
@@ -759,6 +774,23 @@ def main() -> None:
         """Whether this finding is about text this call wrote."""
         return written_here(text, f, ctx.mine)
 
+    def rides_along(f: Finding) -> bool:
+        """Whether this finding is worth handing over beside somebody else's denial.
+
+        This call's work, and something this send changed. The second half only ever narrows a resend:
+        on a first send there is no held draft, so `ctx.resent` is None and every sentence qualifies.
+
+        A resend has already been handed the whole of this list once, about a message whose writer has
+        since read it and changed one clause. Repeating the rest is up to MOST_TO_SAY // 2 characters
+        of an interruption spent on sentences they have decided about, and it is not what is holding
+        the message back either time.
+
+        Deliberately not the test for what MAY hold a message back, which stays `mine`: the writer of
+        a resend wrote every sentence of it, so scoping that to what changed would let a defect they
+        chose to leave go out with nothing said.
+        """
+        return mine(f) and written_here(text, f, ctx.resent)
+
     def worth_asking_now(blocking: str) -> list[str]:
         """Ask whatever was waiting, now that something is holding the message, and hand it all over.
 
@@ -771,7 +803,7 @@ def main() -> None:
             for asked in waiting:
                 state["calls"] += answers.get(asked.NAME, ([], [], 0))[2]
             waiting.clear()
-        return other_concerns(running, answers, blocking, mine, MOST_TO_SAY // 2)
+        return other_concerns(running, answers, blocking, rides_along, MOST_TO_SAY // 2)
     for check in running:
         remembered = state["verdicts"].get(check.NAME) or {}
         if remembered.get("digest") == digest:

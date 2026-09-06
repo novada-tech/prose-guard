@@ -110,6 +110,9 @@ def wrote_which(text: str, fragment: str) -> set[int] | None:
     An edit into the middle of a document must be judged in the document — a list's purpose is stated in
     its first paragraph, and a hunk cannot see that. But a complaint about a sentence the edit never
     touched is not this edit's fault, so the caller needs to know which sentences it wrote.
+
+    The same shape answers "which sentences did this send change", from the fragment `what_changed`
+    returns. Two questions, one arithmetic: a hunk is both what an edit wrote and what it changed.
     """
     if not fragment:
         return None
@@ -125,3 +128,33 @@ def wrote_which(text: str, fragment: str) -> set[int] | None:
             mine.add(n)
         spent = stop + 1
     return mine or None
+
+
+def what_changed(before: str, after: str) -> str:
+    """The one span of `after` that `before` does not already carry, "" when there is nothing to narrow.
+
+    A common prefix and a common suffix, so two changes at opposite ends of a message give ONE span
+    covering both and everything between them. That is wider than the truth and never narrower, which
+    is the only direction available here: a span that missed a change would hide a finding about it.
+
+    Empty when `before` is empty — a first send has nothing to compare against — and when the two are
+    the same, so the caller scopes nothing rather than scoping to a guess. `wrote_which` turns this
+    into sentence numbers and returns None when it cannot find the span at all, which fails the same
+    way.
+
+    Word-aligned at both ends. `wrote_which` locates the span by searching for it, so a fragment
+    starting mid-word matches wherever those letters next appear, which can be a sentence away from
+    the change.
+    """
+    if not before or before == after:
+        return ""
+    limit = min(len(before), len(after))
+    head = 0
+    while head < limit and before[head] == after[head]:
+        head += 1
+    tail = 0
+    while tail < limit - head and before[-1 - tail] == after[-1 - tail]:
+        tail += 1
+    start = after.rfind(" ", 0, head) + 1
+    space = after.find(" ", len(after) - tail)
+    return after[start:space if space >= 0 else len(after)]

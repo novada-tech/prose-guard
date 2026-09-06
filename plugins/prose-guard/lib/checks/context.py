@@ -20,7 +20,8 @@ if TYPE_CHECKING:
 
 class Context:
     def __init__(self, audience: Resolved, situation: dict[str, Any] | None = None,
-                 previous: str = "", mine: set[int] | None = None) -> None:
+                 previous: str = "", mine: set[int] | None = None,
+                 resent: set[int] | None = None) -> None:
         # Whose vocabulary applies, and whether it was measured or guessed.
         self.audience = audience
         # Facts about the moment rather than the reader — a thread reply, an edit, a public repo. Read
@@ -33,3 +34,12 @@ class Context:
         # Which sentences of the text this call actually wrote, or None when all of them are — a new
         # file, a message, a commit. A finding outside them is about text that was already there.
         self.mine = mine
+        # Which sentences differ from the draft the guard last held back, or None when it held none.
+        #
+        # A different question from `mine`, and the difference only shows on a message being sent
+        # again after a hold. The writer of a resend wrote every sentence of it and can fix any of
+        # them, so this decides nothing about what may hold the message back and nothing about what
+        # is somebody else's work — it says only which sentences the writer has already read and
+        # chosen to leave, which is what makes a note about one of them not worth repeating. The two
+        # coincide on a file edit, where the hunk is both what the call wrote and what it changed.
+        self.resent = resent

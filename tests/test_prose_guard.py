@@ -1055,7 +1055,7 @@ def write_audience(home, name, **kw):
         json.dump(data, fh)
 
 
-def Ctx(audience, situation=None, previous="", mine=None):
+def Ctx(audience, situation=None, previous="", mine=None, resent=None):
     """The same Context both callers build, so a test cannot pass against a shape nothing ships.
 
     This was a class of its own setting two of the five fields, which is exactly the duck-typing the
@@ -1063,7 +1063,7 @@ def Ctx(audience, situation=None, previous="", mine=None):
     have caught that.
     """
     from checks import Context
-    return Context(audience, situation, previous, mine)
+    return Context(audience, situation, previous, mine, resent)
 
 
 # --------------------------------------------------------------------- detection
@@ -5754,6 +5754,162 @@ def test_the_report_setup_reads_actually_runs():
         check("and names the destination it counted", "commit message" in got.stdout, True)
         check("and what came of the calls it claimed",
               [o for o in (D.CHECKED, D.NO_TEXT) if o not in got.stdout], [])
+# --------------------------------------------------------- a resend after a hold
+def _resend_texts():
+    """One message and the resend of it, differing in one sentence out of ten.
+
+    Ten sentences so a scoped span is visibly smaller than the document, and three of them carry a
+    span a check can be placed by. The rewritten one is first, so a scope that silently covered
+    everything from the change to the end of the text would still contain the other two and this test
+    would pass on a broken implementation.
+    """
+    body = ["The alpha resolver picks the wrong branch on every second run of the job.",
+            "The deploy step waits for the queue to drain before it starts anything else.",
+            "Nothing in the dashboard moved for the whole of yesterday afternoon.",
+            "The retry budget is spent inside the first minute of an outage.",
+            "Two of the workers were restarted by hand at about four o'clock.",
+            "The beta resolver reads a stale value out of the cache each time.",
+            "Everything in the staging environment agreed with production overnight.",
+            "The report is generated once a day and nobody has read it this week.",
+            "A rollback would take about ten minutes from the moment somebody asks.",
+            "The gamma resolver logs nothing at all when it gives up on a lookup."]
+    fixed = list(body)
+    fixed[0] = "The first stage now picks the branch the job was configured with."
+    return " ".join(body), " ".join(fixed)
+
+
+def test_what_a_resend_changed_is_located_in_the_text_it_changed():
+    """`what_changed` narrows a resend to a span, and `wrote_which` turns that into sentences.
+
+    Two changes far apart give one span covering both, which is wider than the truth and never
+    narrower — the direction that cannot lose a finding.
+    """
+    from checks import placing
+    first, again = _resend_texts()
+    total = len(placing.SENTENCE_END.split(" ".join(again.split())))
+    scope = placing.wrote_which(again, placing.what_changed(first, again))
+    check("the one sentence the resend rewrote is located", scope, {0})
+    check("and it is not the whole message", len(scope) < total, True)
+
+    check("a first send has no draft to compare against, so nothing is scoped",
+          placing.wrote_which(again, placing.what_changed("", again)), None)
+    check("and an identical resend narrows to nothing rather than to a guess",
+          placing.what_changed(again, again), "")
+
+    # Two edits at opposite ends: one span, covering both and everything between them.
+    both = again.replace("A rollback would take about ten minutes",
+                         "A rollback would take about two minutes")
+    wide = placing.wrote_which(both, placing.what_changed(first, both))
+    check("two changes far apart give one span covering both", {0, 8} <= wide, True)
+
+    # A resend the guard cannot locate scopes nothing, rather than scoping to the wrong sentences.
+    check("an unlocatable change scopes nothing",
+          placing.wrote_which(again, "a span that is nowhere in this message at all"), None)
+
+    # A one-letter change is where the span has to be word-aligned. `wrote_which` locates it by
+    # searching for it, so the bare difference — "s read" — matches inside "is reading" a sentence
+    # earlier, and the resend is scoped to a sentence it never touched.
+    was = "The dashboard is reading from the replica. The beta resolver reads a stale value."
+    now = "The dashboard is reading from the replica. The beta resolvers read a stale value."
+    check("a one-letter change is located in the sentence it happened in",
+          placing.wrote_which(now, placing.what_changed(was, now)), {1})
+
+
+def test_the_draft_a_resend_replaces_is_readable_by_session():
+    import rounds
+    with tempfile.TemporaryDirectory() as home:
+        was = os.environ.get("PROSE_GUARD_HOME")
+        os.environ["PROSE_GUARD_HOME"] = home
+        try:
+            check("a session that has never been held back has no draft",
+                  rounds.last_draft("nothing-held"), "")
+            rounds.held("s", {"destination": "our chat"}, "First draft.", "terms", "said so")
+            check("the draft that was held is the one to compare against",
+                  rounds.last_draft("s"), "First draft.")
+            rounds.held("s", {"destination": "our chat"}, "Second draft.", "terms", "said so")
+            check("and a second round replaces it", rounds.last_draft("s"), "Second draft.")
+            rounds.went_out("s", "Third draft.")
+            check("once the message goes out there is nothing to compare against",
+                  rounds.last_draft("s"), "")
+        finally:
+            os.environ.pop("PROSE_GUARD_HOME") if was is None else os.environ.update(
+                PROSE_GUARD_HOME=was)
+
+
+def test_a_resend_is_not_told_again_about_the_sentences_it_did_not_touch():
+    """The ride-along list on a second denial carries what the resend changed, not the whole message.
+
+    Every denial hands over what the other checks found, so the rewrite can address everything in one
+    turn. On a resend that is the same list a second time, about sentences the writer has just read
+    and chosen not to change, and it is bounded only by MOST_TO_SAY // 2.
+
+    Nothing is lost by dropping it: a concern that still matters is said again the round its own check
+    is the one holding the message, which is what the second half of this test pins.
+    """
+    import checks as checks_module
+
+    class Objects:
+        MODE = checks_module.VERDICT          # one call, one verdict, nothing to pool
+
+        def __init__(self, name, span):
+            self.NAME, self.span = name, span
+
+        def run(self, text, ctx):
+            if self.span not in text:
+                return None
+            return checks_module.Finding(checks_module.BLOCK,
+                                         f'"{self.span}" is unclear to this reader')
+
+    running = [Objects("alpha", "alpha resolver"), Objects("beta", "beta resolver"),
+               Objects("gamma", "gamma resolver")]
+    first, again = _resend_texts()
+    with tempfile.TemporaryDirectory() as tmp:
+        held = _drive_hook(running, first, "resend", tmp)
+        resent = _drive_hook(running, again, "resend", tmp)
+
+    reason = held.get("permissionDecisionReason", "")
+    check("the first draft is held by the first check in editorial order",
+          [held.get("permissionDecision"), "alpha resolver" in reason], ["deny", True])
+    check("and the other two ride along in the same interruption",
+          ["beta resolver" in reason, "gamma resolver" in reason], [True, True])
+
+    second = resent.get("permissionDecisionReason", "")
+    # The sentence the resend never touched still holds the message back. Scoping what may BLOCK to
+    # what changed is the mistake this pins: the writer of a resend wrote every sentence and can fix
+    # any of them, and round one told them about this one as context they were free to skip.
+    check("a defect in a sentence the resend did not touch still holds it back",
+          [resent.get("permissionDecision"), "beta resolver" in second], ["deny", True])
+    # And the concern that is only riding along is not read out a second time.
+    check("but the other untouched sentence is not listed again", "gamma resolver" in second, False)
+
+
+def test_a_resend_that_keeps_the_flagged_term_is_still_held():
+    """The trap in scoping a resend: the draft that was blocked must never become `ctx.previous`.
+
+    `terms` subtracts every term the previous version contained, on the reasoning that a term the
+    version being replaced already used is not one this text introduces. Point that at the draft the
+    guard has just refused and the guard forgets the term it refused over, so the second attempt goes
+    out with the term still in it and nothing said. `previous` is the version on disk or the commit
+    being amended; the held draft is a different fact and must not reach it.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        home, state = os.path.join(tmp, "home"), os.path.join(tmp, "state")
+        write_audience(home, "team", matches={"channels": ["C1"]}, inherits=["engineers"])
+        write_destinations(home, chat_destination())
+
+        def send(message):
+            return run_guard({"tool_name": "mcp__ourchat__chat_send", "session_id": "keeps",
+                              "cwd": tmp, "tool_input": {"channel_id": "C1", "message": message}},
+                             home, state)
+
+        first = "The GKE rollout finished overnight and nothing has moved since." + PAD
+        verdict, said = send(first)
+        check("an unexplained term holds the first draft", [verdict, "GKE" in said], ["deny", True])
+        # One clause rewritten, the term left exactly where it was.
+        again = first.replace("nothing has moved since", "the dashboard has been quiet since")
+        verdict, said = send(again)
+        check("and it still holds the resend that kept it", [verdict, "GKE" in said],
+              ["deny", True])
 
 
 def main():

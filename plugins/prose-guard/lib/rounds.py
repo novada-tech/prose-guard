@@ -91,6 +91,21 @@ def held(session: str, envelope: dict[str, Any], text: str, check: str, said: st
     _write(path, data)
 
 
+def last_draft(session: str) -> str:
+    """The draft this session is still being asked to replace, "" when it is not being asked to.
+
+    Read back out of what `held` already writes rather than kept a second time, so there is one copy
+    of a draft on disk and one place that decides when it stops being current: `went_out` closes the
+    argument, and a message nobody objected to never opened one.
+
+    A draft over `LONGEST` characters comes back truncated, and the caller is comparing it against a
+    full one. That makes the difference between them look larger than it is, which costs some of the
+    narrowing and cannot hide a change.
+    """
+    drafts = (_read(_path(session)).get("open") or {}).get("drafts") or []
+    return str(drafts[-1].get("text") or "") if drafts else ""
+
+
 def went_out(session: str, text: str, spent: int | None = None) -> int | None:
     """Close the open argument with the text that finally went out. No argument, nothing written."""
     path = _path(session)

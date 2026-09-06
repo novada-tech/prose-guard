@@ -411,6 +411,40 @@ Calibrating it means tuning the bar until the human-edited version passes and th
 not. That needs more pairs than the one in `measure/fixtures/gold`, and from more than one author —
 tuning five prompts against a single pair would fit the pair rather than the bar.
 
+## Scoping a resend to what it changed saves no model call
+
+A held message is sent again with one clause different, and the guard reads the whole of it again. The
+obvious saving is to check only what changed, and on this repository's own prose there is plenty to
+narrow: across **80 consecutive revisions of 41 markdown files**, the contiguous span between two
+versions covers a median **21%** of the document and the sentences that literally differ are **14%**.
+A revision of a document is a proxy for a resend after a hold and not the thing itself — nobody has
+published a corpus of held-then-resent drafts — but it bounds the narrowing at about a fifth.
+
+That saving is not where the calls are. One real session reported **20 model calls** for a pull request
+body over three sends. At `high`, every prompt file in `phases/` is asked once per send and the
+advisory one once per denial, which is a floor of 17 calls with no pooling at all. So pooling
+contributed 3 runs across 17 invocations, against a `ceiling_for` that was offering ten — **the ceiling
+never bound**, and lowering it with the span, or dividing a smaller budget in `all_at_once`, would have
+saved nothing on the session that prompted the question. What costs 20 calls is sending three times.
+
+Two ways of spending the span that do not survive, both of which let a defect out in silence:
+
+- **Scoping what may hold the message back.** The guard blocks on one check and hands the rest over as
+  context; the agent fixes the blocker and sends again, and the next round is where a concern that
+  merely rode along the first time becomes the blocker. Scope that to what changed and a defect the
+  writer read and chose to leave goes out labelled "already in the file". The writer of a resend wrote
+  every sentence of it and can fix any of them, which is the whole difference from an edit into
+  somebody else's document.
+- **Scoping the repeat ledger.** `repeated()` suppresses a finding already said about text this call
+  did not write. Point it at what a resend did not change and the third round of an argument drops a
+  blocking finding entirely — `found` empties, the check records a pass, and the message goes.
+
+What is left is the ride-along list itself: up to `MOST_TO_SAY // 2` characters of other checks'
+findings, handed over a second and a third time about sentences the writer has since read and decided
+about. Nothing in that list is holding the message back, so leaving it out loses nothing — a concern
+that still matters is said again in the round its own check is the one blocking. That is the only use
+`Context.resent` has, and it buys transcript tokens rather than model calls.
+
 ## The tests were checked by breaking things
 
 A green test run proves nothing on its own. Each of these mutations breaks at least one case, which is
@@ -441,6 +475,16 @@ how the cases are known to be load-bearing:
   of comparing two sets of names, so the mutation was green before it was red
 - `chosen()` answering a level when no source names one, so an install nobody has set up looks
   configured and says nothing about checking nothing. Caught by 11 cases
+- the held draft reaching `ctx.previous`, so `terms` subtracts the very term it blocked on and the
+  resend that kept it goes out. Caught by 8 cases, one of them written for it
+- what may hold a message back scoped to what a resend changed, so a defect the writer read and chose
+  to leave goes out as advice
+- the ride-along list not scoped at all, so a resend is read out its own untouched sentences again
+- `what_changed` without its common suffix, so the span runs from the change to the end of the message
+- `what_changed` not word-aligned, so a one-letter change gives a fragment — `"s read"` — that matches
+  inside `is reading` a sentence earlier and scopes the resend to a sentence it never touched. This one
+  survived the first sweep and is recorded as a gap that was closed, not as an equivalent mutation
+- `rounds.last_draft` answering the first draft of an argument rather than the newest
 - the `mine` guard dropped from the repeat filter, so a complaint that starts as scenery and ends up
   inside the paragraph an edit rewrites is suppressed as already-said — a defect the edit owns, allowed
   in silence. The first version of its test did not catch this, because it only ever showed one
